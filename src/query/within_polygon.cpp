@@ -34,20 +34,17 @@ bool MySearchCallback(Ideal *ideal, void* arg){
 		ctx->found++;
         return true;
 	}
-	if(!ctx->use_gpu){
+	if (!ctx->use_gpu)
+	{
 		ctx->distance = ideal->distance(target,ctx);
 		ctx->found += ctx->distance <= ctx->within_distance;
 	}
 #ifdef USE_GPU
 	else{
-		if(ideal->contain(target, ctx)){
-			ctx->found ++;
+		if(target->get_step(false) > ideal->get_step(false)){
+			ctx->polygon_pairs.push_back(make_pair(target, ideal));
 		}else{
-			if(target->get_step(false) > ideal->get_step(false)){
-				ctx->polygon_pairs.push_back(make_pair(target, ideal));
-			}else{
-				ctx->polygon_pairs.push_back(make_pair(ideal, target));
-			}
+			ctx->polygon_pairs.push_back(make_pair(ideal, target));
 		}
 	}
 #endif
