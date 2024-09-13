@@ -57,5 +57,8 @@ contain:	query/contain.o $(GEOMETRY_OBJS)
 print_raster:	test/print_raster.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
 
+distance_test:	test/distance_test.o $(GEOMETRY_OBJS)
+	$(CXX) -o ../build/$@ $^ $(LIBS) 
+
 clean:
 	rm -fr ../build/* $(OBJS) $(CU_OBJS)
