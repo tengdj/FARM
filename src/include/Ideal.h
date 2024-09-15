@@ -150,7 +150,7 @@ void preprocess(query_context *gctx);
 vector<Ideal *> load_binary_file(const char *path, query_context &ctx);
 VertexSequence *read_vertices(const char *wkt, size_t &offset, bool clockwise);
 Ideal *read_polygon(const char *wkt, size_t &offset);
-vector<Ideal *> load_polygon_wkt(const char *path);
+vector<Ideal *> load_polygon_wkt(const char *path, query_context *ctx);
 Point *load_point_wkt(const char *path, size_t &count);
 void dump_to_file(const char *path, char *data, size_t size);
 void dump_polygons_to_file(vector<MyPolygon *> polygons, const char *path);

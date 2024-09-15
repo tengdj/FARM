@@ -205,7 +205,7 @@ void polygon_process_lines(std::vector<Ideal *> &local_ideals)
 	}
 }
 
-std::vector<Ideal *> load_polygon_wkt(const char *path)
+std::vector<Ideal *> load_polygon_wkt(const char *path, query_context *ctx)
 {
 	std::vector<Ideal *> ideals;
 
@@ -223,7 +223,7 @@ std::vector<Ideal *> load_polygon_wkt(const char *path)
 	}
 
 	std::vector<std::thread> workers;
-	int num_threads = std::thread::hardware_concurrency();		 // 获取系统支持的线程数量
+	int num_threads = ctx->num_threads;							 // 获取系统支持的线程数量
 	std::vector<std::vector<Ideal *>> local_ideals(num_threads); // 每个线程都有一个局部容器
 
 	// 启动多个线程处理WKT

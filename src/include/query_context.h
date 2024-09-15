@@ -26,36 +26,40 @@ struct EdgeSeq;
 struct Idealinfo;
 struct IdealOffset;
 
-enum QueryType{
-    contain = 0,
-    // distance = 1,
-    within = 2
+enum QueryType
+{
+	contain = 0,
+	// distance = 1,
+	within = 2
 };
 
-class execute_step{
+class execute_step
+{
 public:
 	size_t counter = 0;
 	double execution_time = 0;
-	execute_step& operator=(execute_step const &obj){
+	execute_step &operator=(execute_step const &obj)
+	{
 		counter = obj.counter;
 		execution_time = obj.counter;
 		return *this;
 	}
-	void reset(){
+	void reset()
+	{
 		counter = 0;
 		execution_time = 0;
 	}
 
-	execute_step& operator+=(const execute_step& rhs){
+	execute_step &operator+=(const execute_step &rhs)
+	{
 		this->counter += rhs.counter;
 		this->execution_time += rhs.execution_time;
-	    return *this;
+		return *this;
 	}
-
 };
 
-
-class configurations{
+class configurations
+{
 public:
 	int thread_id = 0;
 	int num_threads = 0;
@@ -80,11 +84,12 @@ public:
 	string valid_path;
 };
 
-class query_context{
+class query_context
+{
 public:
 	int thread_id = 0;
 
-	//configuration
+	// configuration
 	bool geography = true;
 	int num_threads = 0;
 
@@ -112,7 +117,7 @@ public:
 
 	size_t max_num_polygons = INT_MAX;
 
-	//shared staff, for multiple thread task assignment
+	// shared staff, for multiple thread task assignment
 	size_t index = 0;
 	size_t index_end = 0;
 	struct timeval previous = get_cur_time();
@@ -121,11 +126,11 @@ public:
 	pthread_mutex_t lk;
 	const char *report_prefix = "processed";
 
-	//result
+	// result
 	double distance = 0;
 	bool contain = false;
 
-	//query statistic
+	// query statistic
 	size_t found = 0;
 	size_t query_count = 0;
 	size_t refine_count = 0;
@@ -150,14 +155,13 @@ public:
 	void *target3 = NULL;
 	query_context *global_ctx = NULL;
 	size_t target_num = 0;
-	vector<pair<Ideal*, Ideal*>> polygon_pairs;
-	vector<pair<Point*, Ideal*>> point_polygon_pairs;
-	
+	vector<pair<Ideal *, Ideal *>> polygon_pairs;
+	vector<pair<Point *, Ideal *>> point_polygon_pairs;
 
 	map<int, int> vertex_number;
 	map<int, double> latency;
 
-	// for gpu 
+	// for gpu
 
 	Idealinfo *h_info = nullptr;
 	Idealinfo *d_info = nullptr;
@@ -175,15 +179,14 @@ public:
 	double *d_gridline_nodes = nullptr;
 
 	size_t num_polygons = 0;
-    size_t num_status = 0;
-    size_t num_offset = 0;
-    size_t num_edge_sequences = 0;
-    size_t num_vertices = 0;
-    size_t num_gridline_offset = 0;
-    size_t num_gridline_nodes = 0;
+	size_t num_status = 0;
+	size_t num_offset = 0;
+	size_t num_edge_sequences = 0;
+	size_t num_vertices = 0;
+	size_t num_gridline_offset = 0;
+	size_t num_gridline_nodes = 0;
 
 public:
-
 	// functions
 	query_context();
 	~query_context();
@@ -192,16 +195,17 @@ public:
 	void unlock();
 
 	// for multiple thread
-	void report_progress(int eval_batch=10);
-	bool next_batch(int batch_num=1);
+	void report_progress(int eval_batch = 10);
+	bool next_batch(int batch_num = 1);
 
 	// for query statistics
 	void report_latency(int num_v, double latency);
 	void load_points();
 	void merge_global();
 
-	void reset_stats(){
-		//query statistic
+	void reset_stats()
+	{
+		// query statistic
 		found = 0;
 		query_count = 0;
 		refine_count = 0;
@@ -219,20 +223,22 @@ public:
 	void print_stats();
 
 	// utility functions for query types
-	bool is_within_query(){
+	bool is_within_query()
+	{
 		return query_type == QueryType::within;
 	}
 
-	bool within(double dist){
+	bool within(double dist)
+	{
 		return is_within_query() && dist <= within_distance;
 	}
 
-	bool is_contain_query(){
+	bool is_contain_query()
+	{
 		return query_type == QueryType::contain;
 	}
 };
 
 query_context get_parameters(int argc, char **argv);
-
 
 #endif /* SRC_GEOMETRY_QUERY_CONTEXT_H_ */

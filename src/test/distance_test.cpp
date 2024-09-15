@@ -17,8 +17,8 @@ int main(int argc, char **argv)
     global_ctx.query_type = QueryType::within;
     global_ctx.geography = true;
 
-    global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str());
-    global_ctx.target_ideals = load_polygon_wkt(global_ctx.target_path.c_str());
+    global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str(), &global_ctx);
+    global_ctx.target_ideals = load_polygon_wkt(global_ctx.target_path.c_str(), &global_ctx);
 
     preprocess(&global_ctx);
 
@@ -49,16 +49,16 @@ int main(int argc, char **argv)
             continue;
         }
 
-        if (ideal->getMBB()->contain(*target->getMBB()) && ideal->contain(target, &global_ctx))
-        {
-            found++;
-            continue;
-        }
-        if (target->getMBB()->contain(*ideal->getMBB()) && target->contain(ideal, &global_ctx))
-        {
-            found++;
-            continue;
-        }
+        // if (ideal->getMBB()->contain(*target->getMBB()) && ideal->contain(target, &global_ctx))
+        // {
+        //     found++;
+        //     continue;
+        // }
+        // if (target->getMBB()->contain(*ideal->getMBB()) && target->contain(ideal, &global_ctx))
+        // {
+        //     found++;
+        //     continue;
+        // }
 
         if (target->get_step(false) > ideal->get_step(false))
         {

@@ -53,7 +53,7 @@ __global__ void kernel_filter(pair<IdealOffset, IdealOffset> *d_pairs, Idealinfo
 							int idx = atomicAdd(pp_size, 1U);
 							d_pixpairs[idx].source_pixid = p;
 							d_pixpairs[idx].target_pixid = p2;
-							d_pixpairs[idx].pixpoly_id = x;
+							d_pixpairs[idx].pair_id = x;
 						}
 					}
 				}
@@ -79,7 +79,7 @@ __global__ void kernel_unroll(PixPair *d_pixpairs, pair<IdealOffset, IdealOffset
 	{
 		int p = d_pixpairs[x].source_pixid;
 		int p2 = d_pixpairs[x].target_pixid;
-		int pair_id = d_pixpairs[x].pixpoly_id;
+		int pair_id = d_pixpairs[x].pair_id;
 		if (resultmap[pair_id] != 0)
 			return;
 

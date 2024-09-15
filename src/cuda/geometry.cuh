@@ -3,7 +3,7 @@
 #include "cuda_util.h"
 #include "Ideal.h"
 
-#define BLOCK_SIZE 512
+#define BLOCK_SIZE 1024
 #define WITHIN_DISTANCE 10
 
 const double EARTH_RADIUS_KM = 6371.0;
@@ -18,7 +18,7 @@ struct PixPair
 {
 	int source_pixid = 0;
 	int target_pixid = 0;
-	int pixpoly_id = 0;
+	int pair_id = 0;
 };
 
 __device__ __forceinline__ double atomicMinDouble(double *address, double val)
@@ -31,6 +31,21 @@ __device__ __forceinline__ double atomicMinDouble(double *address, double val)
 		assumed = old;
 		old = atomicCAS(address_as_ull, assumed,
 						__double_as_longlong(fmin(val, __longlong_as_double(assumed))));
+	} while (assumed != old);
+
+	return __longlong_as_double(old);
+}
+
+__device__ __forceinline__ double atomicMaxDouble(double *address, double val)
+{
+	unsigned long long int *address_as_ull = (unsigned long long int *)address;
+	unsigned long long int old = *address_as_ull, assumed;
+
+	do
+	{
+		assumed = old;
+		old = atomicCAS(address_as_ull, assumed, __double_as_longlong(fmax(__longlong_as_double(assumed), val)));
+
 	} while (assumed != old);
 
 	return __longlong_as_double(old);
