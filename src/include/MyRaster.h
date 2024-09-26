@@ -51,6 +51,8 @@ public:
     vector<int> expand_radius(int lowx, int highx, int lowy, int highy, int step);
 	vector<int> expand_radius(int center, int step);
 
+    void grid_align(query_context *gctx);
+    
     // statistic collection
     size_t get_num_pixels();
     size_t get_num_pixels(PartitionStatus status);
@@ -75,5 +77,6 @@ public:
 		}
 	}
 };
+
 
 #endif // MYRASTER_H

@@ -17,6 +17,7 @@
 #endif
 
 #include "Point.h"
+#include "Box.h"
 
 namespace po = boost::program_options;
 using namespace std;
@@ -185,6 +186,13 @@ public:
 	size_t num_vertices = 0;
 	size_t num_gridline_offset = 0;
 	size_t num_gridline_nodes = 0;
+
+	// for hierachy
+	double min_step_x = DBL_MAX;
+	double min_step_y = DBL_MAX;
+	box space = {10000.0, 10000.0, -10000.0, -10000.0};
+	int num_layers = 0;
+
 
 public:
 	// functions

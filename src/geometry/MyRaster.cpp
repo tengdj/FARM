@@ -29,9 +29,6 @@ void MyRaster::init_raster(int num_pixels){
 		step_y = 0.00001;
 		dimy = (mbr->high[1]-mbr->low[1])/step_y+1;
 	}
-
-	status = new uint8_t[(dimx+1)*(dimy+1) / 4 + 1];
-    memset(status, 0, ((dimx+1)*(dimy+1) / 4 + 1) * sizeof(uint8_t));
 }
 
 void MyRaster::init_raster(int dx, int dy){
@@ -422,4 +419,47 @@ size_t MyRaster::get_num_pixels(PartitionStatus status){
 		}
 	}
 	return num;	
+}
+
+void MyRaster::grid_align(query_context *gctx){
+
+	bool flag1 = false, flag2 = false;
+	auto x = gctx->min_step_x;
+	auto y = gctx->min_step_y;
+	if(step_x <= x) step_x = x, flag1 = true;
+	if(step_y <= y) step_y = y, flag2 = true;
+	
+	for(int i = gctx->num_layers;i > 0; i --){
+		// log("%lf %lf", x, y);
+		// log("step_x = %lf, step_y = %lf", step_x, step_y);
+		
+		if(!flag1 && step_x > x && step_x < x * 2){
+			flag1 = true;
+			step_x = abs(step_x - x) < abs(step_x - x * 2) ? x : x * 2;
+		}
+		if(!flag2 && step_y > y && step_y < y * 2){
+			flag2 = true;
+			step_y = abs(step_y - y) < abs(step_y - y * 2) ? y : y * 2;
+		}
+		if(flag1 && flag2) break;
+		x *= 2;
+		y *= 2;
+	}
+	assert(flag1 && flag2);
+
+	mbr->low[0] = step_x * floor((mbr->low[0] - gctx->space.low[0]) / step_x) + gctx->space.low[0];
+	mbr->low[1] = step_y * floor((mbr->low[1] - gctx->space.low[1]) / step_y) + gctx->space.low[1];
+	mbr->high[0] = step_x * ceil((mbr->high[0] - gctx->space.low[0]) / step_x) + gctx->space.low[0];
+	mbr->high[1] = step_y * ceil((mbr->high[1] - gctx->space.low[1]) / step_y) + gctx->space.low[1];
+
+
+
+	dimx = static_cast<int>(round((mbr->high[0]-mbr->low[0])/step_x));
+	dimy = static_cast<int>(round((mbr->high[1]-mbr->low[1])/step_y));
+
+
+	// printf("dimx = %d, dimy = %d\n", dimx, dimy);
+	// printf("step_x = %lf, step_y = %lf\n", step_x, step_y);
+	// printf("MBR:\n");
+	// printf("POLYGON((%lf %lf, %lf %lf, %lf %lf, %lf %lf, %lf %lf))\n", mbr->low[0], mbr->low[1], mbr->low[0], mbr->high[1], mbr->high[0], mbr->high[1], mbr->high[0], mbr->low[1], mbr->low[0], mbr->low[1]);
 }

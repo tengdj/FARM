@@ -41,7 +41,21 @@ namespace{
 #define TENG_RANDOM_NUMBER 0315
 #define OSM_SRID 4326
 const double PI = 3.14159265;
+
 // some utility function
+
+inline double roundToSignificantDigits(double num, int n) {
+    if (num == 0) {
+        return 0;
+    }
+    
+    double d = std::ceil(std::log10(num < 0 ? -num : num));
+    int power = n - static_cast<int>(d);
+    
+    double magnitude = std::pow(10.0, power);
+    double shifted = std::round(num * magnitude);
+    return shifted / magnitude;
+}
 
 const double degree_per_kilometer_latitude = 360.0/40076.0;
 const double degree_per_kilometer_longitude_arr[] = {

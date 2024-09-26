@@ -156,6 +156,8 @@ void Ideal::process_intersection(map<int, vector<double>> intersection_info, Dir
 
 void Ideal::init_pixels(){
 	assert(mbr);
+	status = new uint8_t[(dimx+1)*(dimy+1) / 4 + 1];
+    memset(status, 0, ((dimx+1)*(dimy+1) / 4 + 1) * sizeof(uint8_t));
     offset = new uint16_t[(dimx+1)*(dimy+1) + 1];    // +1 here is to ensure that pointer[num_pixels] equals len_edge_sequences, so we don't need to make a special case for the last pointer.
 	horizontal = new Grid_line(dimy);
 	vertical = new Grid_line(dimx);
@@ -413,8 +415,27 @@ void Ideal::rasterization(){
 void Ideal::rasterization(int vpr){
 	assert(vpr > 0);
 	pthread_mutex_lock(&ideal_partition_lock);
-    init_raster(boundary->num_vertices / vpr);
+    // init_raster(boundary->num_vertices / vpr);
     rasterization();
+
+	/*for hierachy*/
+	num_layers = static_cast<int>(ceil(max(log(get_dimx() + 1) / log(2.0), log(get_dimy() + 1) / log(2.0))));
+	assert(num_layers != 0);
+	
+	layers = new Hraster[num_layers + 1];
+
+	// process the last layer
+	layers[num_layers].init(get_step_x(), get_step_y(), get_dimx(), get_dimy(), getMBB(), true);
+	layers[num_layers].set_status(get_status());
+
+	for(int i = num_layers - 1; i >= 0; i --){
+		double _step_x = layers[i + 1].get_step_x() * 2, _step_y = layers[i + 1].get_step_y() * 2;
+		int _dimx = static_cast<int>(ceil(layers[i + 1].get_dimx() / 2.0)), _dimy = static_cast<int>(ceil(layers[i + 1].get_dimy() / 2.0));
+		layers[i].init(_step_x, _step_y, _dimx, _dimy, getMBB(), false);
+		layers[i].merge(layers[i + 1]);
+	}
+	/*for hierachy*/
+	
 	pthread_mutex_unlock(&ideal_partition_lock);
 }
 

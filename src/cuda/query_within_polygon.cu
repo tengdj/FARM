@@ -151,11 +151,9 @@ __global__ void kernel_refine(Batch *batches, Point *vertices, uint *size, doubl
 
 uint cuda_within_polygon(query_context *gctx)
 {
-    CudaTimer timer;
+    CudaTimer timer, duration;
 
-    timer.startTimer();
-
-    float duration = 0.0;
+    duration.startTimer();
 
     uint size = gctx->polygon_pairs.size();
 
@@ -208,17 +206,27 @@ uint cuda_within_polygon(query_context *gctx)
     dim3 block_size(BLOCK_SIZE, 1, 1);
     dim3 grid_size(grid_size_x, 1, 1);
 
+    timer.startTimer();
+
     kernel_init<<<grid_size, block_size>>>(d_pairs, gctx->d_info, size, d_distance, d_min_box_dist, d_max_box_dist);
     cudaDeviceSynchronize();
     check_execution("kernel init");
+
+    timer.stopTimer();
+    printf("kernel init: %f ms\n", timer.getElapsedTime());
 
     grid_size_x = (size + 512 - 1) / 512;
     block_size.x = 512;
     grid_size.x = grid_size_x;
 
+    timer.startTimer();
+
     cal_box_distance<<<grid_size, block_size>>>(d_pairs, gctx->d_info, gctx->d_status, d_min_box_dist, d_max_box_dist, size, (BoxDistRange *)d_BufferOutput, d_bufferoutput_size);
     cudaDeviceSynchronize();
     check_execution("cal_box_distance");
+
+    timer.stopTimer();
+    printf("kernel calculate box distance: %f ms\n", timer.getElapsedTime());
 
     /* To delete  */
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
@@ -229,20 +237,26 @@ uint cuda_within_polygon(query_context *gctx)
     CUDA_SAFE_CALL(cudaMemcpy(&h_max_box_dist, d_max_box_dist, sizeof(double), cudaMemcpyDeviceToHost));
     /*   To delete  */
 
-    // can be packaged
+    /*can be packaged*/
     swap(d_BufferInput, d_BufferOutput);
     swap(d_bufferinput_size, d_bufferoutput_size);
     swap(h_bufferinput_size, h_bufferoutput_size);
     CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
+    /*can be packaged*/
 
     grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     block_size.x = BLOCK_SIZE;
     grid_size.x = grid_size_x;
+
+    timer.startTimer();
 
     kernel_filter<<<grid_size, block_size>>>((BoxDistRange *)d_BufferInput, d_min_box_dist, d_max_box_dist, d_bufferinput_size, (PixPair *)d_BufferOutput, d_bufferoutput_size);
     cudaDeviceSynchronize();
     check_execution("kernel_filter");
 
+    timer.stopTimer();
+    printf("kernel filter: %f ms\n", timer.getElapsedTime());
+
     /* To delete  */
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
 
@@ -257,11 +271,16 @@ uint cuda_within_polygon(query_context *gctx)
     grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     block_size.x = BLOCK_SIZE;
     grid_size.x = grid_size_x;
+
+    timer.startTimer();
 
     kernel_unroll<<<grid_size, block_size>>>((PixPair *)d_BufferInput, d_pairs, gctx->d_offset, gctx->d_edge_sequences, d_bufferinput_size, (Batch *)d_BufferOutput, d_bufferoutput_size);
     cudaDeviceSynchronize();
     check_execution("kernel_unroll");
 
+    timer.stopTimer();
+    printf("kernel unroll: %f ms\n", timer.getElapsedTime());
+
     /* To delete  */
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
 
@@ -276,13 +295,18 @@ uint cuda_within_polygon(query_context *gctx)
     grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     block_size.x = BLOCK_SIZE;
     grid_size.x = grid_size_x;
+
+    timer.startTimer();
 
     kernel_refine<<<grid_size, block_size>>>((Batch *)d_BufferInput, gctx->d_vertices, d_bufferinput_size, d_distance);
     cudaDeviceSynchronize();
     check_execution("kernel_refine");
 
     timer.stopTimer();
-    printf("kernel total time = %lf ms\n", timer.getElapsedTime());
+    printf("kernel refine: %f ms\n", timer.getElapsedTime());
+
+    duration.stopTimer();
+    printf("kernel total time = %lf ms\n", duration.getElapsedTime());
 
     CUDA_SAFE_CALL(cudaMemcpy(h_distance, d_distance, size * sizeof(double), cudaMemcpyDeviceToHost));
     int found = 0;

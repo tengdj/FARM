@@ -20,6 +20,9 @@ int main(int argc, char **argv)
     global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str(), &global_ctx);
     global_ctx.target_ideals = load_polygon_wkt(global_ctx.target_path.c_str(), &global_ctx);
 
+    // global_ctx.source_ideals.resize(1);
+    // global_ctx.target_ideals.resize(1);
+
     preprocess(&global_ctx);
 
     // query
@@ -31,6 +34,11 @@ int main(int argc, char **argv)
     {
         Ideal *ideal = global_ctx.source_ideals[i];
         Ideal *target = global_ctx.target_ideals[i];
+
+        // ideal->MyPolygon::print();
+        // ideal->MyRaster::print();
+        // target->MyPolygon::print();
+        // target->MyRaster::print();
 
         if (ideal == target)
         {
@@ -59,6 +67,23 @@ int main(int argc, char **argv)
         //     found++;
         //     continue;
         // }
+        
+        // auto st = std::chrono::high_resolution_clock::now();
+        // printf("dimx = %d, dimy = %d\n", ideal->get_dimx(), ideal->get_dimy());
+        // if (ideal->contain(target, &global_ctx))
+        // {
+        //     found++;
+        //     continue;
+        // }
+        // if (target->contain(ideal, &global_ctx))
+        // {
+        //     found++;
+        //     continue;
+        // }
+        // auto ed = std::chrono::high_resolution_clock::now();
+
+        // std::chrono::duration<double, std::milli> dur = ed - st;
+        // printf("contain time: %lfms\n", dur.count());
 
         if (target->get_step(false) > ideal->get_step(false))
         {
@@ -69,10 +94,6 @@ int main(int argc, char **argv)
             global_ctx.polygon_pairs.push_back(make_pair(ideal, target));
         }
 
-        // ideal->MyPolygon::print();
-        // ideal->MyRaster::print();
-        // target->MyPolygon::print();
-        // target->MyRaster::print();
 
         // double reference_dist = 100000.0;
         // for (int i = 0; i < ideal->get_num_vertices() - 1; i++)

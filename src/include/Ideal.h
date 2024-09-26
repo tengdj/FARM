@@ -3,6 +3,7 @@
 
 #include "MyPolygon.h"
 #include "MyRaster.h"
+#include "Hraster.h"
 
 #define BUFFER_SIZE 1024 * 1024 * 1024
 
@@ -91,7 +92,8 @@ class Ideal : public MyPolygon, public MyRaster{
 
 	uint len_edge_sequences = 0;
 
-	
+	Hraster *layers = nullptr;
+	int num_layers = 0;
 
     pthread_mutex_t ideal_partition_lock;
 	void init_pixels();
@@ -123,6 +125,8 @@ public:
 	void process_intersection(map<int, vector<double>> edge_intersection, Direction direction);
 	int count_intersection_nodes(Point &p);
 	Grid_line *get_vertical() {return vertical;}
+	Hraster* get_layers() {return layers;}
+	int get_num_layers() {return num_layers;}
 
 
 	// statistic collection
