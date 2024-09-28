@@ -16,7 +16,7 @@ struct test
 	unsigned short pix_id2;
 };
 
-__global__ void kernel_init(pair<Point, IdealOffset> *d_pairs, Idealinfo *d_info, uint size, double *distance)
+__global__ void kernel_init(pair<Point, IdealOffset> *d_pairs, RasterInfo *d_info, uint size, double *distance)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x < size)
@@ -31,7 +31,7 @@ __global__ void kernel_init(pair<Point, IdealOffset> *d_pairs, Idealinfo *d_info
 	}
 }
 
-__global__ void kernel_filter(pair<Point, IdealOffset> *d_pairs, Idealinfo *d_info, uint8_t *d_status, PixMapping *d_ptpixpairs, uint *d_pp_size, uint size, int *step, bool *resultmap)
+__global__ void kernel_filter(pair<Point, IdealOffset> *d_pairs, RasterInfo *d_info, uint8_t *d_status, PixMapping *d_ptpixpairs, uint *d_pp_size, uint size, int *step, bool *resultmap)
 {
 	const int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
 	if (pair_id < size)
@@ -182,7 +182,7 @@ __global__ void kernel_refinement(Batch *d_batch, pair<Point, IdealOffset> *d_pa
 	}
 }
 
-__global__ void kernel_check_exit(pair<Point, IdealOffset> *d_pairs, Idealinfo *d_info, uint8_t *d_status, PixMapping *d_ptpixpairs, uint *d_pp_size, uint size, int *step, double *distance, bool *resultmap)
+__global__ void kernel_check_exit(pair<Point, IdealOffset> *d_pairs, RasterInfo *d_info, uint8_t *d_status, PixMapping *d_ptpixpairs, uint *d_pp_size, uint size, int *step, double *distance, bool *resultmap)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x < size)

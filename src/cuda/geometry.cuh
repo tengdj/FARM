@@ -91,17 +91,25 @@ __device__ __forceinline__ int gpu_get_offset_y(double s_yval, double t_yval, do
 	return min(max(y, 0), dimy);
 }
 
+// __device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, int &id)
+// {
+// 	uint8_t st = (status + start)[id / 4];
+// 	int pos = id % 4 * 2; // The multiplication by 2 is because each status occupies 2 bits.
+// 	st &= ((uint8_t)3 << pos);
+// 	st >>= pos;
+// 	if (st == 0)
+// 		return OUT;
+// 	if (st == 3)
+// 		return IN;
+// 	return BORDER;
+// }
+
 __device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, int &id)
 {
-	uint8_t st = (status + start)[id / 4];
-	int pos = id % 4 * 2; // The multiplication by 2 is because each status occupies 2 bits.
-	st &= ((uint8_t)3 << pos);
-	st >>= pos;
-	if (st == 0)
-		return OUT;
-	if (st == 3)
-		return IN;
-	return BORDER;
+	uint8_t st = (status + start)[id];
+	if(st == 0) return OUT;
+	else if(st == 1) return BORDER;
+	else return IN;
 }
 
 __device__ __forceinline__ box gpu_get_pixel_box(int x, int y, double bx_lowx, double bx_lowy, double step_x, double step_y)

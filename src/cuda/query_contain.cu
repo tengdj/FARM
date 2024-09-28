@@ -1,6 +1,6 @@
 #include "geometry.cuh"
 
-__global__ void kernel_filter_contain(pair<Point, IdealOffset> *d_pairs, Idealinfo *d_info, uint8_t *d_status, uint size, uint8_t *resultmap, PixPair *d_ptpixpairs, uint *d_pp_size)
+__global__ void kernel_filter_contain(pair<Point, IdealOffset> *d_pairs, RasterInfo *d_info, uint8_t *d_status, uint size, uint8_t *resultmap, PixPair *d_ptpixpairs, uint *d_pp_size)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x < size)
@@ -34,7 +34,7 @@ __global__ void kernel_filter_contain(pair<Point, IdealOffset> *d_pairs, Idealin
 	}
 }
 
-__global__ void kernel_refinement_contain(pair<Point, IdealOffset> *d_pairs, PixPair *d_ptpixpairs, Idealinfo *d_info, uint16_t *d_offset, EdgeSeq *d_edge_sequences, Point *d_vertices, uint16_t *d_gridline_offset, double *d_gridline_nodes, uint *size, uint8_t *resultmap)
+__global__ void kernel_refinement_contain(pair<Point, IdealOffset> *d_pairs, PixPair *d_ptpixpairs, RasterInfo *d_info, uint16_t *d_offset, EdgeSeq *d_edge_sequences, Point *d_vertices, uint16_t *d_gridline_offset, double *d_gridline_nodes, uint *size, uint8_t *resultmap)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x < *size)

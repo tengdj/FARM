@@ -10,7 +10,7 @@ struct Batch
 	int pair_id = 0;
 };
 
-__global__ void kernel_filter(pair<IdealOffset, IdealOffset> *d_pairs, Idealinfo *d_info, uint8_t *d_status, uint size, uint8_t *resultmap, PixPair *d_pixpairs, uint *pp_size)
+__global__ void kernel_filter(pair<IdealOffset, IdealOffset> *d_pairs, RasterInfo *d_info, uint8_t *d_status, uint size, uint8_t *resultmap, PixPair *d_pixpairs, uint *pp_size)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x < size)

@@ -156,8 +156,21 @@ void Ideal::process_intersection(map<int, vector<double>> intersection_info, Dir
 
 void Ideal::init_pixels(){
 	assert(mbr);
-	status = new uint8_t[(dimx+1)*(dimy+1) / 4 + 1];
-    memset(status, 0, ((dimx+1)*(dimy+1) / 4 + 1) * sizeof(uint8_t));
+	layer_offset = new uint16_t[num_layers + 1];
+	layer_info = new RasterInfo[num_layers + 1];
+
+	status_size = get_num_pixels();
+	int _dimx = dimx, _dimy = dimy;
+	for(int i = num_layers - 1; i >= 0; i --){
+		layer_offset[i] = status_size;
+		_dimx = static_cast<int>(ceil(_dimx / 2.0));
+		_dimy = static_cast<int>(ceil(_dimy / 2.0));
+		status_size += (_dimx + 1) * (_dimy + 1);
+	}
+	assert(_dimx == 1 && _dimy == 1);
+
+	status = new uint8_t[status_size];
+	memset(status, 0, status_size * sizeof(uint8_t));
     offset = new uint16_t[(dimx+1)*(dimy+1) + 1];    // +1 here is to ensure that pointer[num_pixels] equals len_edge_sequences, so we don't need to make a special case for the last pointer.
 	horizontal = new Grid_line(dimy);
 	vertical = new Grid_line(dimx);
@@ -415,25 +428,31 @@ void Ideal::rasterization(){
 void Ideal::rasterization(int vpr){
 	assert(vpr > 0);
 	pthread_mutex_lock(&ideal_partition_lock);
+	num_layers = static_cast<int>(ceil(max(log(dimx + 1) / log(2.0), log(dimy + 1) / log(2.0))));
     // init_raster(boundary->num_vertices / vpr);
     rasterization();
 
 	/*for hierachy*/
-	num_layers = static_cast<int>(ceil(max(log(get_dimx() + 1) / log(2.0), log(get_dimy() + 1) / log(2.0))));
 	assert(num_layers != 0);
-	
 	layers = new Hraster[num_layers + 1];
 
 	// process the last layer
-	layers[num_layers].init(get_step_x(), get_step_y(), get_dimx(), get_dimy(), getMBB(), true);
-	layers[num_layers].set_status(get_status());
+	layers[num_layers].init(step_x, step_y, dimx, dimy, getMBB(), true);
+	layers[num_layers].set_status(status);
+	layer_info[num_layers] = {*mbr, dimx, dimy, step_x, step_y};
+	layer_offset[num_layers] = 0;
 
 	for(int i = num_layers - 1; i >= 0; i --){
 		double _step_x = layers[i + 1].get_step_x() * 2, _step_y = layers[i + 1].get_step_y() * 2;
 		int _dimx = static_cast<int>(ceil(layers[i + 1].get_dimx() / 2.0)), _dimy = static_cast<int>(ceil(layers[i + 1].get_dimy() / 2.0));
+
 		layers[i].init(_step_x, _step_y, _dimx, _dimy, getMBB(), false);
+		layer_info[i] = {*layers[i].mbr, _dimx, _dimy, _step_x, _step_y};
+		
 		layers[i].merge(layers[i + 1]);
+		memcpy(status + layer_offset[i], layers[i].get_status(), (_dimx+1) * (_dimy+1) * sizeof(uint8_t));	
 	}
+
 	/*for hierachy*/
 	
 	pthread_mutex_unlock(&ideal_partition_lock);

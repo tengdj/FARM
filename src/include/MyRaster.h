@@ -11,6 +11,15 @@ enum PartitionStatus{
 	IN = 2
 };
 
+class RasterInfo{
+public:
+	box mbr;
+	int dimx = 0;
+	int dimy = 0;
+	double step_x = 0.0;
+	double step_y = 0.0;
+};
+
 class MyRaster : virtual public BaseGeometry{
     pthread_mutex_t raster_lock;
     pthread_mutex_t qtree_lock;
@@ -52,16 +61,15 @@ public:
 	vector<int> expand_radius(int center, int step);
 
     void grid_align(query_context *gctx);
+    void merge(int level);
     
     // statistic collection
     size_t get_num_pixels();
     size_t get_num_pixels(PartitionStatus status);
     // double get_pixel_portion(PartitionStatus status);
 
-
     // utility
     void print();
-
     box *extractMER(int starter);
 
     // get functions

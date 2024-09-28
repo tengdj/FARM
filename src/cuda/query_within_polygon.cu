@@ -18,9 +18,10 @@ struct BoxDistRange
     double minDist;
     double maxDist; // maxDist is not nessnary
     int pairId;
+    int level = 0;
 };
 
-__global__ void kernel_init(pair<IdealOffset, IdealOffset> *d_pairs, Idealinfo *d_info, uint size, double *distance, double *min_box_dist, double *max_box_dist)
+__global__ void kernel_init(pair<IdealOffset, IdealOffset> *d_pairs, RasterInfo *d_info, uint size, double *distance, double *min_box_dist, double *max_box_dist)
 {
     const int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (pair_id < size)
@@ -37,7 +38,7 @@ __global__ void kernel_init(pair<IdealOffset, IdealOffset> *d_pairs, Idealinfo *
     }
 }
 
-__global__ void cal_box_distance(pair<IdealOffset, IdealOffset> *pairs, Idealinfo *info, uint8_t *status, double *min_box_dist, double *max_box_dist, uint size, BoxDistRange *buffer, uint *buffer_size)
+__global__ void cal_box_distance(pair<IdealOffset, IdealOffset> *pairs, RasterInfo *info, uint8_t *status, double *min_box_dist, double *max_box_dist, uint size, BoxDistRange *buffer, uint *buffer_size)
 {
     const int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (pair_id < size)

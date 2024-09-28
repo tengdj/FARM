@@ -29,35 +29,21 @@ public:
 
 struct IdealOffset{
 	uint info_start = 0;
-	uint info_end = 0;
 	uint status_start = 0;
-	uint status_end = 0;
 	uint offset_start = 0;
-	uint offset_end = 0;
 	uint edge_sequences_start = 0;
-	uint edge_sequences_end = 0;
 	uint vertices_start = 0;
-	uint vertices_end = 0;
 	uint gridline_offset_start = 0;
 	uint gridline_offset_end = 0;
 	uint gridline_nodes_start = 0;
-	uint gridline_nodes_end = 0;
+	uint layer_info_start = 0;
+	uint layer_offset_start = 0;
 };
 
 struct EdgeSeq{
 	uint start;
 	uint length;
 };
-
-struct Idealinfo{
-	box mbr;
-	int dimx = 0;
-	int dimy = 0;
-	double step_x = 0.0;
-	double step_y = 0.0;
-};
-
-
 
 class Grid_line{
 	uint16_t *offset = nullptr;
@@ -89,11 +75,14 @@ class Ideal : public MyPolygon, public MyRaster{
 	pair<uint32_t, uint32_t> *edge_sequences = nullptr;
 	Grid_line *horizontal = nullptr;
 	Grid_line *vertical = nullptr;
+	uint16_t *layer_offset = nullptr;
+    RasterInfo *layer_info = nullptr;
+	Hraster *layers = nullptr;
 
 	uint len_edge_sequences = 0;
+	uint num_layers = 0;
+	uint status_size = 0;
 
-	Hraster *layers = nullptr;
-	int num_layers = 0;
 
     pthread_mutex_t ideal_partition_lock;
 	void init_pixels();
@@ -125,8 +114,11 @@ public:
 	void process_intersection(map<int, vector<double>> edge_intersection, Direction direction);
 	int count_intersection_nodes(Point &p);
 	Grid_line *get_vertical() {return vertical;}
-	Hraster* get_layers() {return layers;}
-	int get_num_layers() {return num_layers;}
+	Hraster* get_layers() { return layers; }
+	uint get_num_layers() { return num_layers; }
+	uint get_status_size() { return status_size; }
+	RasterInfo* get_layer_info() { return layer_info; }
+	uint16_t* get_layer_offset() { return layer_offset; }
 
 
 	// statistic collection

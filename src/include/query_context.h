@@ -24,7 +24,7 @@ using namespace std;
 class MyPolygon;
 class Ideal;
 struct EdgeSeq;
-struct Idealinfo;
+struct RasterInfo;
 struct IdealOffset;
 
 enum QueryType
@@ -164,8 +164,8 @@ public:
 
 	// for gpu
 
-	Idealinfo *h_info = nullptr;
-	Idealinfo *d_info = nullptr;
+	RasterInfo *h_info = nullptr;
+	RasterInfo *d_info = nullptr;
 	uint8_t *h_status = nullptr;
 	uint8_t *d_status = nullptr;
 	uint16_t *h_offset = nullptr;
@@ -178,6 +178,11 @@ public:
 	uint16_t *d_gridline_offset = nullptr;
 	double *h_gridline_nodes = nullptr;
 	double *d_gridline_nodes = nullptr;
+	RasterInfo *h_layer_info = nullptr;
+	RasterInfo *d_layer_info = nullptr;
+	uint16_t *h_layer_offset = nullptr;
+	uint16_t *d_layer_offset = nullptr;
+	
 
 	size_t num_polygons = 0;
 	size_t num_status = 0;
@@ -186,6 +191,8 @@ public:
 	size_t num_vertices = 0;
 	size_t num_gridline_offset = 0;
 	size_t num_gridline_nodes = 0;
+	size_t num_layer_info = 0;
+	size_t num_layer_offset = 0;
 
 	// for hierachy
 	double min_step_x = DBL_MAX;

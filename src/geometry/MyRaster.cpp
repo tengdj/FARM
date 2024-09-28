@@ -201,26 +201,36 @@ int MyRaster::get_offset_y(double yval){
 	return min(max(y, 0), dimy);
 }
 
-void MyRaster::set_status(int id, PartitionStatus state){
-	int pos = id % 4 * 2;   // The multiplication by 2 is because each status occupies 2 bits.
-	if(state == OUT){
-		status[id / 4] &= ~((uint8_t)3 << pos);
-	}else if(state == IN){
-		status[id / 4] |= ((uint8_t)3 << pos);
-	}else{
-		status[id / 4] &= ~((uint8_t)1 << pos);
-		status[id / 4] |= ((uint8_t)1 << (pos + 1));
-	}
+// void MyRaster::set_status(int id, PartitionStatus state){
+// 	int pos = id % 4 * 2;   // The multiplication by 2 is because each status occupies 2 bits.
+// 	if(state == OUT){
+// 		status[id / 4] &= ~((uint8_t)3 << pos);
+// 	}else if(state == IN){
+// 		status[id / 4] |= ((uint8_t)3 << pos);
+// 	}else{
+// 		status[id / 4] &= ~((uint8_t)1 << pos);
+// 		status[id / 4] |= ((uint8_t)1 << (pos + 1));
+// 	}
+// }
+
+void MyRaster::set_status(int id, PartitionStatus state){   // The multiplication by 2 is because each status occupies 2 bits.
+	status[id] = state;
 }
 
+// PartitionStatus MyRaster::show_status(int id){
+// 	uint8_t st = status[id / 4];
+// 	int pos = id % 4 * 2;   // The multiplication by 2 is because each status occupies 2 bits.	
+// 	st &= ((uint8_t)3 << pos);
+// 	st >>= pos;
+// 	if(st == 0) return OUT;
+// 	if(st == 3) return IN;
+// 	return BORDER;
+// }
+
 PartitionStatus MyRaster::show_status(int id){
-	uint8_t st = status[id / 4];
-	int pos = id % 4 * 2;   // The multiplication by 2 is because each status occupies 2 bits.	
-	st &= ((uint8_t)3 << pos);
-	st >>= pos;
-	if(st == 0) return OUT;
-	if(st == 3) return IN;
-	return BORDER;
+	if(status[id] == 0) return OUT;
+	else if(status[id] == 1) return BORDER;
+	else return IN;
 }
 
 vector<int> MyRaster::get_intersect_pixels(box *b){
