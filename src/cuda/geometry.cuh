@@ -21,6 +21,14 @@ struct PixPair
 	int pair_id = 0;
 };
 
+struct PolygonPair
+{
+	IdealOffset source;
+	IdealOffset target;
+	uint s_level = 0;
+	uint t_level = 0;
+};
+
 __device__ __forceinline__ double atomicMinDouble(double *address, double val)
 {
 	unsigned long long int *address_as_ull = (unsigned long long int *)address;
@@ -104,9 +112,9 @@ __device__ __forceinline__ int gpu_get_offset_y(double s_yval, double t_yval, do
 // 	return BORDER;
 // }
 
-__device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, int &id)
+__device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, uint16_t offset, int &id)
 {
-	uint8_t st = (status + start)[id];
+	uint8_t st = (status + start + offset)[id];
 	if(st == 0) return OUT;
 	else if(st == 1) return BORDER;
 	else return IN;

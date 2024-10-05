@@ -36,9 +36,23 @@ int main(int argc, char **argv)
         Ideal *target = global_ctx.target_ideals[i];
 
         // ideal->MyPolygon::print();
-        // ideal->MyRaster::print();
+
+		// for(int i = 0; i <= ideal->get_num_layers(); i ++){
+		// 	printf("level %d:\n", i);
+		// 	printf("dimx=%d, dimy=%d\n", ideal->get_layers()[i].get_dimx(), ideal->get_layers()[i].get_dimy());
+		// 	printf("step_x=%lf, step_y=%lf\n", ideal->get_layers()[i].get_step_x(), ideal->get_layers()[i].get_step_y());
+		// 	// ideal->get_layers()[i].mbr->print();
+		// 	ideal->get_layers()[i].print();
+		// }
+
         // target->MyPolygon::print();
-        // target->MyRaster::print();
+
+        // for(int i = 0; i <= target->get_num_layers(); i ++){
+		// 	printf("level %d:\n", i);
+		// 	printf("dimx=%d, dimy=%d\n", target->get_layers()[i].get_dimx(), target->get_layers()[i].get_dimy());
+		// 	// ideal->get_layers()[i].mbr->print();
+		// 	target->get_layers()[i].print();
+		// }
 
         if (ideal == target)
         {
@@ -57,16 +71,16 @@ int main(int argc, char **argv)
             continue;
         }
 
-        // if (ideal->getMBB()->contain(*target->getMBB()) && ideal->contain(target, &global_ctx))
-        // {
-        //     found++;
-        //     continue;
-        // }
-        // if (target->getMBB()->contain(*ideal->getMBB()) && target->contain(ideal, &global_ctx))
-        // {
-        //     found++;
-        //     continue;
-        // }
+        if (ideal->getMBB()->contain(*target->getMBB()) && ideal->contain(target->get_boundary()->p[0], &global_ctx))
+        {
+            found++;
+            continue;
+        }
+        if (target->getMBB()->contain(*ideal->getMBB()) && target->contain(ideal->get_boundary()->p[0], &global_ctx))
+        {
+            found++;
+            continue;
+        }
         
         // auto st = std::chrono::high_resolution_clock::now();
         // printf("dimx = %d, dimy = %d\n", ideal->get_dimx(), ideal->get_dimy());
