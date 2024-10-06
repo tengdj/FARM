@@ -17,8 +17,8 @@ int main(int argc, char **argv)
     global_ctx.query_type = QueryType::within;
     global_ctx.geography = true;
 
-    global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str(), &global_ctx);
-    global_ctx.target_ideals = load_polygon_wkt(global_ctx.target_path.c_str(), &global_ctx);
+    global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str());
+    global_ctx.target_ideals = load_polygon_wkt(global_ctx.target_path.c_str());
 
     // global_ctx.source_ideals.resize(1);
     // global_ctx.target_ideals.resize(1);

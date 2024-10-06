@@ -60,5 +60,14 @@ print_raster:	test/print_raster.o $(GEOMETRY_OBJS)
 distance_test:	test/distance_test.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
 
+dump_points:	datagen/dump_points.o $(GEOMETRY_OBJS)
+	$(CXX) -o ../build/$@ $^ $(LIBS) 
+
+dump_polygons:	datagen/dump_polygons.o $(GEOMETRY_OBJS)
+	$(CXX) -o ../build/$@ $^ $(LIBS) 
+
+dist_point_polygon:	test/dist_point_polygon.o $(GEOMETRY_OBJS)
+	$(CXX) -o ../build/$@ $^ $(LIBS) 
+
 clean:
 	rm -fr ../build/* $(OBJS) $(CU_OBJS)

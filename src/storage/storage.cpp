@@ -12,257 +12,138 @@ std::queue<std::string> polygon_queue;
 std::condition_variable polygon_cv;
 bool polygon_done = false;
 
-std::mutex mtx;
+// 线程函数：从队列中读取WKT并解析到局部容器中
+void process_lines(std::vector<Ideal*>& local_ideals) {
+    while (true) {
+        std::string line;
+        {
+            std::unique_lock<std::mutex> lock(polygon_mtx);
+            polygon_cv.wait(lock, [] { return !polygon_queue.empty() || polygon_done; });
 
-class ThreadPool
-{
-public:
-	ThreadPool(size_t num_threads);
-	~ThreadPool();
+            if (polygon_queue.empty() && polygon_done)
+                break;
 
-	void enqueue(std::function<void()> task);
+            line = std::move(polygon_queue.front());
+            polygon_queue.pop();
+        }
 
-private:
-	std::vector<std::thread> workers;
-	std::queue<std::function<void()>> tasks;
+        std::istringstream iss(line);
+        std::string wkt;
 
-	std::mutex queue_mutex;
-	std::condition_variable condition;
-	bool stop;
+        getline(iss, wkt); // 提取wkt
+		// cout << wkt << endl;
+        if (wkt.empty()) {
+            std::cerr << "read WKT failed\n";
+            continue;
+        }
 
-	void worker();
-};
+        // 去掉引号
+        if (!wkt.empty() && wkt.front() == '"') {
+            wkt.erase(0, 1); // 删除起始的引号
+        }
+        if (!wkt.empty() && wkt.back() == '"') {
+            wkt.erase(wkt.size() - 1); // 删除结尾的引号
+        }
 
-ThreadPool::ThreadPool(size_t num_threads) : stop(false)
-{
-	for (size_t i = 0; i < num_threads; ++i)
-	{
-		workers.emplace_back([this]
-							 { worker(); });
-	}
+        size_t offset = 7;
+        local_ideals.push_back(read_polygon(wkt.c_str(), offset));
+    }
 }
 
-ThreadPool::~ThreadPool()
-{
-	{
-		std::unique_lock<std::mutex> lock(queue_mutex);
-		stop = true;
-	}
-	condition.notify_all();
-	for (std::thread &worker : workers)
-	{
-		worker.join();
-	}
+std::vector<Ideal*> load_polygon_wkt(const char* path) {
+    std::vector<Ideal*> ideals;
+
+    if (!file_exist(path)) {
+        log("%s does not exist", path);
+        exit(1);
+    }
+
+    std::ifstream infile(path);
+    if (!infile) {
+        std::cerr << "can not open this file\n";
+        exit(1);
+    }
+
+    std::vector<std::thread> workers;
+    int num_threads = std::thread::hardware_concurrency(); // 获取系统支持的线程数量
+	std::vector<std::vector<Ideal*>> local_ideals(num_threads); // 每个线程都有一个局部容器
+
+    // 启动多个线程处理WKT
+    for (int i = 0; i < num_threads; ++i) {
+        workers.emplace_back(process_lines, std::ref(local_ideals[i]));
+    }
+
+    // 主线程读取文件并将每一行放入队列
+    std::string line;
+    while (getline(infile, line)) {
+        std::unique_lock<std::mutex> lock(polygon_mtx);
+        polygon_queue.push(std::move(line));
+        polygon_cv.notify_one(); // 通知一个线程处理
+    }
+
+    infile.close();
+    polygon_done = true;
+    polygon_cv.notify_all(); // 通知所有线程处理结束
+
+    // 等待所有线程结束
+    for (auto& worker : workers) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+
+	for (const auto& local_vec : local_ideals) {
+        ideals.insert(ideals.end(), local_vec.begin(), local_vec.end());
+    }
+
+    return ideals;
 }
 
-void ThreadPool::enqueue(std::function<void()> task)
-{
-	{
-		std::unique_lock<std::mutex> lock(queue_mutex);
-		tasks.push(std::move(task));
-	}
-	condition.notify_one();
-}
-
-void ThreadPool::worker()
-{
-	while (true)
-	{
-		std::function<void()> task;
-		{
-			std::unique_lock<std::mutex> lock(queue_mutex);
-			condition.wait(lock, [this]
-						   { return stop || !tasks.empty(); });
-			if (stop && tasks.empty())
-				return;
-			task = std::move(tasks.front());
-			tasks.pop();
-		}
-		task();
-	}
-}
-
-void point_process_line(const std::string &line, std::vector<Point> &points, size_t line_num)
-{
-	std::istringstream iss(line);
-	std::string id, wkt;
-	getline(iss, id, ','); // 提取id
-	if (id.empty())
-	{
-		std::cerr << "Line " << line_num << ": read ID failed\n";
-		return;
-	}
-	getline(iss, wkt); // 提取wkt
-	if (wkt.empty())
-	{
-		std::cerr << "Line " << line_num << ": read WKT failed\n";
-		return;
-	}
-	// 去掉引号
-	if (wkt.size() > 0 && wkt.front() == '"')
-	{
-		wkt.erase(0, 1); // 删除起始的引号
-	}
-	if (wkt.size() > 0 && wkt.back() == '"')
-	{
-		wkt.erase(wkt.size() - 1); // 删除结尾的引号
-	}
-
-	size_t offset = 5;
-	Point *point = read_vertices(wkt.c_str(), offset, false)->p;
-
-	// 保护对共享资源points的访问
-	std::lock_guard<std::mutex> lock(mtx);
-	points.push_back(*point);
-}
-
-Point *load_point_wkt(const char *path, size_t &count)
-{
-	if (!file_exist(path))
-	{
-		std::cerr << path << " does not exist\n";
+Point* load_point_wkt(const char *path, size_t &count, query_context *ctx){
+	vector<string> wkts;
+	if(!file_exist(path)){
+		log("%s does not exist",path);
 		exit(1);
 	}
 
-	std::ifstream infile(path);
-	if (!infile)
-	{
-		std::cerr << "Cannot open the file\n";
-		exit(1);
-	}
-
-	std::string header;
-	getline(infile, header); // 跳过CSV文件的第一行标题
-
-	std::vector<Point> points;
-	ThreadPool pool(std::thread::hardware_concurrency()); // 根据硬件并发数初始化线程池
-
-	std::string line;
-	size_t line_num = 0;
-
-	while (getline(infile, line))
-	{
-		line_num++;
-		pool.enqueue([line, &points, line_num]()
-					 { point_process_line(line, points, line_num); });
-		count++;
-	}
-
-	infile.close();
-
-	// 将points转换为Point数组
-	Point *point_array = new Point[points.size()];
-	std::copy(points.begin(), points.end(), point_array);
-
-	return point_array;
-}
-
-void polygon_process_lines(std::vector<Ideal *> &local_ideals)
-{
-	while (true)
-	{
-		std::string line;
-		{
-			std::unique_lock<std::mutex> lock(polygon_mtx);
-			polygon_cv.wait(lock, []
-							{ return !polygon_queue.empty() || polygon_done; });
-
-			if (polygon_queue.empty() && polygon_done)
-				break;
-
-			line = std::move(polygon_queue.front());
-			polygon_queue.pop();
-		}
-
-		std::istringstream iss(line);
-		std::string id, wkt;
-		getline(iss, id, ','); // 提取id
-		if (id.empty())
-		{
-			std::cerr << "read ID failed\n";
-			continue;
-		}
-
-		getline(iss, wkt); // 提取wkt
-		if (wkt.empty())
-		{
-			std::cerr << "read WKT failed\n";
-			continue;
-		}
-
-		// 去掉引号
-		if (!wkt.empty() && wkt.front() == '"')
-		{
-			wkt.erase(0, 1); // 删除起始的引号
-		}
-		if (!wkt.empty() && wkt.back() == '"')
-		{
-			wkt.erase(wkt.size() - 1); // 删除结尾的引号
-		}
-
-		size_t offset = 7;
-		local_ideals.push_back(read_polygon(wkt.c_str(), offset));
-	}
-}
-
-std::vector<Ideal *> load_polygon_wkt(const char *path, query_context *ctx)
-{
-	std::vector<Ideal *> ideals;
-
-	if (!file_exist(path))
-	{
-		log("%s does not exist", path);
-		exit(1);
-	}
-
-	std::ifstream infile(path);
-	if (!infile)
-	{
+	ifstream infile(path);
+	if(!infile){
 		std::cerr << "can not open this file\n";
 		exit(1);
 	}
 
-	std::vector<std::thread> workers;
-	int num_threads = ctx->num_threads;							 // 获取系统支持的线程数量
-	std::vector<std::vector<Ideal *>> local_ideals(num_threads); // 每个线程都有一个局部容器
+	string line;
+	// getline(infile, line);
+	while(getline(infile, line)){
+		count ++;
+		istringstream iss(line);
+		string wkt;
 
-	// 启动多个线程处理WKT
-	for (int i = 0; i < num_threads; ++i)
-	{
-		workers.emplace_back(polygon_process_lines, std::ref(local_ideals[i]));
-	}
-
-	// 主线程读取文件并将每一行放入队列
-	std::string line;
-	getline(infile, line); // 跳过第一行
-	while (getline(infile, line))
-	{
-		std::unique_lock<std::mutex> lock(polygon_mtx);
-		polygon_queue.push(std::move(line));
-		polygon_cv.notify_one(); // 通知一个线程处理
+		getline(iss, wkt); // 提取wkt
+		if (wkt.empty()) {
+            std::cerr << "read WKT failed\n";
+            continue;
+        }
+		// 去掉引号
+        // if (wkt.size() > 0 && wkt.front() == '"') {
+        //     wkt.erase(0, 1); // 删除起始的引号
+        // }
+        // if (wkt.size() > 0 && wkt.back() == '"') {
+        //     wkt.erase(wkt.size() - 1); // 删除结尾的引号
+        // }
+		wkts.push_back(wkt);
 	}
 
 	infile.close();
-	polygon_done = true;
-	polygon_cv.notify_all(); // 通知所有线程处理结束
 
-	// 等待所有线程结束
-	for (auto &worker : workers)
-	{
-		if (worker.joinable())
-		{
-			worker.join();
-		}
+	Point *points = new Point[count];
+
+	for(int i = 0; i < count; i ++){
+		size_t offset = 5;
+		points[i] = *read_vertices(wkts[i].c_str(), offset, false)->p;
 	}
 
-	for (const auto &local_vec : local_ideals)
-	{
-		ideals.insert(ideals.end(), local_vec.begin(), local_vec.end());
-	}
-
-	polygon_done = false;
-
-	return ideals;
+	return points;	
 }
 
 void dump_to_file(const char *path, char *data, size_t size)
@@ -280,45 +161,41 @@ void dump_to_file(const char *path, char *data, size_t size)
  *
  * */
 
-void dump_polygons_to_file(vector<MyPolygon *> polygons, const char *path)
-{
+void dump_polygons_to_file(vector<Ideal *> ideals, const char *path){
 	ofstream os;
-	os.open(path, ios::out | ios::binary | ios::trunc);
+	os.open(path, ios::out | ios::binary |ios::trunc);
 	assert(os.is_open());
 
-	size_t buffer_size = 100 * 1024 * 1024;
+	size_t buffer_size = 100*1024*1024;
 	char *data_buffer = new char[buffer_size];
 	size_t data_size = 0;
 	size_t curoffset = 0;
-	PolygonMeta *pmeta = new PolygonMeta[polygons.size()];
-	for (int i = 0; i < polygons.size(); i++)
-	{
-		MyPolygon *p = polygons[i];
-		if (p->get_data_size() + data_size > buffer_size)
-		{
+	PolygonMeta *pmeta = new PolygonMeta[ideals.size()];
+	for(int i=0;i<ideals.size();i++){
+		Ideal *p = ideals[i];
+		if(p->get_data_size()+data_size>buffer_size){
 			os.write(data_buffer, data_size);
 			data_size = 0;
 		}
 		pmeta[i] = p->get_meta();
 		pmeta[i].offset = curoffset;
-		data_size += p->encode(data_buffer + data_size);
+		data_size += p->encode(data_buffer+data_size);
 		curoffset += p->get_data_size();
 	}
 
 	// dump the rest polygon data
-	if (data_size != 0)
-	{
+	if(data_size!=0){
 		os.write(data_buffer, data_size);
 	}
 	// dump the meta data of the polygons
-	os.write((char *)pmeta, sizeof(PolygonMeta) * polygons.size());
-	//	for(PolygonMeta &pm:pmeta){
-	//		printf("%ld\t%d\t%.12f\n", pm.offset, pm.size, pm.mbr.area());
-	//	}
-	size_t bs = polygons.size();
+	os.write((char *)pmeta, sizeof(PolygonMeta)*ideals.size());
+//	for(PolygonMeta &pm:pmeta){
+//		printf("%ld\t%d\t%.12f\n", pm.offset, pm.size, pm.mbr.area());
+//	}
+	size_t bs = ideals.size();
 	os.write((char *)&bs, sizeof(size_t));
 	os.close();
-	delete[] pmeta;
+	delete []pmeta;
 }
 
 MyPolygon *read_polygon_binary_file(ifstream &infile)

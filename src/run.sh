@@ -1,4 +1,4 @@
 make clean
-make distance_test USE_GPU=1 -j
-../build/distance_test -s /home/qmh/data/dist.csv -t /home/qmh/data/dist2.csv -r -v 100 -n 1 > output2.txt
+make dist_point_polygon USE_GPU=1 -j
+../build/dist_point_polygon -s /home/qmh/data/test_polygon.idl -t /home/qmh/data/test_point.dat -r -n 1 > output.txt
 

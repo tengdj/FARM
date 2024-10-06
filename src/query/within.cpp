@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
 	global_ctx.found += cuda_within(&global_ctx);
 #endif
 	cout << endl;
-	global_ctx.print_stats();
+	printf("found: %d\n", global_ctx.found);
 	logt("total query",start);
 
 	return 0;

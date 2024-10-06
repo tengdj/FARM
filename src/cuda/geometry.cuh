@@ -29,6 +29,13 @@ struct PolygonPair
 	uint t_level = 0;
 };
 
+struct PointPolygonPair
+{
+	IdealOffset source;
+	Point target;
+	uint level = 0;
+};
+
 __device__ __forceinline__ double atomicMinDouble(double *address, double val)
 {
 	unsigned long long int *address_as_ull = (unsigned long long int *)address;
@@ -112,7 +119,7 @@ __device__ __forceinline__ int gpu_get_offset_y(double s_yval, double t_yval, do
 // 	return BORDER;
 // }
 
-__device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, uint16_t offset, int &id)
+__device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, int &id, uint16_t offset = 0)
 {
 	uint8_t st = (status + start + offset)[id];
 	if(st == 0) return OUT;
@@ -212,6 +219,45 @@ __device__ __forceinline__ double gpu_max_distance(box &s_box, box &t_box)
 	return haversine(p.x, p.y, q.x, q.y);
 }
 
+// point to box
+__device__ __forceinline__ double gpu_distance(box &s, Point &t)
+{
+	if(t.x >= s.low[0] && t.x <= s.high[0]&&
+	   t.y >= s.low[1] && t.y <= s.high[1])
+	{
+		return 0.0;
+    }
+	Point p;
+
+	if (t.y > s.high[1])
+	{
+		p.y = s.high[1];
+	}
+	else if (s.low[1] > t.y)
+	{
+		p.y = s.low[1];
+	}
+	else
+	{
+		p.y = t.y;
+	}
+
+	if (t.x > s.high[0])
+	{
+		p.x = s.high[0];
+	}
+	else if (s.low[0] > t.x)
+	{
+		p.x = s.low[0];
+	}
+	else
+	{
+		p.x = t.x;
+	}
+
+	return haversine(p.x, p.y, t.x, t.y);
+}
+
 // box to box
 __device__ __forceinline__ double gpu_distance(box &s, box &t)
 {
@@ -219,7 +265,7 @@ __device__ __forceinline__ double gpu_distance(box &s, box &t)
 	if (!(t.low[0] > s.high[0] || t.high[0] < s.low[0] ||
 		  t.low[1] > s.high[1] || t.high[1] < s.low[1]))
 	{
-		return 0;
+		return 0.0;
 	}
 
 	Point p, q;
