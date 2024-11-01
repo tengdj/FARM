@@ -38,12 +38,12 @@ void process_lines(std::vector<Ideal*>& local_ideals) {
         }
 
         // 去掉引号
-        if (!wkt.empty() && wkt.front() == '"') {
-            wkt.erase(0, 1); // 删除起始的引号
-        }
-        if (!wkt.empty() && wkt.back() == '"') {
-            wkt.erase(wkt.size() - 1); // 删除结尾的引号
-        }
+        // if (!wkt.empty() && wkt.front() == '"') {
+        //     wkt.erase(0, 1); // 删除起始的引号
+        // }
+        // if (!wkt.empty() && wkt.back() == '"') {
+        //     wkt.erase(wkt.size() - 1); // 删除结尾的引号
+        // }
 
         size_t offset = 7;
         local_ideals.push_back(read_polygon(wkt.c_str(), offset));
@@ -65,7 +65,7 @@ std::vector<Ideal*> load_polygon_wkt(const char* path) {
     }
 
     std::vector<std::thread> workers;
-    int num_threads = std::thread::hardware_concurrency(); // 获取系统支持的线程数量
+    int num_threads = 1; // 获取系统支持的线程数量
 	std::vector<std::vector<Ideal*>> local_ideals(num_threads); // 每个线程都有一个局部容器
 
     // 启动多个线程处理WKT

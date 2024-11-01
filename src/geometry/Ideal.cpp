@@ -683,6 +683,68 @@ double Ideal::get_possible_min(Point &p, int center, int step, bool geography){
 	return mindist;
 }
 
+double Ideal::get_possible_min(box *t_mbr, int core_x_low, int core_y_low, int core_x_high, int core_y_high, int step, bool geography)
+{
+
+	vector<int> needprocess;
+
+	int ymin = max(0, core_y_low - step);
+	int ymax = min(dimy, core_y_high + step);
+
+	double mindist = DBL_MAX;
+	// left scan
+	if (core_x_low - step >= 0)
+	{
+		double x = get_pixel_box(core_x_low - step, ymin).high[0];
+		double y1 = get_pixel_box(core_x_low - step, ymin).low[1];
+		double y2 = get_pixel_box(core_x_low - step, ymax).high[1];
+
+		Point p1 = Point(x, y1);
+		Point p2 = Point(x, y2);
+		double dist = t_mbr->distance(p1, p2, geography);
+		mindist = min(dist, mindist);
+	}
+	// right scan
+	if (core_x_high + step <= get_dimx())
+	{
+		double x = get_pixel_box(core_x_high + step, ymin).low[0];
+		double y1 = get_pixel_box(core_x_high + step, ymin).low[1];
+		double y2 = get_pixel_box(core_x_high + step, ymax).high[1];
+		Point p1 = Point(x, y1);
+		Point p2 = Point(x, y2);
+		double dist = t_mbr->distance(p1, p2, geography);
+		mindist = min(dist, mindist);
+	}
+
+	// skip the first if there is left scan
+	int xmin = max(0, core_x_low - step + (core_x_low - step >= 0));
+	// skip the last if there is right scan
+	int xmax = min(dimx, core_x_high + step - (core_x_high + step <= dimx));
+	// bottom scan
+	if (core_y_low - step >= 0)
+	{
+		double y = get_pixel_box(xmin, core_y_low - step).high[1];
+		double x1 = get_pixel_box(xmin, core_y_low - step).low[0];
+		double x2 = get_pixel_box(xmax, core_y_low - step).high[0];
+		Point p1 = Point(x1, y);
+		Point p2 = Point(x2, y);
+		double dist = t_mbr->distance(p1, p2, geography);
+		mindist = min(dist, mindist);
+	}
+	// top scan
+	if (core_y_high + step <= get_dimy())
+	{
+		double y = get_pixel_box(xmin, core_y_low + step).low[1];
+		double x1 = get_pixel_box(xmin, core_y_low + step).low[0];
+		double x2 = get_pixel_box(xmax, core_y_low + step).high[0];
+		Point p1 = Point(x1, y);
+		Point p2 = Point(x2, y);
+		double dist = t_mbr->distance(p1, p2, geography);
+		mindist = min(dist, mindist);
+	}
+	return mindist;
+}
+
 double Ideal::distance(Point &p, query_context *ctx, bool profile){
 	// distance is 0 if contained by the polygon
 	double mindist = getMBB()->max_distance(p, ctx->geography);
@@ -757,70 +819,84 @@ double Ideal::distance(Point &p, query_context *ctx, bool profile){
 }
 
 // get the distance from pixel pix to polygon target
-double Ideal::distance(Ideal *target, int pix, query_context *ctx, bool profile){
+double Ideal::distance(Ideal *target, int pix, query_context *ctx, bool profile)
+{
 	assert(show_status(pix) == BORDER);
 
 	auto pix_x = get_x(pix);
-    auto pix_y = get_y(pix);
-    auto pix_box = get_pixel_box(pix_x, pix_y);
+	auto pix_y = get_y(pix);
+	auto pix_box = get_pixel_box(pix_x, pix_y);
 	double mindist = getMBB()->max_distance(pix_box, ctx->geography);
 	double mbrdist = getMBB()->distance(pix_box, ctx->geography);
-	double min_mbrdist = mbrdist;
 	int step = 0;
-	double step_size = get_step(ctx->geography);
+
 	// initialize the seed closest pixels
 	vector<int> needprocess = target->get_closest_pixels(pix_box);
-	assert(needprocess.size()>0);
+	assert(needprocess.size() > 0);
 	unsigned short lowx = target->get_x(needprocess[0]);
 	unsigned short highx = target->get_x(needprocess[0]);
 	unsigned short lowy = target->get_y(needprocess[0]);
 	unsigned short highy = target->get_y(needprocess[0]);
-	for(auto p : needprocess){
+	for (auto p : needprocess)
+	{
 		lowx = min(lowx, (unsigned short)target->get_x(p));
 		highx = max(highx, (unsigned short)target->get_x(p));
 		lowy = min(lowy, (unsigned short)target->get_y(p));
 		highy = max(highy, (unsigned short)target->get_y(p));
 	}
 
-	while(true){
+	while (true)
+	{
 		// for later steps, expand the circle to involve more pixels
-		if(step>0){
-			needprocess = target->expand_radius(lowx,highx,lowy,highy,step);
+		if (step > 0)
+		{
+			needprocess = target->expand_radius(lowx, highx, lowy, highy, step);
 		}
 
 		// all the boxes are scanned (should never happen)
-		if(needprocess.size()==0){
+		if (needprocess.size() == 0)
+		{
 			return mindist;
 		}
 
-		for(auto cur : needprocess){
+		for (auto cur : needprocess)
+		{
 			// note that there is no need to check the edges of
 			// this pixel if it is too far from the target
 			auto cur_x = target->get_x(cur);
 			auto cur_y = target->get_y(cur);
 
-			if(target->show_status(cur) == BORDER){
-				bool toofar = (target->get_pixel_box(cur_x, cur_y).distance(pix_box,ctx->geography) >= mindist);
-				if(toofar){
+			if (target->show_status(cur) == BORDER)
+			{
+				bool toofar = (target->get_pixel_box(cur_x, cur_y).distance(pix_box, ctx->geography) >= mindist);
+				if (toofar)
+				{
 					continue;
 				}
 				// the vector model need be checked.
-				for(int i = 0; i < get_num_sequences(pix); i ++){
+				for (int i = 0; i < get_num_sequences(pix); i++)
+				{
 					auto pix_er = get_edge_sequence(get_offset(pix) + i);
-					for(int j = 0; j < target->get_num_sequences(cur); j ++){
+					for (int j = 0; j < target->get_num_sequences(cur); j++)
+					{
 						auto cur_er = target->get_edge_sequence(target->get_offset(cur) + j);
-						if(cur_er.second < 2 || pix_er.second < 2) continue;
+						if (cur_er.second < 2 || pix_er.second < 2)
+							continue;
 						double dist;
-						if(ctx->is_within_query()){
-							dist = segment_to_segment_within_batch(target->boundary->p+cur_er.first,
-												boundary->p+pix_er.first, cur_er.second, pix_er.second,
-												ctx->within_distance, ctx->geography, ctx->edge_checked.counter);
-						}else{
-							dist = segment_sequence_distance(target->boundary->p+cur_er.first,
-												boundary->p+pix_er.first, cur_er.second, pix_er.second, ctx->geography);
+						if (ctx->is_within_query())
+						{
+							dist = segment_to_segment_within_batch(target->boundary->p + cur_er.first,
+																   boundary->p + pix_er.first, cur_er.second, pix_er.second,
+																   ctx->within_distance, ctx->geography, ctx->edge_checked.counter);
+						}
+						else
+						{
+							dist = segment_sequence_distance(target->boundary->p + cur_er.first,
+															 boundary->p + pix_er.first, cur_er.second, pix_er.second, ctx->geography);
 						}
 						mindist = min(dist, mindist);
-						if(ctx->within(mindist)){
+						if (ctx->within(mindist))
+						{
 							return mindist;
 						}
 					}
@@ -828,95 +904,97 @@ double Ideal::distance(Ideal *target, int pix, query_context *ctx, bool profile)
 			}
 		}
 		needprocess.clear();
-		double min_possible = mbrdist+step*step_size;
-		// the minimum distance for now is good enough for three reasons:
-		// 1. current minimum distance is smaller than any further distance
-		// 2. for within query, current minimum is close enough
-		// 3. for within query, current minimum could never be smaller than the threshold
-		if(mindist <= min_possible
-		   || (ctx->within(mindist))
-		   || (ctx->is_within_query() && ctx->within_distance < min_possible)){
+		if (ctx->within(mindist))
+		{
 			return mindist;
 		}
 		step++;
+		double minrasterdist = target->get_possible_min(&pix_box, lowx, lowy, highx, highy, step, ctx->geography);
+		if (mindist < minrasterdist)
+			break;
 	}
 
 	return mindist;
 }
 
-double Ideal::distance(Ideal *target, query_context *ctx){
-    timeval start = get_cur_time();
-    // both polygons are rasterized and the pixel of the target is larger
-    // then swap the role of source and target, and use the target as the host
-    // one currently we put this optimization in the caller
-    if (target->get_step(false) > get_step(false)) {
-        return target->distance(this, ctx);
-    }
+double Ideal::distance(Ideal *target, query_context *ctx)
+{
+	timeval start = get_cur_time();
+	// both polygons are rasterized and the pixel of the target is larger
+	// then swap the role of source and target, and use the target as the host
+	// one currently we put this optimization in the caller
+	if (target->get_step(false) > get_step(false))
+	{
+		return target->distance(this, ctx);
+	}
 
-    double mindist = getMBB()->max_distance(*target->getMBB(), ctx->geography);
-    const double mbrdist = getMBB()->distance(*target->getMBB(), ctx->geography);
-    double min_mbrdist = mbrdist;
-    int step = 0;
-    double step_size = get_step(ctx->geography);
+	double mindist = getMBB()->max_distance(*target->getMBB(), ctx->geography);
+	const double mbrdist = getMBB()->distance(*target->getMBB(), ctx->geography);
+	int step = 0;
 
-    vector<int> needprocess = get_closest_pixels(*target->getMBB());
-    assert(needprocess.size() > 0);
-    unsigned short lowx = get_x(needprocess[0]);
-    unsigned short highx = get_x(needprocess[0]);
-    unsigned short lowy = get_y(needprocess[0]);
-    unsigned short highy = get_y(needprocess[0]);
-    for (auto p : needprocess) {
-        lowx = min(lowx, (unsigned short)get_x(p));
-        highx = max(highx, (unsigned short)get_x(p));
-        lowy = min(lowy, (unsigned short)get_y(p));
-        highy = max(highy, (unsigned short)get_y(p));
-    }
+	vector<int> needprocess = get_closest_pixels(*target->getMBB());
+	assert(needprocess.size() > 0);
+	unsigned short lowx = get_x(needprocess[0]);
+	unsigned short highx = get_x(needprocess[0]);
+	unsigned short lowy = get_y(needprocess[0]);
+	unsigned short highy = get_y(needprocess[0]);
+	for (auto p : needprocess)
+	{
+		lowx = min(lowx, (unsigned short)get_x(p));
+		highx = max(highx, (unsigned short)get_x(p));
+		lowy = min(lowy, (unsigned short)get_y(p));
+		highy = max(highy, (unsigned short)get_y(p));
+	}
 
-    while (true) {
-        struct timeval start = get_cur_time();
+	while (true)
+	{
+		struct timeval start = get_cur_time();
 
-        // first of all, expand the circle to involve more pixels
-        if (step > 0) {
-            needprocess = expand_radius(lowx, highx, lowy, highy, step);
-        }
+		// first of all, expand the circle to involve more pixels
+		if (step > 0)
+		{
+			needprocess = expand_radius(lowx, highx, lowy, highy, step);
+		}
 
-        // all the boxes are scanned (should never happen)
-        if (needprocess.size() == 0) {
-            return mindist;
-        }
+		// all the boxes are scanned (should never happen)
+		if (needprocess.size() == 0)
+		{
+			return mindist;
+		}
 
-        for (auto cur : needprocess) {
-            // printf("checking pixel %d %d
-            // %d\n",cur->id[0],cur->id[1],cur->status);
-            //  note that there is no need to check the edges of
-            //  this pixel if it is too far from the target
-            auto cur_x = get_x(cur);
-            auto cur_y = get_y(cur);
-            if (show_status(cur) == BORDER && get_pixel_box(cur_x, cur_y).distance(*target->getMBB(), ctx->geography) < mindist) {
-                // the vector model need be checked.
-                // do a polygon--pixel distance calculation
-                double dist = distance(target, cur, ctx, true);
-                mindist = min(dist, mindist);
-                if (ctx->within(mindist)) {
-                    return mindist;
-                }
-            }
-        }
-        needprocess.clear();
-        double min_possible = mbrdist + step * step_size;
-        // the minimum distance for now is good enough for three reasons:
-        // 1. current minimum distance is smaller than any further distance
-        // 2. for within query, current minimum is close enough
-        // 3. for within query, current minimum could never be smaller than the
-        // threshold
-        if (mindist <= min_possible || (ctx->within(mindist)) ||
-            (ctx->is_within_query() && ctx->within_distance < min_possible)) {
-            return mindist;
-        }
-        step++;
-    }
+		for (auto cur : needprocess)
+		{
+			// printf("checking pixel %d %d
+			// %d\n",cur->id[0],cur->id[1],cur->status);
+			//  note that there is no need to check the edges of
+			//  this pixel if it is too far from the target
+			auto cur_x = get_x(cur);
+			auto cur_y = get_y(cur);
+			if (show_status(cur) == BORDER && get_pixel_box(cur_x, cur_y).distance(*target->getMBB(), ctx->geography) < mindist)
+			{
+				// the vector model need be checked.
+				// do a polygon--pixel distance calculation
+				double dist = distance(target, cur, ctx, true);
+				mindist = min(dist, mindist);
+				if (ctx->within(mindist))
+				{
+					return mindist;
+				}
+			}
+		}
+		needprocess.clear();
+		if (ctx->within(mindist))
+		{
+			return mindist;
+		}
+		step++;
+		double minrasterdist = get_possible_min(target->getMBB(), lowx, lowy, highx, highy, step, ctx->geography);
+		if (mindist < minrasterdist)
+			break;
+	}
 
-    // iterate until the closest pair of edges are found
-    assert(false && "happens when there is no boundary pixel, check out the input");
-    return DBL_MAX;
+	// iterate until the closest pair of edges are found
+	// assert(false && "happens when there is no boundary pixel, check out the input");
+	// return DBL_MAX;
+	return mindist;
 }

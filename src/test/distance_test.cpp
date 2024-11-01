@@ -17,11 +17,11 @@ int main(int argc, char **argv)
     global_ctx.query_type = QueryType::within;
     global_ctx.geography = true;
 
-    global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str());
-    global_ctx.target_ideals = load_polygon_wkt(global_ctx.target_path.c_str());
+    global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
+    global_ctx.target_ideals = load_binary_file(global_ctx.target_path.c_str(), global_ctx);
 
-    // global_ctx.source_ideals.resize(1);
-    // global_ctx.target_ideals.resize(1);
+    // global_ctx.source_ideals.resize(10);
+    // global_ctx.target_ideals.resize(10);
 
     preprocess(&global_ctx);
 
@@ -35,7 +35,14 @@ int main(int argc, char **argv)
         Ideal *ideal = global_ctx.source_ideals[i];
         Ideal *target = global_ctx.target_ideals[i];
 
+
+        // printf("dimx = %d, dimy = %d, stepx = %lf, stepy = %lf\n", ideal->get_dimx(), ideal->get_dimy(), ideal->get_step_x(), ideal->get_step_y());
+        // ideal->MyRaster::print();
+        // printf("dimx = %d, dimy = %d, stepx = %lf, stepy = %lf\n", target->get_dimx(), target->get_dimy(), target->get_step_x(), target->get_step_y());
+        // target->MyRaster::print();
+
         // ideal->MyPolygon::print();
+        // ideal->getMBB()->print();
 
 		// for(int i = 0; i <= ideal->get_num_layers(); i ++){
 		// 	printf("level %d:\n", i);
@@ -46,6 +53,7 @@ int main(int argc, char **argv)
 		// }
 
         // target->MyPolygon::print();
+        // target->getMBB()->print();
 
         // for(int i = 0; i <= target->get_num_layers(); i ++){
 		// 	printf("level %d:\n", i);
@@ -81,32 +89,9 @@ int main(int argc, char **argv)
             found++;
             continue;
         }
-        
-        // auto st = std::chrono::high_resolution_clock::now();
-        // printf("dimx = %d, dimy = %d\n", ideal->get_dimx(), ideal->get_dimy());
-        // if (ideal->contain(target, &global_ctx))
-        // {
-        //     found++;
-        //     continue;
-        // }
-        // if (target->contain(ideal, &global_ctx))
-        // {
-        //     found++;
-        //     continue;
-        // }
-        // auto ed = std::chrono::high_resolution_clock::now();
 
-        // std::chrono::duration<double, std::milli> dur = ed - st;
-        // printf("contain time: %lfms\n", dur.count());
+        global_ctx.polygon_pairs.push_back(make_pair(ideal, target));
 
-        if (target->get_step(false) > ideal->get_step(false))
-        {
-            global_ctx.polygon_pairs.push_back(make_pair(target, ideal));
-        }
-        else
-        {
-            global_ctx.polygon_pairs.push_back(make_pair(ideal, target));
-        }
 
 
         // double reference_dist = 100000.0;
@@ -130,8 +115,8 @@ int main(int argc, char **argv)
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
 
-    printf("total time: %lfms\n", duration.count());
-    printf("TOTAL: %ld, WITHIN: %d\n", global_ctx.source_ideals.size(), found);
+    log("total time: %lfms\n", duration.count());
+    log("TOTAL: %ld, WITHIN: %d", global_ctx.source_ideals.size(), found);
     // printf("Avarge Runtime: %lfs\n", time.count() / (global_ctx.source_ideals.size() - found));
     return 0;
 }

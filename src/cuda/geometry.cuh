@@ -305,6 +305,12 @@ __device__ __forceinline__ double gpu_distance(box &s, box &t)
 	return haversine(p.x, p.y, q.x, q.y);
 }
 
+// point to point
+__device__ __forceinline__ double gpu_point_to_point_distance(const Point &p1, const Point &p2)
+{
+	return haversine(p1.x, p1.y, p2.x, p2.y);
+}
+
 __device__ __forceinline__ double gpu_point_to_segment_distance(const Point &p, const Point &p1, const Point &p2)
 {
 	double A = p.x - p1.x;

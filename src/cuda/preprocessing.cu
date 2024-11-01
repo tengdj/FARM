@@ -4,6 +4,8 @@
 
 void cuda_create_buffer(query_context *gctx)
 {
+    cudaSetDevice(1);
+
     size_t num_polygons = gctx->source_ideals.size() + gctx->target_ideals.size();
     size_t num_status = 0;
     size_t num_offset = 0;
@@ -108,6 +110,8 @@ void cuda_create_buffer(query_context *gctx)
 
 void preprocess_for_gpu(query_context *gctx)
 {
+    cudaSetDevice(1);
+
     bool flag1 = false, flag2 = false;
     // compact data
     uint iidx = 0, sidx = 0, oidx = 0, eidx = 0, vidx = 0, goidx = 0, gnidx = 0, liidx = 0, loidx = 0;
@@ -126,7 +130,7 @@ void preprocess_for_gpu(query_context *gctx)
             source->idealoffset->info_start = iidx;
             iidx++;
 
-            uint status_size = (dimx + 1) * (dimy + 1) / 4 + 1;
+            uint status_size = source->get_status_size();
             memcpy(gctx->h_status + sidx, source->get_status(), status_size);
             source->idealoffset->status_start = sidx;
             sidx += status_size;
@@ -156,6 +160,16 @@ void preprocess_for_gpu(query_context *gctx)
             memcpy(gctx->h_gridline_nodes + gnidx, source->get_vertical()->get_intersection_nodes(), gridline_nodes_size * sizeof(double));
             source->idealoffset->gridline_nodes_start = gnidx;
             gnidx += gridline_nodes_size;
+
+            uint layer_info_size = source->get_num_layers() + 1;
+            memcpy(gctx->h_layer_info + liidx, source->get_layer_info(), layer_info_size * sizeof(RasterInfo));
+            source->idealoffset->layer_info_start = liidx;
+            liidx += layer_info_size;
+
+            uint layer_offset_size = source->get_num_layers() + 1;
+            memcpy(gctx->h_layer_offset + loidx, source->get_layer_offset(), layer_offset_size * sizeof(uint16_t));
+            source->idealoffset->layer_offset_start = loidx;
+            loidx += layer_offset_size;
         }
     }
 

@@ -19,9 +19,13 @@ int main(int argc, char **argv)
 
     global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
 
+    // global_ctx.source_ideals.resize(1);
+
     preprocess(&global_ctx);
 
     global_ctx.load_points();
+
+    // global_ctx.target_num = 1;
 
     // query
     int found = 0;
@@ -33,11 +37,26 @@ int main(int argc, char **argv)
         Ideal *ideal = global_ctx.source_ideals[i];
         Point *p = global_ctx.points + i;
 
+		// for(int i = 0; i <= ideal->get_num_layers(); i ++){
+		// 	printf("level %d:\n", i);
+		// 	printf("dimx=%d, dimy=%d\n", ideal->get_layers()[i].get_dimx(), ideal->get_layers()[i].get_dimy());
+		// 	printf("step_x=%lf, step_y=%lf\n", ideal->get_layers()[i].get_step_x(), ideal->get_layers()[i].get_step_y());
+		// 	// ideal->get_layers()[i].mbr->print();
+		// 	ideal->get_layers()[i].print();
+		// }
+
         if(ideal->getMBB()->distance(*p, true) > global_ctx.within_distance){
-            found ++;
             continue;
         }
 
+        if(ideal->contain(*p, &global_ctx)){
+            found ++;
+            continue;
+        }
+        printf("begin\n");
+        ideal->MyPolygon::print();
+        p->print();
+        printf("end\n");
         global_ctx.point_polygon_pairs.push_back(make_pair(p, ideal));
     }
 

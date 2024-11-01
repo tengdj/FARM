@@ -34,6 +34,18 @@ bool MySearchCallback(Ideal *ideal, void* arg){
 		ctx->found++;
         return true;
 	}
+
+	if (ideal->getMBB()->contain(*target->getMBB()) && ideal->contain(target->get_boundary()->p[0], ctx))
+	{
+		ctx->found++;
+        return true;
+	}
+	if (target->getMBB()->contain(*ideal->getMBB()) && target->contain(ideal->get_boundary()->p[0], ctx))
+	{
+		ctx->found++;
+        return true;
+	}
+        
 	if (!ctx->use_gpu)
 	{
 		ctx->distance = ideal->distance(target,ctx);
@@ -41,11 +53,7 @@ bool MySearchCallback(Ideal *ideal, void* arg){
 	}
 #ifdef USE_GPU
 	else{
-		if(target->get_step(false) > ideal->get_step(false)){
-			ctx->polygon_pairs.push_back(make_pair(target, ideal));
-		}else{
-			ctx->polygon_pairs.push_back(make_pair(ideal, target));
-		}
+		ctx->polygon_pairs.push_back(make_pair(ideal, target));
 	}
 #endif
 
@@ -70,6 +78,7 @@ bool PolygonSearchCallback(MyPolygon *poly, void* arg){
 		ctx->found++;
         return true;
 	}
+
 	ctx->distance = poly->distance(target,ctx);
 	ctx->found += ctx->distance <= ctx->within_distance;
 
@@ -112,6 +121,7 @@ int main(int argc, char** argv) {
 
 	if(global_ctx.use_ideal){
     	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
+		global_ctx.source_ideals.resize(50000);
 		timeval start = get_cur_time();
 		for(Ideal *p : global_ctx.source_ideals){
 			ideal_rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
@@ -131,6 +141,8 @@ int main(int argc, char** argv) {
 	}
 
 	preprocess(&global_ctx);
+
+	// timeval start = get_cur_time();
 
     pthread_t threads[global_ctx.num_threads];
 	query_context ctx[global_ctx.num_threads];
@@ -156,7 +168,7 @@ int main(int argc, char** argv) {
 	cout << endl;
 	global_ctx.print_stats();
 	logt("total query",start);
-
+	printf("Found: %d\n", global_ctx.found);
 	return 0;
 }
 

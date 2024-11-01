@@ -109,6 +109,7 @@ public:
 	pair<uint32_t, uint32_t> *get_edge_sequence(){return edge_sequences;}
 	uint get_len_edge_sequences() {return len_edge_sequences;}
 	uint16_t get_num_sequences(int id);
+	double get_possible_min(box *t_mbr, int core_x_low, int core_y_low, int core_x_high, int code_y_high, int step, bool geography = true);
 	double get_possible_min(Point &p, int center, int step, bool geography = true);
 	void process_crosses(map<int, vector<cross_info>> edge_info);
 	void process_intersection(map<int, vector<double>> edge_intersection, Direction direction);
