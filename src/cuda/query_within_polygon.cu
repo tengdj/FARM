@@ -275,16 +275,18 @@ void SortGroups(BoxDistRange *pixpairs, uint size, uint *pixelpairsize, int *pix
     }
 }
 
-__global__ void kernel_unroll(int *pixelpairidx, uint *pixelpairsize, BoxDistRange *pixpairs, PolygonPair *pairs, uint16_t *offset, EdgeSeq *edge_sequences, Point *vertices, uint size, int *loop, Batch *batches, uint *batch_size, bool *resultmap, double *distance)
+__global__ void kernel_merge(int *pixelpairidx, uint *pixelpairsize, BoxDistRange *pixpairs, uint pairsize, int *mergeSize, bool *resultmap)
 {
     const int pairId = blockIdx.x * blockDim.x + threadIdx.x;
-    if (pairId < size)
+    if (pairId < pairsize)
     {
         int start = pixelpairidx[pairId];
         int size = pixelpairsize[pairId];
         int length = size;
 
-        if(resultmap[pairId] || size == 0) return;
+        // printf("start = %d, size = %d, length = %d\n", start, size, length);
+
+        if(resultmap[pairId] || size <= 0) return;
 
         double left = 0x3f3f3f3f, right = 0x3f3f3f3f;
         for(int i = start; i < start + size; i ++){
@@ -293,66 +295,73 @@ __global__ void kernel_unroll(int *pixelpairidx, uint *pixelpairsize, BoxDistRan
             right = min(maxd, right);
             double ratio = (right - mind) / (right - left);
             // printf("ratio = %d\n", ratio);
-            if(ratio < 0.8){
+            if(ratio < 0.7){
                 // printf("mind = %lf, maxd = %lfd, left = %lf, right = %lf\n", mind, maxd, left, right);
                 length = i - start + 1;
                 break;
             }
         }
-          printf("length = %d\n", length);
 
-        for(int i = 0; i < length; i ++){
+        // printf("%d in kernel %d\n", length, pairId);
 
-            int bufferId = start + i;
-            int p = pixpairs[bufferId].sourcePixelId;
-            int p2 = pixpairs[bufferId].targetPixelId;
-            // printf("%d %d %d %lf %lf\n", pairId, p, p2, pixpairs[bufferId].minDist, pixpairs[bufferId].maxDist);
-            if(*loop && pixpairs[bufferId].minDist > distance[pairId]){
-                resultmap[pairId] = true;
-                return;
-            }
-            
-            IdealOffset &source = pairs[pairId].source;
-            IdealOffset &target = pairs[pairId].target;
+        mergeSize[pairId] = length;   
+        
+    }
+}
 
-            int s_num_sequence = (offset + source.offset_start)[p + 1] - (offset + source.offset_start)[p];
-            int t_num_sequence = (offset + target.offset_start)[p2 + 1] - (offset + target.offset_start)[p2];
+__global__ void kernel_unroll(int *pixelpairidx, uint *pixelpairsize, int *mergeSize, BoxDistRange *pixpairs, PolygonPair *pairs, uint16_t *offset, EdgeSeq *edge_sequences, Point *vertices, int pairId, int *loop, Batch *batches, uint *batch_size, bool *resultmap, double *distance)
+{
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < mergeSize[pairId])
+    {
+        if(resultmap[pairId] || pixelpairsize[pairId] <= 0) return;
+        int bufferId = pixelpairidx[pairId] + idx;
+        int p = pixpairs[bufferId].sourcePixelId;
+        int p2 = pixpairs[bufferId].targetPixelId;
+        // printf("%d %d %d %lf %lf\n", pairId, p, p2, pixpairs[bufferId].minDist, pixpairs[bufferId].maxDist);
+        if(*loop && pixpairs[bufferId].minDist > distance[pairId]){
+            resultmap[pairId] = true;
+            return;
+        }
+        
+        IdealOffset &source = pairs[pairId].source;
+        IdealOffset &target = pairs[pairId].target;
 
-            for (int i = 0; i < s_num_sequence; ++i)
+        int s_num_sequence = (offset + source.offset_start)[p + 1] - (offset + source.offset_start)[p];
+        int t_num_sequence = (offset + target.offset_start)[p2 + 1] - (offset + target.offset_start)[p2];
+
+        for (int i = 0; i < s_num_sequence; ++i)
+        {
+            EdgeSeq r = (edge_sequences + source.edge_sequences_start)[(offset + source.offset_start)[p] + i];
+            for (int j = 0; j < t_num_sequence; ++j)
             {
-                EdgeSeq r = (edge_sequences + source.edge_sequences_start)[(offset + source.offset_start)[p] + i];
-                for (int j = 0; j < t_num_sequence; ++j)
+                EdgeSeq r2 = (edge_sequences + target.edge_sequences_start)[(offset + target.offset_start)[p2] + j];
+                // if (r.length < 2 || r2.length < 2) continue;
+                // if(gpu_point_to_point_distance(vertices[source.vertices_start + r.start], vertices[target.vertices_start + r2.start]) <= WITHIN_DISTANCE ||
+                //    gpu_point_to_point_distance(vertices[source.vertices_start + r.start], vertices[target.vertices_start + r2.start + r2.length - 1]) <= WITHIN_DISTANCE ||
+                //    gpu_point_to_point_distance(vertices[source.vertices_start + r.start + r.length - 1], vertices[target.vertices_start + r2.start]) <= WITHIN_DISTANCE ||
+                //    gpu_point_to_point_distance(vertices[source.vertices_start + r.start + r.length - 1], vertices[target.vertices_start + r2.start + r2.length - 1]) <= WITHIN_DISTANCE)
+                // {
+                //     resultmap[pairId] = true;
+                //     return;
+                // }    
+                int max_size = 1;
+                for (uint s = 0; s < r.length; s += max_size)
                 {
-                    EdgeSeq r2 = (edge_sequences + target.edge_sequences_start)[(offset + target.offset_start)[p2] + j];
-                    // if (r.length < 2 || r2.length < 2) continue;
-                    // if(gpu_point_to_point_distance(vertices[source.vertices_start + r.start], vertices[target.vertices_start + r2.start]) <= WITHIN_DISTANCE ||
-                    //    gpu_point_to_point_distance(vertices[source.vertices_start + r.start], vertices[target.vertices_start + r2.start + r2.length - 1]) <= WITHIN_DISTANCE ||
-                    //    gpu_point_to_point_distance(vertices[source.vertices_start + r.start + r.length - 1], vertices[target.vertices_start + r2.start]) <= WITHIN_DISTANCE ||
-                    //    gpu_point_to_point_distance(vertices[source.vertices_start + r.start + r.length - 1], vertices[target.vertices_start + r2.start + r2.length - 1]) <= WITHIN_DISTANCE)
-                    // {
-                    //     resultmap[pairId] = true;
-                    //     return;
-                    // }    
-                    int max_size = 1;
-                    for (uint s = 0; s < r.length; s += max_size)
+                    uint end_s = min(s + max_size, r.length);
+                    for (uint t = 0; t < r2.length; t += max_size)
                     {
-                        uint end_s = min(s + max_size, r.length);
-                        for (uint t = 0; t < r2.length; t += max_size)
-                        {
-                            uint end_t = min(t + max_size, r2.length);
-                            uint idx = atomicAdd(batch_size, 1U);
-                            batches[idx].s_start = source.vertices_start + r.start + s;
-                            batches[idx].t_start = target.vertices_start + r2.start + t;
-                            batches[idx].s_length = end_s - s;
-                            batches[idx].t_length = end_t - t;
-                            batches[idx].pair_id = pairId;
-                        }
+                        uint end_t = min(t + max_size, r2.length);
+                        uint idx = atomicAdd(batch_size, 1U);
+                        batches[idx].s_start = source.vertices_start + r.start + s;
+                        batches[idx].t_start = target.vertices_start + r2.start + t;
+                        batches[idx].s_length = end_s - s;
+                        batches[idx].t_length = end_t - t;
+                        batches[idx].pair_id = pairId;
                     }
                 }
             }
         }
-        pixelpairidx[pairId] += length;
-        pixelpairsize[pairId] -= length;
     }
 }
 
@@ -368,7 +377,8 @@ __global__ void kernel_refine(Batch *batches, Point *vertices, uint *size, doubl
         int pair_id = batches[bufferId].pair_id;
         if(resultmap[pair_id]) return;
 
-        double dist = gpu_segment_to_segment_within_batch(vertices + s1, vertices + s2, len1, len2);
+        // double dist = gpu_segment_to_segment_within_batch(vertices + s1, vertices + s2, len1, len2);
+        double dist = gpu_point_to_point_distance(vertices + s1, vertices + s2);
         // if(dist <= WITHIN_DISTANCE) resultmap[pair_id] = true;
         atomicMinDouble(max_box_dist + pair_id, dist);
         atomicMinDouble(distance + pair_id, dist);
@@ -429,6 +439,12 @@ uint cuda_within_polygon(query_context *gctx)
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_pixelpairidx, size * sizeof(int)));
     CUDA_SAFE_CALL(cudaMemset(d_pixelpairidx, 0, size * sizeof(int)));
     memset(h_pixelpairidx, 0, size * sizeof(int));
+
+    int *h_mergesize = new int[size];
+    int *d_mergesize = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_mergesize, size * sizeof(int)));
+    CUDA_SAFE_CALL(cudaMemset(d_mergesize, 0, size * sizeof(int)));
+    memset(h_mergesize, 0, size * sizeof(int));
 
     char *d_BufferInput = nullptr;
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_BufferInput, 10UL * 1024 * 1024 * 1024));
@@ -629,12 +645,46 @@ uint cuda_within_polygon(query_context *gctx)
 
         timer.startTimer();
 
-        kernel_unroll<<<grid_size, block_size>>>(d_pixelpairidx, d_pixelpairsize, (BoxDistRange *)d_BufferInput, d_pairs, gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices, size, d_loop, (Batch *)d_BufferOutput, d_bufferoutput_size, d_resultmap, d_distance);
+        kernel_merge<<<grid_size, block_size>>>(d_pixelpairidx, d_pixelpairsize, (BoxDistRange *)d_BufferInput, size, d_mergesize, d_resultmap);
         cudaDeviceSynchronize();
-        check_execution("kernel_unroll");
+        check_execution("kernel_merge");
 
         timer.stopTimer();
+        printf("kernel merge: %f ms\n", timer.getElapsedTime()); 
+
+        /*  To Delete  */
+        CUDA_SAFE_CALL(cudaMemcpy(h_pixelpairidx, d_pixelpairidx, size * sizeof(int), cudaMemcpyDeviceToHost));
+        CUDA_SAFE_CALL(cudaMemcpy(h_pixelpairsize, d_pixelpairsize, size * sizeof(int), cudaMemcpyDeviceToHost));
+        CUDA_SAFE_CALL(cudaMemcpy(h_mergesize, d_mergesize, size * sizeof(int), cudaMemcpyDeviceToHost));
+        CUDA_SAFE_CALL(cudaMemcpy(h_resultmap, d_resultmap, size * sizeof(bool), cudaMemcpyDeviceToHost));
+
+        for(int i = 0; i < size;i ++) {
+            if(!h_resultmap[i]){
+                printf("%d %d %d\n", h_pixelpairidx[i], h_pixelpairsize[i], h_mergesize[i]);
+            }
+        }
+
+        /*  To Delete  */
+        timer.startTimer();
+        for(int i = 0; i < size; i ++){ 
+            grid_size_x = (h_mergesize[i] + BLOCK_SIZE - 1) / BLOCK_SIZE;
+            block_size.x = BLOCK_SIZE;
+            grid_size.x = grid_size_x;
+            kernel_unroll<<<grid_size, block_size>>>(d_pixelpairidx, d_pixelpairsize, d_mergesize, (BoxDistRange *)d_BufferInput, d_pairs, gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices, i, d_loop, (Batch *)d_BufferOutput, d_bufferoutput_size, d_resultmap, d_distance);
+            if(h_pixelpairsize[i] > 0){
+                h_pixelpairidx[i] += h_mergesize[i];
+                h_pixelpairsize[i] -= h_mergesize[i];
+            }
+        }
+        check_execution("kernel_unroll");
+        cudaDeviceSynchronize();
+        timer.stopTimer();
         printf("kernel unroll: %f ms\n", timer.getElapsedTime());
+
+        CUDA_SAFE_CALL(cudaMemcpy(d_pixelpairidx, h_pixelpairidx, size * sizeof(int), cudaMemcpyHostToDevice));
+        CUDA_SAFE_CALL(cudaMemcpy(d_pixelpairsize, h_pixelpairsize, size * sizeof(int), cudaMemcpyHostToDevice));
+        CUDA_SAFE_CALL(cudaMemcpy(d_mergesize, h_mergesize, size * sizeof(int), cudaMemcpyHostToDevice));
+        
 
         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
         if(h_bufferoutput_size == 0) break;
@@ -668,9 +718,17 @@ uint cuda_within_polygon(query_context *gctx)
 
         CUDA_SAFE_CALL(cudaMemcpy(d_bufferinput_size, d_sortedpairs_size, sizeof(uint), cudaMemcpyDeviceToDevice));
         CUDA_SAFE_CALL(cudaMemcpy(d_BufferInput, d_sortedpairs, h_sortpairs_size * sizeof(BoxDistRange), cudaMemcpyDeviceToDevice));
+
+        // CUDA_SAFE_CALL(cudaMemcpy(h_distance, d_distance, size * sizeof(double), cudaMemcpyDeviceToHost));
+        // for (int i = 0; i < size; i++)
+        // {
+        //     printf("%lf ", h_distance[i]);
+        // }
+        // printf("\n");
+
     }
     duration.stopTimer();
-    printf("kernel total time = %lf ms", duration.getElapsedTime());
+    printf("kernel total time = %lf ms\n", duration.getElapsedTime());
 
     CUDA_SAFE_CALL(cudaMemcpy(h_distance, d_distance, size * sizeof(double), cudaMemcpyDeviceToHost));
     CUDA_SAFE_CALL(cudaMemcpy(h_resultmap, d_resultmap, size * sizeof(bool), cudaMemcpyDeviceToHost));
