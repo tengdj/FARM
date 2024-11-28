@@ -9,11 +9,15 @@ int main(int argc, char** argv){
 
     global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
 
-	preprocess(&global_ctx);
-	cout << "rasterization finished!" << endl;
+	for(auto item : global_ctx.source_ideals){
+		cout << item->get_num_vertices() << endl;;
+	}
 
-	// read all the points
-	global_ctx.load_points();
+	// preprocess(&global_ctx);
+	// cout << "rasterization finished!" << endl;
+
+	// // read all the points
+	// global_ctx.load_points();
 
 
 	return 0;

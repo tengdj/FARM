@@ -21,7 +21,7 @@ struct PixPair
 	int pair_id = 0;
 };
 
-struct PolygonPair
+struct Batch
 {
 	IdealOffset source;
 	IdealOffset target;

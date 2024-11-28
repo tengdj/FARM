@@ -31,18 +31,18 @@ bool MySearchCallback(Ideal *ideal, void* arg){
 	}
 	// the maximum possible distance is smaller than the threshold
 	if(ideal->getMBB()->max_distance(*target->getMBB(), ctx->geography)<=ctx->within_distance){
-		ctx->found++;
+		// ctx->found++;
         return true;
 	}
 
 	if (ideal->getMBB()->contain(*target->getMBB()) && ideal->contain(target->get_boundary()->p[0], ctx))
 	{
-		ctx->found++;
+		// ctx->found++;
         return true;
 	}
 	if (target->getMBB()->contain(*ideal->getMBB()) && target->contain(ideal->get_boundary()->p[0], ctx))
 	{
-		ctx->found++;
+		// ctx->found++;
         return true;
 	}
         
@@ -121,7 +121,6 @@ int main(int argc, char** argv) {
 
 	if(global_ctx.use_ideal){
     	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
-		global_ctx.source_ideals.resize(50000);
 		timeval start = get_cur_time();
 		for(Ideal *p : global_ctx.source_ideals){
 			ideal_rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);

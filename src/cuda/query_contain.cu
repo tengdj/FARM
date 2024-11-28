@@ -107,6 +107,13 @@
 // 	}
 // }
 
+// __global__ void kernel_contain_baseline(pair<Point, IdealOffset> *d_pairs, RasterInfo *d_info, Point *d_vertices, uint size, uint8_t *resultmap){
+// 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+// 	if (x < size){
+        
+//     }
+// }
+
 // uint cuda_contain(query_context *gctx)
 // {
 
@@ -161,6 +168,76 @@
 
 // 	uint h_pp_size;
 // 	CUDA_SAFE_CALL(cudaMemcpy(&h_pp_size, d_pp_size, sizeof(uint), cudaMemcpyDeviceToHost));
+
+// 	/*Refinement Step*/
+
+// 	grid_size_x = (h_pp_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+// 	grid_size.x = grid_size_x;
+
+// 	timer.startTimer();
+
+// 	kernel_refinement_contain<<<grid_size, block_size>>>(d_pairs, d_ptpixpairs, gctx->d_info, gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices, gctx->d_gridline_offset, gctx->d_gridline_nodes, d_pp_size, d_resultmap);
+// 	cudaDeviceSynchronize();
+// 	check_execution();
+
+// 	timer.stopTimer();
+// 	printf("kernel_refinement time: %f ms\n", timer.getElapsedTime());
+
+// 	uint8_t *h_resultmap = new uint8_t[size];
+// 	CUDA_SAFE_CALL(cudaMemcpy(h_resultmap, d_resultmap, size * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+
+// 	int found = 0;
+// 	for (int i = 0; i < size; ++i)
+// 	{
+// 		if (h_resultmap[i] == 1)
+// 			found++;
+// 	}
+
+// 	return found;
+// }
+
+// uint cuda_contain_baseline(query_context *gctx){
+//     CudaTimer timer;
+
+// 	uint size = gctx->point_polygon_pairs.size();
+
+// 	printf("size = %d\n", size);
+
+// 	pair<Point, IdealOffset> *h_pairs = nullptr;
+// 	pair<Point, IdealOffset> *d_pairs = nullptr;
+
+// 	h_pairs = new pair<Point, IdealOffset>[size];
+
+// 	for (int i = 0; i < size; ++i)
+// 	{
+// 		Point *target = gctx->point_polygon_pairs[i].first;
+// 		Ideal *source = gctx->point_polygon_pairs[i].second;
+// 		h_pairs[i] = {*target, *source->idealoffset};
+// 	}
+
+// 	CUDA_SAFE_CALL(cudaMalloc((void **)&d_pairs, size * sizeof(pair<Point, IdealOffset>)));
+// 	CUDA_SAFE_CALL(cudaMemcpy(d_pairs, h_pairs, size * sizeof(pair<Point, IdealOffset>), cudaMemcpyHostToDevice));
+
+// 	// resultmap status: 0(undecided), 1(contain), 2(not contain)
+// 	uint8_t *d_resultmap = nullptr;
+// 	CUDA_SAFE_CALL(cudaMalloc((void **)&d_resultmap, size * sizeof(uint8_t)));
+// 	CUDA_SAFE_CALL(cudaMemset(d_resultmap, 0, size * sizeof(uint8_t)));
+
+// 	/*1. Raster Model Filtering*/
+
+// 	int grid_size_x = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+// 	dim3 block_size(BLOCK_SIZE, 1, 1);
+// 	dim3 grid_size(grid_size_x, 1, 1);
+
+// 	timer.startTimer();
+
+// 	kernel_contain_baseline<<<grid_size, block_size>>>(d_pairs, gctx->d_info, gctx->d_vertices, size, d_resultmap);
+// 	cudaDeviceSynchronize();
+// 	check_execution();
+
+// 	timer.stopTimer();
+// 	printf("kernel_filter time: %f ms\n", timer.getElapsedTime());
+
 
 // 	/*Refinement Step*/
 
