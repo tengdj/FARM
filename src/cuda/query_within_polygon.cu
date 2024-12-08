@@ -5,6 +5,8 @@
 
 #define WITHIN_DISTANCE 10
 
+unordered_map<int, int> ht;
+
 struct Task
 {
     uint s_start = 0;
@@ -257,55 +259,42 @@ __global__ void kernel_sort(BoxDistRange *pixpairs, uint size, uint *pixelpairsi
 }
 
 struct CompareByMinDist {
-    __host__ __device__
+    __device__
     bool operator()(const BoxDistRange& a, const BoxDistRange& b) {
         return a.minDist < b.minDist;  // 按照 minDist 升序排序
     }
 };
 
-void SortGroups(BoxDistRange *pixpairs, uint size, uint *pixelpairsize, int *pixelpairidx){
-    for (int i = 0; i < size; i++) {
+void SortGroups(BoxDistRange *pixpairs, uint size, uint *pixelpairsize, int *pixelpairidx) {
+    // 创建 CUDA 流
+    cudaStream_t *streams = new cudaStream_t[size];
+    for (uint i = 0; i < size; i++) {
+        cudaError_t err = cudaStreamCreate(&streams[i]);
+        if (err != cudaSuccess) {
+            std::cerr << "Error creating stream: " << cudaGetErrorString(err) << std::endl;
+            // 处理错误
+        }
+    }
+
+    for (uint i = 0; i < size; i++) {
         int startIdx = pixelpairidx[i];
         int endIdx = startIdx + pixelpairsize[i];
 
         thrust::device_ptr<BoxDistRange> begin = thrust::device_pointer_cast(pixpairs + startIdx);
         thrust::device_ptr<BoxDistRange> end = thrust::device_pointer_cast(pixpairs + endIdx);
 
-        thrust::sort(begin, end, CompareByMinDist());      
-
+        // 在特定的流中执行排序
+        thrust::sort(thrust::cuda::par.on(streams[i]), begin, end, CompareByMinDist());
     }
+
+    // 等待所有流完成
+    for (uint i = 0; i < size; i++) {
+        cudaStreamSynchronize(streams[i]);
+        cudaStreamDestroy(streams[i]);
+    }
+
+    delete[] streams;
 }
-
-// void SortGroups(BoxDistRange *pixpairs, uint size, uint *pixelpairsize, int *pixelpairidx) {
-//     // 创建 CUDA 流
-//     cudaStream_t *streams = new cudaStream_t[size];
-//     for (uint i = 0; i < size; i++) {
-//         cudaError_t err = cudaStreamCreate(&streams[i]);
-//         if (err != cudaSuccess) {
-//             std::cerr << "Error creating stream: " << cudaGetErrorString(err) << std::endl;
-//             // 处理错误
-//         }
-//     }
-
-//     for (uint i = 0; i < size; i++) {
-//         int startIdx = pixelpairidx[i];
-//         int endIdx = startIdx + pixelpairsize[i];
-
-//         thrust::device_ptr<BoxDistRange> begin = thrust::device_pointer_cast(pixpairs + startIdx);
-//         thrust::device_ptr<BoxDistRange> end = thrust::device_pointer_cast(pixpairs + endIdx);
-
-//         // 在特定的流中执行排序
-//         thrust::sort(thrust::cuda::par.on(streams[i]), begin, end, CompareByMinDist());
-//     }
-
-//     // 等待所有流完成
-//     for (uint i = 0; i < size; i++) {
-//         cudaStreamSynchronize(streams[i]);
-//         cudaStreamDestroy(streams[i]);
-//     }
-
-//     delete[] streams;
-// }
 
 __global__ void kernel_merge(int *pixelpairidx, uint *pixelpairsize, BoxDistRange *pixpairs, uint pairsize, int *mergeSize, bool *resultmap)
 {
@@ -362,7 +351,7 @@ __global__ void kernel_unroll(int *pixelpairidx, uint *pixelpairsize, int *merge
         int s_num_sequence = (offset + source.offset_start)[p + 1] - (offset + source.offset_start)[p];
         int t_num_sequence = (offset + target.offset_start)[p2 + 1] - (offset + target.offset_start)[p2];
 
-        for (int i = 0; i < s_num_sequence; ++i)
+        for (int i = 0; i < s_num_sequence; ++ i)
         {
             EdgeSeq r = (edge_sequences + source.edge_sequences_start)[(offset + source.offset_start)[p] + i];
             for (int j = 0; j < t_num_sequence; ++j)
@@ -377,7 +366,7 @@ __global__ void kernel_unroll(int *pixelpairidx, uint *pixelpairsize, int *merge
                 //     resultmap[pairId] = true;
                 //     return;
                 // }    
-                int max_size = 16;
+                int max_size = 2;
                 for (uint s = 0; s < r.length; s += max_size)
                 {
                     uint end_s = min(s + max_size, r.length);
@@ -397,7 +386,7 @@ __global__ void kernel_unroll(int *pixelpairidx, uint *pixelpairsize, int *merge
     }
 }
 
-__global__ void kernel_refine(Task *batches, Point *vertices, uint *size, double *distance, bool *resultmap, double *max_box_dist)
+__global__ void kernel_refine(Task *batches, Point *vertices, uint *size, double *distance, bool *resultmap, double *max_box_dist, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
 {
     const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
     if (bufferId < *size)
@@ -409,22 +398,24 @@ __global__ void kernel_refine(Task *batches, Point *vertices, uint *size, double
         int pair_id = batches[bufferId].pair_id;
         if(resultmap[pair_id]) return;
 
-        double dist = gpu_segment_to_segment_within_batch(vertices + s1, vertices + s2, len1, len2);
+        double dist = gpu_segment_to_segment_within_batch(vertices + s1, vertices + s2, len1, len2, degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
+
         // double dist = gpu_point_to_point_distance(vertices + s1, vertices + s2);
         // if(dist <= WITHIN_DISTANCE) resultmap[pair_id] = true;
         atomicMinDouble(max_box_dist + pair_id, dist);
-        // atomicMinDouble(distance + pair_id, dist);
+        atomicMinDouble(distance + pair_id, dist);
     }
 }
 
 uint cuda_within_polygon(query_context *gctx)
 {
+    cudaSetDevice(1);
     CudaTimer timer, duration, total;
 
     duration.startTimer();
 
     uint polygon_pairs_size = gctx->polygon_pairs.size();
-    uint batch_size = 100000;
+    uint batch_size = 10000;
     int found = 0;
 
     log("The number of polygon pairs = %u", polygon_pairs_size);
@@ -491,14 +482,15 @@ uint cuda_within_polygon(query_context *gctx)
         {
             Ideal *source = gctx->polygon_pairs[j].first;
             Ideal *target = gctx->polygon_pairs[j].second;
-            // printf("id = %d %d %d %d %d\n", i, source->get_dimx(), source->get_dimy(), target->get_dimx(), target->get_dimy());
-            // source->MyPolygon::print();
-            // source->MyRaster::print();
-            // target->MyPolygon::print();
-            // target->MyRaster::print();
+            // if(idx == 5){
+            //     source->MyPolygon::print();
+            //     source->MyRaster::print();
+            //     target->MyPolygon::print();
+            //     target->MyRaster::print();
+            // }
             h_pairs[idx] = {*source->idealoffset, *target->idealoffset, source->get_num_layers(), target->get_num_layers()};
         }
-
+        
         uint h_level = 0;
         CUDA_SAFE_CALL(cudaMemset(d_level, 0, sizeof(uint)));
 
@@ -535,7 +527,6 @@ uint cuda_within_polygon(query_context *gctx)
         h_level = 0;
         CUDA_SAFE_CALL(cudaMemset(d_level, 0, sizeof(uint)));
 
-        //TODO: 限制寄存器数量
         grid_size_x = (size + 512 - 1) / 512;
         block_size.x = 512;
         grid_size.x = grid_size_x;
@@ -547,12 +538,10 @@ uint cuda_within_polygon(query_context *gctx)
         timer.stopTimer();
         printf("kernel first calculate box distance: %f ms\n", timer.getElapsedTime());
 
-// #ifdef DEBUG
         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
         printf("h_bufferinput_size = %u\n", h_bufferinput_size);
         printf("h_bufferoutput_size = %u\n", h_bufferoutput_size);
-// #endif
 
         while(true){
             h_level ++;
@@ -577,12 +566,10 @@ uint cuda_within_polygon(query_context *gctx)
             timer.stopTimer();
             printf("kernel calculate box distance: %f ms\n", timer.getElapsedTime());
 
-// #ifdef DEBUG
             CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
             CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
             printf("calculate box distance h_bufferinput_size = %u\n", h_bufferinput_size);
             printf("calculate box distance h_bufferoutput_size = %u\n", h_bufferoutput_size);
-// #endif
 
             if(h_bufferinput_size == h_bufferoutput_size) break;
 
@@ -602,18 +589,34 @@ uint cuda_within_polygon(query_context *gctx)
             timer.stopTimer();
             printf("kernel filter: %f ms\n", timer.getElapsedTime());
 
-// #ifdef DEBUG
             CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
             CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
             printf("filter h_bufferinput_size = %u\n", h_bufferinput_size);
             printf("filter h_bufferoutput_size = %u\n", h_bufferoutput_size);
-// #endif
         }
 
         swap(d_BufferInput, d_BufferOutput);
         swap(d_bufferinput_size, d_bufferoutput_size);
         swap(h_bufferinput_size, h_bufferoutput_size);
         CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
+
+        /* TO DELETE */
+        // 输出第一对polygons的具体信息
+        // BoxDistRange *h_BufferInput = new BoxDistRange[h_bufferinput_size];
+        // CUDA_SAFE_CALL(cudaMemcpy(h_BufferInput, d_BufferInput, h_bufferinput_size * sizeof(BoxDistRange), cudaMemcpyDeviceToHost));
+        // gctx->polygon_pairs[239].first->MyPolygon::print();
+        // gctx->polygon_pairs[239].first->MyRaster::print();
+        // gctx->polygon_pairs[239].second->MyPolygon::print();
+        // gctx->polygon_pairs[239].second->MyRaster::print();
+
+        // for(int i = 0; i < h_bufferinput_size; i ++){
+        //     if(h_BufferInput[i].pairId == 1){
+        //         printf("%d\t%d\t%d\t%d\t%lf\t%lf\n", gctx->polygon_pairs[239].first->get_x(h_BufferInput[i].sourcePixelId), gctx->polygon_pairs[239].first->get_y(h_BufferInput[i].sourcePixelId), 
+        //         gctx->polygon_pairs[239].second->get_x(h_BufferInput[i].targetPixelId), gctx->polygon_pairs[239].second->get_y(h_BufferInput[i].targetPixelId), h_BufferInput[i].minDist, h_BufferInput[i].maxDist);
+        //     }
+        // }
+        // return 0;
+        /* TO DELETE */
 
         grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
         block_size.x = BLOCK_SIZE;
@@ -679,34 +682,50 @@ uint cuda_within_polygon(query_context *gctx)
             timer.stopTimer();
             printf("kernel merge: %f ms\n", timer.getElapsedTime()); 
 
-            // /*  To Delete  */
             CUDA_SAFE_CALL(cudaMemcpy(h_pixelpairidx, d_pixelpairidx, size * sizeof(int), cudaMemcpyDeviceToHost));
             CUDA_SAFE_CALL(cudaMemcpy(h_pixelpairsize, d_pixelpairsize, size * sizeof(int), cudaMemcpyDeviceToHost));
             CUDA_SAFE_CALL(cudaMemcpy(h_mergesize, d_mergesize, size * sizeof(int), cudaMemcpyDeviceToHost));
             CUDA_SAFE_CALL(cudaMemcpy(h_resultmap, d_resultmap, size * sizeof(bool), cudaMemcpyDeviceToHost));
-
+            // /*  To Delete  */
+            // printf("come on%d\n", size);
             // for(int i = 0; i < size;i ++) {
             //     if(!h_resultmap[i]){
-            //         printf("%d %d %d\n", h_pixelpairidx[i], h_pixelpairsize[i], h_mergesize[i]);
+            //         printf("%d\n", i);
             //     }
             // }
             // /*  To Delete  */
 
             timer.startTimer();
+            cudaStream_t *streams = new cudaStream_t[size];
+            for (int i = 0; i < size; i++) {
+                cudaStreamCreate(&streams[i]);
+            }
+
             for(int i = 0; i < size; i ++){ 
                 grid_size_x = (h_mergesize[i] + BLOCK_SIZE - 1) / BLOCK_SIZE;
                 block_size.x = BLOCK_SIZE;
                 grid_size.x = grid_size_x;
-                kernel_unroll<<<grid_size, block_size>>>(d_pixelpairidx, d_pixelpairsize, d_mergesize, (BoxDistRange *)d_BufferInput, d_pairs, gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices, i, d_loop, (Task *)d_BufferOutput, d_bufferoutput_size, d_resultmap, d_distance);
+                kernel_unroll<<<grid_size, block_size, 0, streams[i]>>>(d_pixelpairidx, d_pixelpairsize, d_mergesize, (BoxDistRange *)d_BufferInput, d_pairs, gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices, i, d_loop, (Task *)d_BufferOutput, d_bufferoutput_size, d_resultmap, d_distance);
                 if(h_pixelpairsize[i] > 0){
                     h_pixelpairidx[i] += h_mergesize[i];
                     h_pixelpairsize[i] -= h_mergesize[i];
                 }
+
             }
             check_execution("kernel_unroll");
             cudaDeviceSynchronize();
             timer.stopTimer();
             printf("kernel unroll: %f ms\n", timer.getElapsedTime());
+
+            for (int i = 0; i < size; i++) {
+                cudaStreamSynchronize(streams[i]);
+            }
+
+            for (int i = 0; i < size; i++) {
+            cudaStreamDestroy(streams[i]);
+            }
+
+            delete[] streams;
 
             CUDA_SAFE_CALL(cudaMemcpy(d_pixelpairidx, h_pixelpairidx, size * sizeof(int), cudaMemcpyHostToDevice));
             CUDA_SAFE_CALL(cudaMemcpy(d_pixelpairsize, h_pixelpairsize, size * sizeof(int), cudaMemcpyHostToDevice));
@@ -729,12 +748,12 @@ uint cuda_within_polygon(query_context *gctx)
             swap(h_bufferinput_size, h_bufferoutput_size);
             CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
 
-            grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-            block_size.x = BLOCK_SIZE;
+            grid_size_x = (h_bufferinput_size + 512 - 1) / 512;
+            block_size.x = 512;
             grid_size.x = grid_size_x;
 
             timer.startTimer();
-            kernel_refine<<<grid_size, block_size>>>((Task *)d_BufferInput, gctx->d_vertices, d_bufferinput_size, d_distance, d_resultmap, d_max_box_dist);
+            kernel_refine<<<grid_size, block_size>>>((Task *)d_BufferInput, gctx->d_vertices, d_bufferinput_size, d_distance, d_resultmap, d_max_box_dist, gctx->d_degree_degree_per_kilometer_latitude, gctx->degree_per_kilometer_longitude_arr);
             cudaDeviceSynchronize();
             check_execution("kernel_refine");
             timer.stopTimer();

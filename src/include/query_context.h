@@ -194,6 +194,9 @@ public:
 	size_t num_layer_info = 0;
 	size_t num_layer_offset = 0;
 
+	double *d_degree_degree_per_kilometer_latitude = nullptr;
+	double *degree_per_kilometer_longitude_arr = nullptr;
+
 	// for hierachy
 	double min_step_x = DBL_MAX;
 	double min_step_y = DBL_MAX;

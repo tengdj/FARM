@@ -311,12 +311,55 @@ __device__ __forceinline__ double gpu_point_to_point_distance(const Point *p1, c
 	return haversine(p1->x, p1->y, p2->x, p2->y);
 }
 
-__device__ __forceinline__ double gpu_point_to_segment_distance(const Point &p, const Point &p1, const Point &p2)
+__device__ __forceinline__ double gpu_degree_per_kilometer_longitude(double latitude, double *degree_per_kilometer_longitude_arr){
+	double absla = abs(latitude);
+	assert(absla<=90);
+	if(absla==90){
+		absla = 89.9;
+	}
+	return degree_per_kilometer_longitude_arr[(int)(absla*10)];
+}
+
+__device__ __forceinline__ double gpu_point_to_segment_distance(const Point &p, const Point &p1, const Point &p2, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
 {
 	double A = p.x - p1.x;
 	double B = p.y - p1.y;
 	double C = p2.x - p1.x;
 	double D = p2.y - p1.y;
+
+	double dot = A * C + B * D;
+	double len_sq = C * C + D * D;
+	double param = -1;
+	if (len_sq != 0) //in case of 0 length line
+		param = dot / len_sq;
+
+	double xx, yy;
+
+	if (param < 0) {
+	xx = p1.x;
+	yy = p1.y;
+	} else if (param > 1) {
+	xx = p2.x;
+	yy = p2.y;
+	} else {
+	xx = p1.x + param * C;
+	yy = p1.y + param * D;
+	}
+
+	double dx = p.x - xx;
+	double dy = p.y - yy;
+	dx = dx/gpu_degree_per_kilometer_longitude(p.y, degree_per_kilometer_longitude_arr);
+	dy = dy / *degree_per_kilometer_latitude;
+
+	return sqrt(dx * dx + dy * dy);
+}
+
+__device__ __forceinline__ double gpu_point_to_segment_distance(const double &p_x, const double &p_y, const double &p1_x, const double &p1_y, const double &p2_x, const double &p2_y, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
+{
+	double A = p_x - p1_x;
+	double B = p_y - p1_y;
+	double C = p2_x - p1_x;
+	double D = p2_y - p1_y;
 
 	double dot = A * C + B * D;
 	double len_sq = C * C + D * D;
@@ -328,21 +371,26 @@ __device__ __forceinline__ double gpu_point_to_segment_distance(const Point &p, 
 
 	if (param < 0)
 	{
-		xx = p1.x;
-		yy = p1.y;
+		xx = p1_x;
+		yy = p1_y;
 	}
 	else if (param > 1)
 	{
-		xx = p2.x;
-		yy = p2.y;
+		xx = p2_x;
+		yy = p2_y;
 	}
 	else
 	{
-		xx = p1.x + param * C;
-		yy = p1.y + param * D;
+		xx = p1_x + param * C;
+		yy = p1_y + param * D;
 	}
 
-	return haversine(p.x, p.y, xx, yy);
+	double dx = p_x - xx;
+	double dy = p_y - yy;
+	dx = dx/gpu_degree_per_kilometer_longitude(p_y, degree_per_kilometer_longitude_arr);
+	dy = dy / *degree_per_kilometer_latitude;
+	
+	return sqrt(dx * dx + dy * dy);
 }
 
 __device__ __forceinline__ double gpu_point_to_segment_distance(const double &p_x, const double &p_y, const double &p1_x, const double &p1_y, const double &p2_x, const double &p2_y)
@@ -379,15 +427,6 @@ __device__ __forceinline__ double gpu_point_to_segment_distance(const double &p_
 	return haversine(p_x, p_y, xx, yy);
 }
 
-__device__ __forceinline__ double gpu_segment_to_segment_distance(Point &s1, Point &e1, Point s2, Point e2)
-{
-	double dist1 = gpu_point_to_segment_distance(s1, s2, e2);
-	double dist2 = gpu_point_to_segment_distance(e1, s2, e2);
-	double dist3 = gpu_point_to_segment_distance(s2, s1, e1);
-	double dist4 = gpu_point_to_segment_distance(e2, s1, e1);
-	return min(dist1, min(dist2, min(dist3, dist4)));
-}
-
 __device__ __forceinline__ double gpu_segment_to_segment_distance(Point &s1, Point &e1, double s2_x, double s2_y, double e2_x, double e2_y)
 {
 	double dist1 = gpu_point_to_segment_distance(s1.x, s1.y, s2_x, s2_y, e2_x, e2_y);
@@ -417,50 +456,52 @@ __device__ __forceinline__ double gpu_get_step(box &bx, int dimx, int dimy)
 	return min(haversine(a.x, a.y, b.x, b.y) / dimx, haversine(a.x, a.y, c.x, c.y) / dimy);
 }
 
-__device__ __forceinline__ double gpu_point_to_segment_within_batch(Point &p, Point *vs, size_t seq_len)
+__device__ __forceinline__ double gpu_point_to_segment_within_batch(Point &p, Point *vs, size_t seq_len, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
 {
 	double mindist = DBL_MAX;
+	double dist;
 	for (int i = 0; i < seq_len - 1; i++)
 	{
-		double dist = gpu_point_to_segment_distance(p, vs[i], vs[i + 1]);
+		dist = gpu_point_to_segment_distance(p, vs[i], vs[i + 1], degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
 		if (dist < mindist)
 		{
 			mindist = dist;
 		}
-		if (mindist <= WITHIN_DISTANCE)
-		{
-			return mindist;
-		}
+		// if (mindist <= WITHIN_DISTANCE)
+		// {
+		// 	return mindist;
+		// }
 	}
 	return mindist;
 }
 
-__device__ __forceinline__ double gpu_segment_to_segment_within_batch(Point *vs1, Point *vs2, size_t s1, size_t s2)
+__device__ __forceinline__ double gpu_segment_to_segment_within_batch(Point *vs1, Point *vs2, size_t s1, size_t s2, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
 {
 	double mindist = DBL_MAX;
+	double dist;
 	for (int i = 0; i < s1; i++)
 	{
-		double dist = gpu_point_to_segment_within_batch(vs1[i], vs2, s2);
+		dist = gpu_point_to_segment_within_batch(vs1[i], vs2, s2, degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
 		if (dist < mindist)
 		{
 			mindist = dist;
 		}
-		if (mindist <= WITHIN_DISTANCE)
-		{
-			return mindist;
-		}
+		// if (mindist <= WITHIN_DISTANCE)
+		// {
+		// 	return mindist;
+		// }
 	}
 	for (int i = 0; i < s2; i++)
 	{
-		double dist = gpu_point_to_segment_within_batch(vs2[i], vs1, s1);
+		dist = gpu_point_to_segment_within_batch(vs2[i], vs1, s1, degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
 		if (dist < mindist)
 		{
 			mindist = dist;
 		}
-		if (mindist <= WITHIN_DISTANCE)
-		{
-			return mindist;
-		}
+		// if (mindist <= WITHIN_DISTANCE)
+		// {
+		// 	return mindist;
+		// }
 	}
 	return mindist;
 }
