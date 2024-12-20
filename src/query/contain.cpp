@@ -11,6 +11,7 @@
 #include <queue>
 #include <fstream>
 #include "../include/Ideal.h"
+#include <chrono>
 
 // some shared parameters
 
@@ -25,7 +26,7 @@ bool IdealSearchCallback(Ideal *ideal, void* arg){
 #ifdef USE_GPU
 	else{
 		if(ideal->getMBB()->contain(*(Point *)ctx->target)){
-			ctx->point_polygon_pairs.push_back(make_pair((Point *)ctx->target, ideal));
+			ctx->point_polygon_pairs.emplace_back(make_pair((Point *)ctx->target, ideal));
 		}
 	}
 #endif
@@ -69,25 +70,33 @@ int main(int argc, char** argv) {
 	global_ctx.query_type = QueryType::contain;
 
 	if(global_ctx.use_ideal){
-		global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
+		global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
 		timeval start = get_cur_time();
 		for(auto p : global_ctx.source_ideals){
 			ideal_rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
 		}
 		logt("building R-Tree with %d nodes", start, global_ctx.source_ideals.size());
 	}else{
-		global_ctx.source_polygons = load_polygons_from_path(global_ctx.source_path.c_str(),global_ctx);
+		global_ctx.source_polygons = load_polygons_from_path(global_ctx.source_path.c_str(), global_ctx);
 		timeval start = get_cur_time();
 		for(auto p : global_ctx.source_polygons){
 			poly_rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
 		}
 		logt("building R-Tree with %d nodes", start, global_ctx.source_polygons.size());
 	}
-
+	auto preprocess_start = std::chrono::high_resolution_clock::now();
 	preprocess(&global_ctx);
+	auto preprocess_end = std::chrono::high_resolution_clock::now();
+	auto preprocess_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start);
+	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
+
 
 	// read all the points
 	global_ctx.load_points();
+
+	auto total_runtime_start = std::chrono::high_resolution_clock::now();
+
+	global_ctx.point_polygon_pairs.resize(651161735);
 
 	pthread_t threads[global_ctx.num_threads];
 	query_context ctx[global_ctx.num_threads];
@@ -104,15 +113,23 @@ int main(int argc, char** argv) {
 		void *status;
 		pthread_join(threads[i], &status);
 	}
+
+	printf("total pair size = %d\n", global_ctx.point_polygon_pairs.size());
+
+	auto total_runtime_end = std::chrono::high_resolution_clock::now();
+	auto total_runtime_duration = std::chrono::duration_cast<std::chrono::milliseconds>(total_runtime_end - total_runtime_start);
+	std::cout << "cpu extra time: " << total_runtime_duration.count() << " ms" << std::endl;
 #ifdef USE_GPU
+	auto preprocess_gpu_start = std::chrono::high_resolution_clock::now();
 	preprocess_for_gpu(&global_ctx);
-	timeval start = get_cur_time();
+	auto preprocess_gpu_end = std::chrono::high_resolution_clock::now();
+	auto preprocess_gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_gpu_end - preprocess_gpu_start);
+	std::cout << "preprocess for gpu time: " << preprocess_gpu_duration.count() << " ms" << std::endl;
 	global_ctx.found = cuda_contain(&global_ctx);
 #endif
 	cout << endl;
-	global_ctx.print_stats();
-	logt("total query",start);
-
+	printf("FOUND: %d\n", global_ctx.found);
+	// global_ctx.print_stats();
 
 	return 0;
 }

@@ -133,15 +133,21 @@ void query_context::merge_global(){
 		}
 	}
 
-	for(auto &tp : polygon_pairs){
-		global_ctx->polygon_pairs.push_back(tp);
-	}
+	// for(auto &tp : polygon_pairs){
+	// 	global_ctx->polygon_pairs.push_back(tp);
+	// }
 
-	for(auto &tp : point_polygon_pairs){
-		global_ctx->point_polygon_pairs.push_back(tp);
-	}
+	// for(auto &tp : point_polygon_pairs){
+	// 	global_ctx->point_polygon_pairs.push_back(tp);
+	// }
 
 	global_ctx->unlock();
+
+	pair_size = point_polygon_pairs.size();
+	cout << pair_size << endl;
+	for(int i = 0; i < pair_size; i ++){
+		global_ctx->point_polygon_pairs[thread_id * pair_size + i] = point_polygon_pairs[i];
+	} 
 }
 
 bool query_context::next_batch(int batch_num){
@@ -235,11 +241,13 @@ query_context get_parameters(int argc, char **argv){
 
 	po::options_description desc("query usage");
 	desc.add_options()
-		("help,h", "produce help message")
+		("help", "produce help message")
 		("rasterize,r", "partition with rasterization")
 		("qtree,q", "partition with qtree")
 		("raster_only", "query with raster only")
 		("vector", "use techniques like MER convex hull and internal RTree")
+		("gpu,g", "query with gpu")
+		("hierachy,h", "partition with hierarchical grid")
 
 		("source,s", po::value<string>(&global_ctx.source_path), "path to the source")
 		("target,t", po::value<string>(&global_ctx.target_path), "path to the target")
@@ -267,6 +275,9 @@ query_context get_parameters(int argc, char **argv){
 	global_ctx.use_vector = vm.count("vector");
 	global_ctx.use_raster = vm.count("raster_only");
 	global_ctx.use_qtree = vm.count("qtree");
+	global_ctx.use_gpu = vm.count("gpu");
+	global_ctx.use_hierachy = vm.count("hierachy");
+
 
 	assert(global_ctx.use_ideal+global_ctx.use_vector+global_ctx.use_qtree<=1
 			&&"can only choose one from, IDEAL, VECTOR, QTree");

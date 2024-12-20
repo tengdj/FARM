@@ -28,16 +28,16 @@ public:
 };
 
 struct IdealOffset{
-	uint info_start = 0;
-	uint status_start = 0;
-	uint offset_start = 0;
-	uint edge_sequences_start = 0;
-	uint vertices_start = 0;
-	uint gridline_offset_start = 0;
-	uint gridline_offset_end = 0;
-	uint gridline_nodes_start = 0;
-	uint layer_info_start = 0;
-	uint layer_offset_start = 0;
+	uint info_start;
+	uint status_start;
+	uint offset_start;
+	uint edge_sequences_start;
+	uint vertices_start;
+	uint gridline_offset_start;
+	uint gridline_offset_end;
+	uint gridline_nodes_start;
+	uint layer_info_start;
+	uint layer_offset_start;
 };
 
 struct EdgeSeq{
@@ -71,6 +71,10 @@ public:
 
 
 class Ideal : public MyPolygon, public MyRaster{
+public:
+	bool use_hierachy = false;
+
+private:
 	uint16_t *offset = nullptr;
 	pair<uint32_t, uint32_t> *edge_sequences = nullptr;
 	Grid_line *horizontal = nullptr;

@@ -89,6 +89,7 @@ class query_context
 {
 public:
 	int thread_id = 0;
+	int pair_size = 0;
 
 	// configuration
 	bool geography = true;
@@ -99,8 +100,8 @@ public:
 	bool use_raster = false;
 	bool use_vector = false;
 	bool use_qtree = false;
-
-	bool use_gpu = true;
+	bool use_gpu = false;
+	bool use_hierachy = false;
 
 	int mer_sample_round = 20;
 	bool perform_refine = true;

@@ -11,7 +11,8 @@ void *rasterization_unit(void *args){
 	while(ctx->next_batch(10)){
 		for(int i=ctx->index;i<ctx->index_end;i++){
 			struct timeval start = get_cur_time();
-			ideals[i]->grid_align(gctx);
+			ideals[i]->use_hierachy = gctx->use_hierachy;
+			if(gctx->use_hierachy) ideals[i]->grid_align(gctx);
 			ideals[i]->rasterization(ctx->vpr);
 			ctx->report_progress();
 		}
@@ -313,38 +314,40 @@ void preprocess(query_context *gctx){
 		target_ideals.insert(target_ideals.end(), gctx->target_ideals.begin(), gctx->target_ideals.end());
 		gctx->target = (void *)&target_ideals;
 
-		for(auto ideal : target_ideals){
-			ideal->init_raster(ideal->get_boundary()->num_vertices / gctx->vpr);
-			gctx->min_step_x = min(gctx->min_step_x, ideal->get_step_x());
-			gctx->min_step_y = min(gctx->min_step_y, ideal->get_step_y());
+		if(gctx->use_hierachy){
+			for(auto ideal : target_ideals){
+				ideal->init_raster(ideal->get_boundary()->num_vertices / gctx->vpr);
+				gctx->min_step_x = min(gctx->min_step_x, ideal->get_step_x());
+				gctx->min_step_y = min(gctx->min_step_y, ideal->get_step_y());
+				
+				gctx->space.low[0] = min(gctx->space.low[0], ideal->getMBB()->low[0]);
+				gctx->space.low[1] = min(gctx->space.low[1], ideal->getMBB()->low[1]);
+				gctx->space.high[0] = max(gctx->space.high[0], ideal->getMBB()->high[0]);
+				gctx->space.high[1] = max(gctx->space.high[1], ideal->getMBB()->high[1]);
+			}
+
+			assert(gctx->space.low[0] < gctx->space.high[0] && gctx->space.low[1] < gctx->space.high[1]);
+
+			gctx->min_step_x = roundToSignificantDigits(gctx->min_step_x, 1);
+			gctx->min_step_y = roundToSignificantDigits(gctx->min_step_y, 1);
+
+			int dimx = (gctx->space.high[0] - gctx->space.low[0]) / gctx->min_step_x;
+			int dimy = (gctx->space.high[1] - gctx->space.low[1]) / gctx->min_step_y;
+
+			int num_layers = static_cast<int>(ceil(max(log(dimx + 1) / log(2.0), log(dimy + 1) / log(2.0))));
+			// printf("最低的一层：%d\n", num_floor);
 			
-			gctx->space.low[0] = min(gctx->space.low[0], ideal->getMBB()->low[0]);
-			gctx->space.low[1] = min(gctx->space.low[1], ideal->getMBB()->low[1]);
-			gctx->space.high[0] = max(gctx->space.high[0], ideal->getMBB()->high[0]);
-			gctx->space.high[1] = max(gctx->space.high[1], ideal->getMBB()->high[1]);
-		}
+			gctx->num_layers = num_layers;
 
-		assert(gctx->space.low[0] < gctx->space.high[0] && gctx->space.low[1] < gctx->space.high[1]);
-
-		gctx->min_step_x = roundToSignificantDigits(gctx->min_step_x, 1);
-		gctx->min_step_y = roundToSignificantDigits(gctx->min_step_y, 1);
-
-		int dimx = (gctx->space.high[0] - gctx->space.low[0]) / gctx->min_step_x;
-		int dimy = (gctx->space.high[1] - gctx->space.low[1]) / gctx->min_step_y;
-
-		int num_layers = static_cast<int>(ceil(max(log(dimx + 1) / log(2.0), log(dimy + 1) / log(2.0))));
-		// printf("最低的一层：%d\n", num_floor);
-		
-		gctx->num_layers = num_layers;
-
-		gctx->space.low[0] = gctx->min_step_x * floor(gctx->space.low[0] / gctx->min_step_x);
-		gctx->space.low[1] = gctx->min_step_y * floor(gctx->space.low[1] / gctx->min_step_y);
-		gctx->space.high[0] = gctx->min_step_x * ceil(gctx->space.high[0] / gctx->min_step_x);
-		gctx->space.high[1] = gctx->min_step_y * ceil(gctx->space.high[1] / gctx->min_step_y);
+			gctx->space.low[0] = gctx->min_step_x * floor(gctx->space.low[0] / gctx->min_step_x);
+			gctx->space.low[1] = gctx->min_step_y * floor(gctx->space.low[1] / gctx->min_step_y);
+			gctx->space.high[0] = gctx->min_step_x * ceil(gctx->space.high[0] / gctx->min_step_x);
+			gctx->space.high[1] = gctx->min_step_y * ceil(gctx->space.high[1] / gctx->min_step_y);
         
-		// printf("\nBOX: %lf %lf %lf %lf\n", gctx->space.low[0], gctx->space.low[1], gctx->space.high[0], gctx->space.high[1]);
-		// printf("MIN STEP_X = %lf, MIN STEP_Y = %lf\n", gctx->min_step_x, gctx->min_step_y);
-		// exit(0);
+			// printf("\nBOX: %lf %lf %lf %lf\n", gctx->space.low[0], gctx->space.low[1], gctx->space.high[0], gctx->space.high[1]);
+			// printf("MIN STEP_X = %lf, MIN STEP_Y = %lf\n", gctx->min_step_x, gctx->min_step_y);
+			// exit(0);
+		}
 		process_rasterization(gctx);
 
 #ifdef USE_GPU

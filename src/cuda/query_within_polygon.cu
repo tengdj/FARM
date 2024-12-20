@@ -7,6 +7,14 @@
 
 unordered_map<int, int> ht;
 
+struct Batch
+{
+	IdealOffset source;
+	IdealOffset target;
+	uint s_level = 0;
+	uint t_level = 0;
+};
+
 struct Task
 {
     uint s_start = 0;

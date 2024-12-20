@@ -3,7 +3,7 @@
 #include "cuda_util.h"
 #include "Ideal.h"
 
-#define BLOCK_SIZE 1024
+#define BLOCK_SIZE 512
 #define WITHIN_DISTANCE 10
 
 const double EARTH_RADIUS_KM = 6371.0;
@@ -19,14 +19,6 @@ struct PixPair
 	int source_pixid = 0;
 	int target_pixid = 0;
 	int pair_id = 0;
-};
-
-struct Batch
-{
-	IdealOffset source;
-	IdealOffset target;
-	uint s_level = 0;
-	uint t_level = 0;
 };
 
 struct PointPolygonPair

@@ -21,8 +21,8 @@ class Point {
     double x;
     double y;
     CUDA_HOSTDEV Point() {
-        x = 0;
-        y = 0;
+        // x = 0;
+        // y = 0;
     }
     CUDA_HOSTDEV Point(double xx, double yy) {
         x = xx;
