@@ -27,6 +27,7 @@ bool IdealSearchCallback(Ideal *ideal, void* arg){
 	else{
 		if(ideal->getMBB()->contain(*(Point *)ctx->target)){
 			ctx->point_polygon_pairs.emplace_back(make_pair((Point *)ctx->target, ideal));
+			// ctx->point_polygon_pairs[ctx->point_polygon_pairs_idx ++] = make_pair((Point *)ctx->target, ideal);
 		}
 	}
 #endif
@@ -44,6 +45,7 @@ void *query(void *args){
 	query_context *gctx = ctx->global_ctx;
 	log("thread %d is started",ctx->thread_id);
 	ctx->query_count = 0;
+	// ctx->point_polygon_pairs = new pair<Point*, Ideal*>[gctx->target_num];
 
 	while(ctx->next_batch(100)){
 		for(int i=ctx->index;i<ctx->index_end;i++){
@@ -56,6 +58,7 @@ void *query(void *args){
 			ctx->report_progress();
 		}
 	}
+
 	ctx->merge_global();
 
 	return NULL;
@@ -68,6 +71,7 @@ int main(int argc, char** argv) {
 	query_context global_ctx;
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::contain;
+	global_ctx.num_threads = 1;
 
 	if(global_ctx.use_ideal){
 		global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
@@ -84,19 +88,29 @@ int main(int argc, char** argv) {
 		}
 		logt("building R-Tree with %d nodes", start, global_ctx.source_polygons.size());
 	}
+
 	auto preprocess_start = std::chrono::high_resolution_clock::now();
 	preprocess(&global_ctx);
 	auto preprocess_end = std::chrono::high_resolution_clock::now();
 	auto preprocess_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start);
 	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
 
+	for(int i = 0; i < global_ctx.source_ideals.size(); i ++){
+		if(global_ctx.source_ideals[i]->get_num_vertices() == 817){
+			global_ctx.source_ideals[i]->MyPolygon::print();
+			global_ctx.source_ideals[i]->MyRaster::print();
+		}
 
+	}
+	return 0;
 	// read all the points
 	global_ctx.load_points();
 
 	auto total_runtime_start = std::chrono::high_resolution_clock::now();
 
-	global_ctx.point_polygon_pairs.resize(651161735);
+	// global_ctx.point_polygon_pairs = new pair<Point*, Ideal*>[global_ctx.target_num * 20];
+	global_ctx.num_threads = 1;
+
 
 	pthread_t threads[global_ctx.num_threads];
 	query_context ctx[global_ctx.num_threads];

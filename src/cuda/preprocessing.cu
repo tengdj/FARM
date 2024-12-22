@@ -116,9 +116,11 @@ void preprocess_for_gpu(query_context *gctx)
     bool flag1 = false, flag2 = false;
     // compact data
     uint iidx = 0, sidx = 0, oidx = 0, eidx = 0, vidx = 0, goidx = 0, gnidx = 0, liidx = 0, loidx = 0;
+    // for(int i = 0; i < gctx->point_polygon_pairs_size; i ++)
     for (auto &tp : gctx->point_polygon_pairs)
     {
         flag1 = true;
+        // Ideal *source = gctx->point_polygon_pairs[i].second;
         Ideal *source = tp.second;
         int dimx = source->get_dimx(), dimy = source->get_dimy();
         if (source->idealoffset == nullptr)

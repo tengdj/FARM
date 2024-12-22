@@ -133,21 +133,22 @@ void query_context::merge_global(){
 		}
 	}
 
-	// for(auto &tp : polygon_pairs){
-	// 	global_ctx->polygon_pairs.push_back(tp);
-	// }
+	for(auto &tp : polygon_pairs){
+		global_ctx->polygon_pairs.push_back(tp);
+	}
 
-	// for(auto &tp : point_polygon_pairs){
-	// 	global_ctx->point_polygon_pairs.push_back(tp);
+	for(auto &tp : point_polygon_pairs){
+		global_ctx->point_polygon_pairs.push_back(tp);
+	}
+
+	// point_polygon_pairs_size = point_polygon_pairs_idx;
+	// global_ctx->point_polygon_pairs_size += point_polygon_pairs_size;
+	
+	// for(int i = 0; i < point_polygon_pairs_size; i ++){
+	// 	global_ctx->point_polygon_pairs[global_ctx->point_polygon_pairs_idx ++] = point_polygon_pairs[i];
 	// }
 
 	global_ctx->unlock();
-
-	pair_size = point_polygon_pairs.size();
-	cout << pair_size << endl;
-	for(int i = 0; i < pair_size; i ++){
-		global_ctx->point_polygon_pairs[thread_id * pair_size + i] = point_polygon_pairs[i];
-	} 
 }
 
 bool query_context::next_batch(int batch_num){

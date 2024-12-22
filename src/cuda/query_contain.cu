@@ -19,17 +19,21 @@ __global__ void kernel_filter_contain(Batch *d_pairs, RasterInfo *d_info, uint8_
 		const double &s_step_x = d_info[source.info_start].step_x, &s_step_y = d_info[source.info_start].step_y;
 		const int &s_dimx = d_info[source.info_start].dimx, &s_dimy = d_info[source.info_start].dimy;
 
+		
+
 		int xoff = gpu_get_offset_x(s_mbr.low[0], p.x, s_step_x, s_dimx);
 		int yoff = gpu_get_offset_y(s_mbr.low[1], p.y, s_step_y, s_dimy);
 		int target = gpu_get_id(xoff, yoff, s_dimx);
 
 		// printf("x: %d, y: %d, id = %d, status: %d\n", xoff, yoff, target, gpu_show_status(d_status, source.status_start, target));
 
-		if (gpu_show_status(d_status, source.status_start, target) == IN)
+		PartitionStatus status = gpu_show_status(d_status, source.status_start, target);
+		
+		if (status == IN)
 		{
 			resultmap[x] = 2;
 		}
-		else if (gpu_show_status(d_status, source.status_start, target) == OUT)
+		else if (status == OUT)
 		{
 			resultmap[x] = 0;
 		}
@@ -134,7 +138,7 @@ uint cuda_contain(query_context *gctx)
 	total.startTimer();
 
 	uint point_polygon_pairs_size = gctx->point_polygon_pairs.size();
-	uint batch_size = point_polygon_pairs_size / 5;
+	uint batch_size = point_polygon_pairs_size;
 	int found = 0;
 
 	printf("size = %d\n", point_polygon_pairs_size);
@@ -191,7 +195,7 @@ uint cuda_contain(query_context *gctx)
 		for (auto& thread : threads) {
 			thread.join();
 		}
-		
+
 		// int idx = 0;
 		// for(int j = start; j < end; j ++)
 		// {
@@ -260,6 +264,9 @@ uint cuda_contain(query_context *gctx)
 		for (int idx = 0; idx < size; ++ idx)
 		{
 			if (h_resultmap[idx] >= 1){
+				cout << gctx->point_polygon_pairs[idx].second->get_num_vertices() << " "; 
+				gctx->point_polygon_pairs[idx].first->print();
+
 				found ++;
 			}
 				

@@ -57,7 +57,7 @@ int main(int argc, char **argv)
         ideal->MyPolygon::print();
         p->print();
         printf("end\n");
-        global_ctx.point_polygon_pairs.push_back(make_pair(p, ideal));
+        // global_ctx.point_polygon_pairs.push_back(make_pair(p, ideal));
     }
 
     preprocess_for_gpu(&global_ctx);

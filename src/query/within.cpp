@@ -30,7 +30,7 @@ bool IdealSearchCallback(Ideal *ideal, void* arg){
 		if(ideal->contain(*p, ctx)){
 			ctx->found ++;
 		}else{
-			ctx->point_polygon_pairs.push_back(make_pair(p, ideal));
+			// ctx->point_polygon_pairs.push_back(make_pair(p, ideal));
 		}
 	}
 #endif

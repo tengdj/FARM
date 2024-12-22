@@ -89,7 +89,6 @@ class query_context
 {
 public:
 	int thread_id = 0;
-	int pair_size = 0;
 
 	// configuration
 	bool geography = true;
@@ -159,6 +158,9 @@ public:
 	size_t target_num = 0;
 	vector<pair<Ideal *, Ideal *>> polygon_pairs;
 	vector<pair<Point *, Ideal *>> point_polygon_pairs;
+	// pair<Point *, Ideal *>* point_polygon_pairs = nullptr;
+	// int point_polygon_pairs_size = 0;
+	// int point_polygon_pairs_idx = 0;
 
 	map<int, int> vertex_number;
 	map<int, double> latency;
