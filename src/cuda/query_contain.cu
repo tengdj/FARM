@@ -46,7 +46,7 @@ __global__ void kernel_filter_contain(Batch *d_pairs, RasterInfo *d_info, uint8_
 	}
 }
 
-__global__ void kernel_refinement_contain(Batch *d_pairs, PixMapping *d_ptpixpairs, RasterInfo *d_info, uint16_t *d_offset, EdgeSeq *d_edge_sequences, Point *d_vertices, uint16_t *d_gridline_offset, double *d_gridline_nodes, uint *size, uint8_t *resultmap)
+__global__ void kernel_refinement_contain(Batch *d_pairs, PixMapping *d_ptpixpairs, RasterInfo *d_info, uint32_t *d_offset, EdgeSeq *d_edge_sequences, Point *d_vertices, uint32_t *d_gridline_offset, double *d_gridline_nodes, uint *size, uint8_t *resultmap)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x < *size)
@@ -68,13 +68,16 @@ __global__ void kernel_refinement_contain(Batch *d_pairs, PixMapping *d_ptpixpai
 		int yoff = gpu_get_y(target, s_dimx, s_dimy);
 		box bx = gpu_get_pixel_box(xoff, yoff, s_mbr.low[0], s_mbr.low[1], s_step_x, s_step_y);
 
+		assert(target + 1 < source.offset_end - source.offset_start);
 		int s_num_sequence = (d_offset + source.offset_start)[target + 1] - (d_offset + source.offset_start)[target];
 
 		for (int i = 0; i < s_num_sequence; ++i)
 		{
+			assert(((d_offset + source.offset_start)[target] + i) < (source.edge_sequences_end - source.edge_sequences_start));
 			EdgeSeq r = (d_edge_sequences + source.edge_sequences_start)[(d_offset + source.offset_start)[target] + i];
 			for (int j = 0; j < r.length; j++)
 			{
+				assert(r.start + j + 1 < source.vertices_end - source.vertices_start);
 				if ((d_vertices + source.vertices_start)[r.start + j].y >= p.y != (d_vertices + source.vertices_start)[r.start + j + 1].y >= p.y)
 				{
 					double int_x =
@@ -84,8 +87,7 @@ __global__ void kernel_refinement_contain(Batch *d_pairs, PixMapping *d_ptpixpai
 							(p.y -
 							 (d_vertices + source.vertices_start)[r.start + j]
 								 .y) /
-							((d_vertices +
-							  source.vertices_start)[r.start + j + 1]
+							((d_vertices + source.vertices_start)[r.start + j + 1]
 								 .y -
 							 (d_vertices + source.vertices_start)[r.start + j]
 								 .y) +
@@ -98,11 +100,22 @@ __global__ void kernel_refinement_contain(Batch *d_pairs, PixMapping *d_ptpixpai
 			}
 		}
 		int nc = 0;
-		uint16_t i = (d_gridline_offset + source.gridline_offset_start)[xoff + 1], j;
-		if (xoff + 1 < s_dimx)
+		assert(xoff + 2 < source.gridline_offset_end - source.gridline_offset_start);
+		uint32_t i = (d_gridline_offset + source.gridline_offset_start)[xoff + 1], j;
+		// if (xoff + 1 < s_dimx){
 			j = (d_gridline_offset + source.gridline_offset_start)[xoff + 2];
-		else
-			j = source.gridline_offset_end - source.gridline_offset_start + 1;
+		// }else{
+		// 	j = source.gridline_offset_end - source.gridline_offset_start;
+		// }
+		// printf("i = %d, size = %d\n", i, source.gridline_nodes_end - source.gridline_nodes_start);
+		// if(i > source.gridline_nodes_end - source.gridline_nodes_start){
+		// 	printf("i = %d, size = %d\n", i, source.gridline_nodes_end - source.gridline_nodes_start);
+		// }
+
+		// if(i >= j) printf("i = %d, j = %d\n", i , j);
+		
+		// assert(i <= source.gridline_nodes_end - source.gridline_nodes_start);
+		// assert(i < j);
 		while (i < j && (d_gridline_nodes + source.gridline_nodes_start)[i] <= p.y)
 		{
 			nc++;
@@ -134,46 +147,43 @@ void process_chunk(int start, int end, int base, query_context *gctx, Batch *h_p
 
 uint cuda_contain(query_context *gctx)
 {
-	CudaTimer timer, total, duration;
-	total.startTimer();
+	CudaTimer timer;
 
+	
 	uint point_polygon_pairs_size = gctx->point_polygon_pairs.size();
-	uint batch_size = point_polygon_pairs_size;
+	uint batch_size = gctx->point_polygon_pairs.size();
 	int found = 0;
 
-	printf("size = %d\n", point_polygon_pairs_size);
-
 	timer.startTimer();
-	Batch *h_pairs = new Batch[point_polygon_pairs_size];
+	Batch *h_pairs = new Batch[batch_size];
+	uint8_t *h_resultmap = new uint8_t[batch_size];
 	timer.stopTimer();
-	printf("cpu time: %f ms\n", timer.getElapsedTime());
+	printf("CPU Malloc time: %f ms\n", timer.getElapsedTime());
 
 	timer.startTimer();
 	Batch *d_pairs = nullptr;
 	CUDA_SAFE_CALL(cudaMalloc((void **)&d_pairs, batch_size * sizeof(Batch)));
 
-	timer.stopTimer();
-	printf("cudaMalloc time: %f ms\n", timer.getElapsedTime());
-
-	// resultmap status: 0(undecided), 1(contain), 2(not contain)
+	// resultmap status: 0(undecided / not contain), 1(contain), 2(contain)
 	uint8_t *d_resultmap = nullptr;
 	CUDA_SAFE_CALL(cudaMalloc((void **)&d_resultmap, batch_size * sizeof(uint8_t)));
-	uint8_t *h_resultmap = new uint8_t[batch_size];
-
+	
 	char *d_Buffer = nullptr;
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_Buffer, 10UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_Buffer, 8UL * 1024 * 1024 * 1024));
     uint *d_buffer_size = nullptr;
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_buffer_size, sizeof(uint)));
     uint h_buffer_size;
 
+	timer.stopTimer();
+	printf("cudaMalloc time: %f ms\n", timer.getElapsedTime());
+
+	timer.startTimer();
+
 	for (int i = 0; i < point_polygon_pairs_size; i += batch_size)
 	{
 		
-		duration.startTimer();
 		int start = i, end = min(i + batch_size, point_polygon_pairs_size);
         int size = end - start;
-
-		printf("size = %d\n", size);
 
 		timer.startTimer();
 
@@ -184,11 +194,8 @@ uint cuda_contain(query_context *gctx)
 
 		for (int j = 0; j < num_threads; ++ j) {
 			int chunk_start = start + j * chunk_size;
-			// int chunk_end = (j == (num_threads - 1)) ? end : chunk_start + chunk_size;
 			int chunk_end = min(chunk_start + chunk_size, end);
 
-			// printf("thread %d\n", i);
-			// printf("%d %d %d\n", chunk_start, chunk_end, start);
 			threads.emplace_back(process_chunk, chunk_start, chunk_end, start, gctx, h_pairs);
 		}
 
@@ -196,40 +203,33 @@ uint cuda_contain(query_context *gctx)
 			thread.join();
 		}
 
-		// int idx = 0;
-		// for(int j = start; j < end; j ++)
-		// {
-		// 	Point *target = gctx->point_polygon_pairs[j].first;
-		// 	Ideal *source = gctx->point_polygon_pairs[j].second;
-		// 	h_pairs[idx ++] = {*source->idealoffset, *target};
-		// }
-
 		timer.stopTimer();
-		printf("cpu time: %f ms\n", timer.getElapsedTime());
+		printf("preprocessing for GPU (cpu time): %f ms\n", timer.getElapsedTime());
 
 		timer.startTimer();
 		CUDA_SAFE_CALL(cudaMemcpy(d_pairs, h_pairs, size * sizeof(Batch), cudaMemcpyHostToDevice));
 		timer.stopTimer();
 		printf("cudaMemcpy time: %f ms\n", timer.getElapsedTime());
 
+		timer.startTimer();
 		CUDA_SAFE_CALL(cudaMemset(d_resultmap, 0, size * sizeof(uint8_t)));
 		CUDA_SAFE_CALL(cudaMemset(d_buffer_size, 0, sizeof(uint)));
-
+		timer.stopTimer();
+		printf("cudaMemset time: %f ms\n", timer.getElapsedTime());
+		
+		timer.startTimer();
+		
 		/*1. Raster Model Filtering*/
 
 		int grid_size_x = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 		dim3 block_size(BLOCK_SIZE, 1, 1);
 		dim3 grid_size(grid_size_x, 1, 1);
 
-		timer.startTimer();
 		kernel_filter_contain<<<grid_size, block_size>>>(d_pairs, gctx->d_info, gctx->d_status, size, d_resultmap, (PixMapping *)d_Buffer, d_buffer_size);
 		cudaDeviceSynchronize();
 		check_execution("kernel_filter_contain");
-		timer.stopTimer();
-		printf("kernel_filter time: %f ms\n", timer.getElapsedTime());
 
 		CUDA_SAFE_CALL(cudaMemcpy(&h_buffer_size, d_buffer_size, sizeof(uint), cudaMemcpyDeviceToHost));
-		printf("h_buffer_size = %u\n", h_buffer_size);
 
 		if(h_buffer_size == 0) {
 			if(i + batch_size >= point_polygon_pairs_size){
@@ -241,9 +241,6 @@ uint cuda_contain(query_context *gctx)
 					}
 					
 				}
-
-				duration.stopTimer();
-				printf("round time: %f ms\n", duration.getElapsedTime());
 			}
 			continue;
 		}
@@ -253,31 +250,26 @@ uint cuda_contain(query_context *gctx)
 		grid_size_x = (h_buffer_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 		grid_size.x = grid_size_x;
 
-		timer.startTimer();
 		kernel_refinement_contain<<<grid_size, block_size>>>(d_pairs, (PixMapping *)d_Buffer, gctx->d_info, gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices, gctx->d_gridline_offset, gctx->d_gridline_nodes, d_buffer_size, d_resultmap);
 		cudaDeviceSynchronize();
 		check_execution("kernel_refinement_contain");
+
 		timer.stopTimer();
-		printf("kernel_refinement time: %f ms\n", timer.getElapsedTime());
+		printf("query time: %f ms\n", timer.getElapsedTime());
 
 		CUDA_SAFE_CALL(cudaMemcpy(h_resultmap, d_resultmap, size * sizeof(uint8_t), cudaMemcpyDeviceToHost));
 		for (int idx = 0; idx < size; ++ idx)
 		{
 			if (h_resultmap[idx] >= 1){
-				cout << gctx->point_polygon_pairs[idx].second->get_num_vertices() << " "; 
-				gctx->point_polygon_pairs[idx].first->print();
+				// cout << gctx->point_polygon_pairs[idx].second->get_num_vertices() << " "; 
+				// cout << gctx->point_polygon_pairs[idx].second->get_boundary()->p[0].x << " " << gctx->point_polygon_pairs[idx].second->get_boundary()->p[0].y << " ";
+				// gctx->point_polygon_pairs[idx].first->print();
 
 				found ++;
 			}
-				
 		}
 
-		duration.stopTimer();
-		printf("round time: %f ms\n", duration.getElapsedTime());
 	}
-
-	total.stopTimer();
-	printf("total query: %f ms\n", total.getElapsedTime());
 	
 	CUDA_SAFE_CALL(cudaFree(d_pairs));
 	CUDA_SAFE_CALL(cudaFree(d_resultmap));

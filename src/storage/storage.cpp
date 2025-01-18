@@ -45,7 +45,7 @@ void process_lines(std::vector<Ideal*>& local_ideals) {
         //     wkt.erase(wkt.size() - 1); // 删除结尾的引号
         // }
 
-        size_t offset = 7;
+        size_t offset = 10;
         local_ideals.push_back(read_polygon(wkt.c_str(), offset));
     }
 }
@@ -691,7 +691,7 @@ Ideal *read_polygon(const char *wkt, size_t &offset)
 	Ideal *ideal = new Ideal();
 	skip_space(wkt, offset);
 	// left parentheses for the entire polygon
-	assert(wkt[offset++] == '(');
+	// assert(wkt[offset++] == '(');
 
 	// read the vertices of the boundary polygon
 	// the vertex must rotation in clockwise
@@ -716,7 +716,7 @@ Ideal *read_polygon(const char *wkt, size_t &offset)
 
 		skip_space(wkt, offset);
 	}
-	assert(wkt[offset++] == ')');
+	// assert(wkt[offset++] == ')');
 	ideal->getMBB();
 	return ideal;
 }

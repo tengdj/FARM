@@ -12,7 +12,7 @@ void Ideal::add_edge(int idx, int start, int end){
 	edge_sequences[idx] = make_pair(start, end - start  + 1);
 }
 
-uint16_t Ideal::get_num_sequences(int id){
+uint32_t Ideal::get_num_sequences(int id){
 	if(show_status(id) != BORDER) return 0;
 	return offset[id + 1] - offset[id];
 }
@@ -134,6 +134,7 @@ void Ideal::process_intersection(map<int, vector<double>> intersection_info, Dir
 	}else{
 		vertical->init_intersection_node(num_nodes);
 		vertical->set_num_crosses(num_nodes);
+		vertical->set_offset(dimx + 1, num_nodes);
 
 		int idx = 0;
 		for(auto info : intersection_info){
@@ -158,7 +159,7 @@ void Ideal::init_pixels(){
 	assert(mbr);
 	status_size = get_num_pixels();
 	if(use_hierachy){
-		layer_offset = new uint16_t[num_layers + 1];
+		layer_offset = new uint32_t[num_layers + 1];
 		layer_info = new RasterInfo[num_layers + 1];
 
 		int _dimx = dimx, _dimy = dimy;
@@ -173,7 +174,7 @@ void Ideal::init_pixels(){
 
 	status = new uint8_t[status_size];
 	memset(status, 0, status_size * sizeof(uint8_t));
-    offset = new uint16_t[(dimx+1)*(dimy+1) + 1];    // +1 here is to ensure that pointer[num_pixels] equals len_edge_sequences, so we don't need to make a special case for the last pointer.
+    offset = new uint32_t[(dimx+1)*(dimy+1) + 1];    // +1 here is to ensure that pointer[num_pixels] equals len_edge_sequences, so we don't need to make a special case for the last pointer.
 	horizontal = new Grid_line(dimy);
 	vertical = new Grid_line(dimx);
 }
@@ -394,7 +395,7 @@ void Ideal::scanline_reandering(){
 
 	for(int y = 1; y < dimy; y ++){
 		bool isin = false;
-		uint16_t i = horizontal->get_offset(y), j = horizontal->get_offset(y + 1);
+		uint32_t i = horizontal->get_offset(y), j = horizontal->get_offset(y + 1);
 		for(int x = 0; x < dimx; x ++){
 			if(show_status(get_id(x, y)) != BORDER){
 				if(isin){
@@ -493,7 +494,7 @@ int Ideal::count_intersection_nodes(Point &p){
 	assert(show_status(pix_id) == BORDER);
 	int count = 0;
 	int x = get_x(pix_id) + 1;
-	uint16_t i = vertical->get_offset(x), j;
+	uint32_t i = vertical->get_offset(x), j;
 	if(x < dimx) j = vertical->get_offset(x + 1);
 	else j = vertical->get_num_crosses();
 	while(i < j && vertical->get_intersection_nodes(i) <= p.y){
@@ -528,7 +529,7 @@ bool Ideal::contain(Point &p, query_context *ctx, bool profile){
     bool ret = false;
 
     // checking the intersection edges in the target pixel
-    for(uint16_t e = 0; e < get_num_sequences(target); e ++){    
+    for(uint32_t e = 0; e < get_num_sequences(target); e ++){    
         auto edges = get_edge_sequence(get_offset(target) + e);
         auto pos = edges.first;
         for(int k = 0; k < edges.second; k ++){

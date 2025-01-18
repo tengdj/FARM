@@ -71,8 +71,7 @@ int main(int argc, char** argv) {
 	query_context global_ctx;
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::contain;
-	global_ctx.num_threads = 1;
-
+	
 	if(global_ctx.use_ideal){
 		global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
 		timeval start = get_cur_time();
@@ -95,23 +94,21 @@ int main(int argc, char** argv) {
 	auto preprocess_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start);
 	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
 
-	for(int i = 0; i < global_ctx.source_ideals.size(); i ++){
-		if(global_ctx.source_ideals[i]->get_num_vertices() == 817){
-			global_ctx.source_ideals[i]->MyPolygon::print();
-			global_ctx.source_ideals[i]->MyRaster::print();
-		}
+	// for(int i = 0; i < global_ctx.source_ideals.size(); i ++){
+	// 	if(global_ctx.source_ideals[i]->get_num_vertices() == 817){
+	// 		global_ctx.source_ideals[i]->MyPolygon::print();
+	// 		global_ctx.source_ideals[i]->MyRaster::print();
+	// 	}
 
-	}
-	return 0;
+	// }
+	// return 0;
 	// read all the points
 	global_ctx.load_points();
 
-	auto total_runtime_start = std::chrono::high_resolution_clock::now();
-
 	// global_ctx.point_polygon_pairs = new pair<Point*, Ideal*>[global_ctx.target_num * 20];
-	global_ctx.num_threads = 1;
 
-
+	
+	auto total_runtime_start = std::chrono::high_resolution_clock::now();
 	pthread_t threads[global_ctx.num_threads];
 	query_context ctx[global_ctx.num_threads];
 	for(int i=0;i<global_ctx.num_threads;i++){
@@ -128,11 +125,9 @@ int main(int argc, char** argv) {
 		pthread_join(threads[i], &status);
 	}
 
-	printf("total pair size = %d\n", global_ctx.point_polygon_pairs.size());
-
 	auto total_runtime_end = std::chrono::high_resolution_clock::now();
 	auto total_runtime_duration = std::chrono::duration_cast<std::chrono::milliseconds>(total_runtime_end - total_runtime_start);
-	std::cout << "cpu extra time: " << total_runtime_duration.count() << " ms" << std::endl;
+	std::cout << "rtree query: " << total_runtime_duration.count() << " ms" << std::endl;
 #ifdef USE_GPU
 	auto preprocess_gpu_start = std::chrono::high_resolution_clock::now();
 	preprocess_for_gpu(&global_ctx);

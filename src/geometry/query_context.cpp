@@ -258,6 +258,7 @@ query_context get_parameters(int argc, char **argv){
 		("small_threshold", po::value<int>(&global_ctx.small_threshold), "low threshold for complex polygon")
 		("sample_rate", po::value<float>(&global_ctx.sample_rate), "sample rate")
 		("latency,l","collect the latency information")
+		("batch_size", po::value<int>(&global_ctx.batch_size), "batch size")
 		;
 	po::variables_map vm;
 	try{

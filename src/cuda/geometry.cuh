@@ -3,7 +3,7 @@
 #include "cuda_util.h"
 #include "Ideal.h"
 
-#define BLOCK_SIZE 512
+#define BLOCK_SIZE 256
 #define WITHIN_DISTANCE 10
 
 const double EARTH_RADIUS_KM = 6371.0;
@@ -111,7 +111,7 @@ __device__ __forceinline__ int gpu_get_offset_y(double s_yval, double t_yval, do
 // 	return BORDER;
 // }
 
-__device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, int &id, uint16_t offset = 0)
+__device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, int &id, uint32_t offset = 0)
 {
 	uint8_t st = (status + start + offset)[id];
 	if(st == 0) return OUT;

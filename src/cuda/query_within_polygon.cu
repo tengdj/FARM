@@ -50,7 +50,7 @@ __global__ void kernel_init(Batch *d_pairs, RasterInfo *d_info, uint size, doubl
     }
 }
 
-__global__ void first_cal_box_distance(Batch *pairs, RasterInfo *layer_info, uint16_t *layer_offset, uint8_t *status, double *max_box_dist, uint *global_level, uint size, BoxDistRange *buffer, uint *buffer_size, bool *resultmap)
+__global__ void first_cal_box_distance(Batch *pairs, RasterInfo *layer_info, uint32_t *layer_offset, uint8_t *status, double *max_box_dist, uint *global_level, uint size, BoxDistRange *buffer, uint *buffer_size, bool *resultmap)
 {
     const int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (pair_id < size)
@@ -59,8 +59,8 @@ __global__ void first_cal_box_distance(Batch *pairs, RasterInfo *layer_info, uin
         IdealOffset &source = pair.source;
         IdealOffset &target = pair.target;     
 
-        uint16_t source_offset = (layer_offset + source.layer_offset_start)[*global_level];
-        uint16_t target_offset = (layer_offset + target.layer_offset_start)[*global_level];
+        uint32_t source_offset = (layer_offset + source.layer_offset_start)[*global_level];
+        uint32_t target_offset = (layer_offset + target.layer_offset_start)[*global_level];
 
         box &s_mbr = (layer_info + source.layer_info_start)[*global_level].mbr, &t_mbr = (layer_info + target.layer_info_start)[*global_level].mbr;
         const double &s_step_x = (layer_info + source.layer_info_start)[*global_level].step_x, &s_step_y = (layer_info + source.layer_info_start)[*global_level].step_y;
@@ -90,7 +90,7 @@ __global__ void first_cal_box_distance(Batch *pairs, RasterInfo *layer_info, uin
     }
 }
 
-__global__ void cal_box_distance(BoxDistRange *candidate, Batch *pairs, RasterInfo *layer_info, uint16_t *layer_offset, uint8_t *status, double *max_box_dist, uint *global_level, uint *size, BoxDistRange *buffer, uint *buffer_size, bool *resultmap)
+__global__ void cal_box_distance(BoxDistRange *candidate, Batch *pairs, RasterInfo *layer_info, uint32_t *layer_offset, uint8_t *status, double *max_box_dist, uint *global_level, uint *size, BoxDistRange *buffer, uint *buffer_size, bool *resultmap)
 {
     const int candidate_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (candidate_id < *size)
@@ -114,7 +114,7 @@ __global__ void cal_box_distance(BoxDistRange *candidate, Batch *pairs, RasterIn
         }
 
         int source_start_x, source_start_y, source_end_x, source_end_y, target_start_x, target_start_y, target_end_x, target_end_y;
-        uint16_t source_offset, target_offset;
+        uint32_t source_offset, target_offset;
         box s_mbr, t_mbr;
         double s_step_x, s_step_y, t_step_x, t_step_y;
         int s_dimx, s_dimy, t_dimx, t_dimy;
@@ -338,7 +338,7 @@ __global__ void kernel_merge(int *pixelpairidx, uint *pixelpairsize, BoxDistRang
     }
 }
 
-__global__ void kernel_unroll(int *pixelpairidx, uint *pixelpairsize, int *mergeSize, BoxDistRange *pixpairs, Batch *pairs, uint16_t *offset, EdgeSeq *edge_sequences, Point *vertices, int pairId, int *loop, Task *tasks, uint *batch_size, bool *resultmap, double *distance)
+__global__ void kernel_unroll(int *pixelpairidx, uint *pixelpairsize, int *mergeSize, BoxDistRange *pixpairs, Batch *pairs, uint32_t *offset, EdgeSeq *edge_sequences, Point *vertices, int pairId, int *loop, Task *tasks, uint *batch_size, bool *resultmap, double *distance)
 {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < mergeSize[pairId])
@@ -570,7 +570,8 @@ uint cuda_within_polygon(query_context *gctx)
             timer.startTimer();
             cal_box_distance<<<grid_size, block_size>>>((BoxDistRange *)d_BufferInput, d_pairs, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, d_max_box_dist, d_level, d_bufferinput_size, (BoxDistRange *)d_BufferOutput, d_bufferoutput_size, d_resultmap);
             cudaDeviceSynchronize();
-            check_execution("cal_box_distance");
+            check_execution("cal_box_distance");            
+
             timer.stopTimer();
             printf("kernel calculate box distance: %f ms\n", timer.getElapsedTime());
 

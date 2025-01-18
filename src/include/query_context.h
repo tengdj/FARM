@@ -106,6 +106,7 @@ public:
 	bool perform_refine = true;
 	bool collect_latency = false;
 	float sample_rate = 1.0;
+	int batch_size = 0;
 
 	int small_threshold = 500;
 	int big_threshold = 400000;
@@ -171,20 +172,20 @@ public:
 	RasterInfo *d_info = nullptr;
 	uint8_t *h_status = nullptr;
 	uint8_t *d_status = nullptr;
-	uint16_t *h_offset = nullptr;
-	uint16_t *d_offset = nullptr;
+	uint32_t *h_offset = nullptr;
+	uint32_t *d_offset = nullptr;
 	EdgeSeq *h_edge_sequences = nullptr;
 	EdgeSeq *d_edge_sequences = nullptr;
 	Point *h_vertices = nullptr;
 	Point *d_vertices = nullptr;
-	uint16_t *h_gridline_offset = nullptr;
-	uint16_t *d_gridline_offset = nullptr;
+	uint32_t *h_gridline_offset = nullptr;
+	uint32_t *d_gridline_offset = nullptr;
 	double *h_gridline_nodes = nullptr;
 	double *d_gridline_nodes = nullptr;
 	RasterInfo *h_layer_info = nullptr;
 	RasterInfo *d_layer_info = nullptr;
-	uint16_t *h_layer_offset = nullptr;
-	uint16_t *d_layer_offset = nullptr;
+	uint32_t *h_layer_offset = nullptr;
+	uint32_t *d_layer_offset = nullptr;
 	
 
 	size_t num_polygons = 0;

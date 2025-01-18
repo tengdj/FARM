@@ -29,13 +29,19 @@ public:
 
 struct IdealOffset{
 	uint info_start;
+	uint info_end;
 	uint status_start;
+	uint status_end;
 	uint offset_start;
+	uint offset_end;
 	uint edge_sequences_start;
+	uint edge_sequences_end;
 	uint vertices_start;
+	uint vertices_end;
 	uint gridline_offset_start;
 	uint gridline_offset_end;
 	uint gridline_nodes_start;
+	uint gridline_nodes_end;
 	uint layer_info_start;
 	uint layer_offset_start;
 };
@@ -46,7 +52,7 @@ struct EdgeSeq{
 };
 
 class Grid_line{
-	uint16_t *offset = nullptr;
+	uint32_t *offset = nullptr;
 	double *intersection_nodes = nullptr;
 
 	size_t num_grid_lines = 0;
@@ -63,9 +69,9 @@ public:
 	void set_num_crosses(size_t x) {num_crosses = x;}
 	size_t get_num_crosses() {return num_crosses;}
 	void set_offset(int id, int idx) {offset[id] = idx;}
-	uint16_t get_offset(int id) {return offset[id];}
+	uint32_t get_offset(int id) {return offset[id];}
 	double get_intersection_nodes(int id) {return intersection_nodes[id];}
-	uint16_t *get_offset() {return offset;}
+	uint32_t *get_offset() {return offset;}
 	double *get_intersection_nodes() {return intersection_nodes;}
 };
 
@@ -75,11 +81,11 @@ public:
 	bool use_hierachy = false;
 
 private:
-	uint16_t *offset = nullptr;
+	uint32_t *offset = nullptr;
 	pair<uint32_t, uint32_t> *edge_sequences = nullptr;
 	Grid_line *horizontal = nullptr;
 	Grid_line *vertical = nullptr;
-	uint16_t *layer_offset = nullptr;
+	uint32_t *layer_offset = nullptr;
     RasterInfo *layer_info = nullptr;
 	Hraster *layers = nullptr;
 
@@ -104,15 +110,15 @@ public:
 	void rasterization();
 
 	void set_offset(int id, int idx){offset[id] = idx;}
-	uint16_t get_offset(int id) {return offset[id];}
-	uint16_t *get_offset() {return offset; }
+	uint32_t get_offset(int id) {return offset[id];}
+	uint32_t *get_offset() {return offset; }
 	void process_pixels_null(int x, int y);
 	void init_edge_sequences(int num_edge_seqs);
 	void add_edge(int idx, int start, int end);
 	pair<uint32_t, uint32_t> get_edge_sequence(int idx){return edge_sequences[idx];}
 	pair<uint32_t, uint32_t> *get_edge_sequence(){return edge_sequences;}
 	uint get_len_edge_sequences() {return len_edge_sequences;}
-	uint16_t get_num_sequences(int id);
+	uint32_t get_num_sequences(int id);
 	double get_possible_min(box *t_mbr, int core_x_low, int core_y_low, int core_x_high, int code_y_high, int step, bool geography = true);
 	double get_possible_min(Point &p, int center, int step, bool geography = true);
 	void process_crosses(map<int, vector<cross_info>> edge_info);
@@ -123,7 +129,7 @@ public:
 	uint get_num_layers() { return num_layers; }
 	uint get_status_size() { return status_size; }
 	RasterInfo* get_layer_info() { return layer_info; }
-	uint16_t* get_layer_offset() { return layer_offset; }
+	uint32_t* get_layer_offset() { return layer_offset; }
 
 
 	// statistic collection

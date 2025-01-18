@@ -49,8 +49,8 @@ void cuda_create_buffer(query_context *gctx)
     gctx->h_status = new uint8_t[num_status];
     log("\t%.2f MB\t\tstatus", 1.0 * sizeof(uint8_t) * num_status / 1024 / 1024);
 
-    gctx->h_offset = new uint16_t[num_offset];
-    log("\t%.2f MB\toffset", 1.0 * sizeof(uint16_t) * num_offset / 1024 / 1024);
+    gctx->h_offset = new uint32_t[num_offset];
+    log("\t%.2f MB\toffset", 1.0 * sizeof(uint32_t) * num_offset / 1024 / 1024);
 
     gctx->h_edge_sequences = new EdgeSeq[num_edge_sequences];
     log("\t%.2f MB\tedge sequences", 1.0 * sizeof(EdgeSeq) * num_edge_sequences / 1024 / 1024);
@@ -58,8 +58,8 @@ void cuda_create_buffer(query_context *gctx)
     gctx->h_vertices = new Point[num_vertices];
     log("\t%.2f MB\tvertices", 1.0 * sizeof(Point) * num_vertices / 1024 / 1024);
 
-    gctx->h_gridline_offset = new uint16_t[num_gridline_offset];
-    log("\t%.2f MB\t\tgrid line offset", 1.0 * sizeof(uint16_t) * num_gridline_offset / 1024 / 1024);
+    gctx->h_gridline_offset = new uint32_t[num_gridline_offset];
+    log("\t%.2f MB\t\tgrid line offset", 1.0 * sizeof(uint32_t) * num_gridline_offset / 1024 / 1024);
 
     gctx->h_gridline_nodes = new double[num_gridline_nodes];
     log("\t%.2f MB\tgrid line nodes", 1.0 * sizeof(double) * num_gridline_nodes / 1024 / 1024);
@@ -72,8 +72,8 @@ void cuda_create_buffer(query_context *gctx)
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_status, sizeof(uint8_t) * num_status));
     log("\t%.2f MB\t\tstatus", 1.0 * sizeof(uint8_t) * num_status / 1024 / 1024);
 
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_offset, sizeof(uint16_t) * num_offset));
-    log("\t%.2f MB\toffset", 1.0 * sizeof(uint16_t) * num_offset / 1024 / 1024);
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_offset, sizeof(uint32_t) * num_offset));
+    log("\t%.2f MB\toffset", 1.0 * sizeof(uint32_t) * num_offset / 1024 / 1024);
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_edge_sequences, sizeof(EdgeSeq) * num_edge_sequences));
     log("\t%.2f MB\tedge sequences", 1.0 * sizeof(EdgeSeq) * num_edge_sequences / 1024 / 1024);
@@ -81,8 +81,8 @@ void cuda_create_buffer(query_context *gctx)
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_vertices, sizeof(Point) * num_vertices));
     log("\t%.2f MB\tvertices", 1.0 * sizeof(Point) * num_vertices / 1024 / 1024);
 
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_gridline_offset, sizeof(uint16_t) * num_gridline_offset));
-    log("\t%.2f MB\t\tgrid line offset", 1.0 * sizeof(uint16_t) * num_gridline_offset / 1024 / 1024);
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_gridline_offset, sizeof(uint32_t) * num_gridline_offset));
+    log("\t%.2f MB\t\tgrid line offset", 1.0 * sizeof(uint32_t) * num_gridline_offset / 1024 / 1024);
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_gridline_nodes, sizeof(double) * num_gridline_nodes));
     log("\t%.2f MB\tgrid line nodes", 1.0 * sizeof(double) * num_gridline_nodes / 1024 / 1024);
@@ -98,13 +98,13 @@ void cuda_create_buffer(query_context *gctx)
     if(gctx->use_hierachy){
         gctx->h_layer_info = new RasterInfo[num_layer_info];
         log("\t%.2f MB\tlayer info", 1.0 * sizeof(RasterInfo) * num_layer_info / 1024 / 1024);
-        gctx->h_layer_offset = new uint16_t[num_layer_offset];
-        log("\t%.2f MB\tlayer offset", 1.0 * sizeof(uint16_t) * num_layer_offset / 1024 / 1024);
+        gctx->h_layer_offset = new uint32_t[num_layer_offset];
+        log("\t%.2f MB\tlayer offset", 1.0 * sizeof(uint32_t) * num_layer_offset / 1024 / 1024);
 
         CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_layer_info, sizeof(RasterInfo) * num_layer_info));
         log("\t%.2f MB\tlayer info", 1.0 * sizeof(RasterInfo) * num_layer_info / 1024 / 1024);
-        CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_layer_offset, sizeof(uint16_t) * num_layer_offset));
-        log("\t%.2f MB\tlayer offset", 1.0 * sizeof(uint16_t) * num_layer_offset / 1024 / 1024);
+        CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_layer_offset, sizeof(uint32_t) * num_layer_offset));
+        log("\t%.2f MB\tlayer offset", 1.0 * sizeof(uint32_t) * num_layer_offset / 1024 / 1024);
 
         gctx->num_layer_info = num_layer_info;
         gctx->num_layer_offset = num_layer_offset;
@@ -122,6 +122,13 @@ void preprocess_for_gpu(query_context *gctx)
         flag1 = true;
         // Ideal *source = gctx->point_polygon_pairs[i].second;
         Ideal *source = tp.second;
+        
+        // cout << source->get_dimx() << endl;
+        // for(int i = 0; i < source->get_vertical()->get_num_grid_lines(); i ++){
+        //     cout << source->get_vertical()->get_offset()[i] << " ";
+        // }
+        // cout << endl;
+
         int dimx = source->get_dimx(), dimy = source->get_dimy();
         if (source->idealoffset == nullptr)
         {
@@ -132,29 +139,34 @@ void preprocess_for_gpu(query_context *gctx)
             memcpy(gctx->h_info + iidx, &rasterinfo, sizeof(RasterInfo));
             source->idealoffset->info_start = iidx;
             iidx++;
+            source->idealoffset->info_end = iidx;
 
             uint status_size = source->get_status_size();
             memcpy(gctx->h_status + sidx, source->get_status(), status_size);
             source->idealoffset->status_start = sidx;
             sidx += status_size;
+            source->idealoffset->status_end = sidx;
 
             uint offset_size = (dimx + 1) * (dimy + 1) + 1;
-            memcpy(gctx->h_offset + oidx, source->get_offset(), offset_size * sizeof(uint16_t));
+            memcpy(gctx->h_offset + oidx, source->get_offset(), offset_size * sizeof(uint32_t));
             source->idealoffset->offset_start = oidx;
             oidx += offset_size;
+            source->idealoffset->offset_end = oidx;
 
             uint edge_sequences_size = source->get_len_edge_sequences();
             memcpy(gctx->h_edge_sequences + eidx, source->get_edge_sequence(), edge_sequences_size * sizeof(EdgeSeq));
             source->idealoffset->edge_sequences_start = eidx;
             eidx += edge_sequences_size;
+            source->idealoffset->edge_sequences_end = eidx;
 
             uint vertices_size = source->get_num_vertices();
             memcpy(gctx->h_vertices + vidx, source->get_boundary()->p, vertices_size * sizeof(Point));
             source->idealoffset->vertices_start = vidx;
             vidx += vertices_size;
+            source->idealoffset->vertices_end = vidx;
 
             uint gridline_offset_size = source->get_vertical()->get_num_grid_lines();
-            memcpy(gctx->h_gridline_offset + goidx, source->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint16_t));
+            memcpy(gctx->h_gridline_offset + goidx, source->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint32_t));
             source->idealoffset->gridline_offset_start = goidx;
             goidx += gridline_offset_size;
             source->idealoffset->gridline_offset_end = goidx;
@@ -163,6 +175,7 @@ void preprocess_for_gpu(query_context *gctx)
             memcpy(gctx->h_gridline_nodes + gnidx, source->get_vertical()->get_intersection_nodes(), gridline_nodes_size * sizeof(double));
             source->idealoffset->gridline_nodes_start = gnidx;
             gnidx += gridline_nodes_size;
+            source->idealoffset->gridline_nodes_end = gnidx;
 
             if(gctx->use_hierachy){
                 uint layer_info_size = source->get_num_layers() + 1;
@@ -171,7 +184,7 @@ void preprocess_for_gpu(query_context *gctx)
                 liidx += layer_info_size;
 
                 uint layer_offset_size = source->get_num_layers() + 1;
-                memcpy(gctx->h_layer_offset + loidx, source->get_layer_offset(), layer_offset_size * sizeof(uint16_t));
+                memcpy(gctx->h_layer_offset + loidx, source->get_layer_offset(), layer_offset_size * sizeof(uint32_t));
                 source->idealoffset->layer_offset_start = loidx;
                 loidx += layer_offset_size;
             }
@@ -199,7 +212,7 @@ void preprocess_for_gpu(query_context *gctx)
             sidx += status_size;
 
             uint offset_size = (dimx + 1) * (dimy + 1) + 1;
-            memcpy(gctx->h_offset + oidx, source->get_offset(), offset_size * sizeof(uint16_t));
+            memcpy(gctx->h_offset + oidx, source->get_offset(), offset_size * sizeof(uint32_t));
             source->idealoffset->offset_start = oidx;
             oidx += offset_size;
 
@@ -214,7 +227,7 @@ void preprocess_for_gpu(query_context *gctx)
             vidx += vertices_size;
 
             uint gridline_offset_size = source->get_vertical()->get_num_grid_lines();
-            memcpy(gctx->h_gridline_offset + goidx, source->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint16_t));
+            memcpy(gctx->h_gridline_offset + goidx, source->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint32_t));
             source->idealoffset->gridline_offset_start = goidx;
             goidx += gridline_offset_size;
             source->idealoffset->gridline_offset_end = goidx;
@@ -224,6 +237,7 @@ void preprocess_for_gpu(query_context *gctx)
             source->idealoffset->gridline_nodes_start = gnidx;
             gnidx += gridline_nodes_size;
 
+
             if(gctx->use_hierachy){
                 uint layer_info_size = source->get_num_layers() + 1;
                 memcpy(gctx->h_layer_info + liidx, source->get_layer_info(), layer_info_size * sizeof(RasterInfo));
@@ -231,7 +245,7 @@ void preprocess_for_gpu(query_context *gctx)
                 liidx += layer_info_size;
 
                 uint layer_offset_size = source->get_num_layers() + 1;
-                memcpy(gctx->h_layer_offset + loidx, source->get_layer_offset(), layer_offset_size * sizeof(uint16_t));
+                memcpy(gctx->h_layer_offset + loidx, source->get_layer_offset(), layer_offset_size * sizeof(uint32_t));
                 source->idealoffset->layer_offset_start = loidx;
                 loidx += layer_offset_size;
             }
@@ -255,7 +269,7 @@ void preprocess_for_gpu(query_context *gctx)
             sidx += status_size;
 
             uint offset_size = (dimx + 1) * (dimy + 1) + 1;
-            memcpy(gctx->h_offset + oidx, target->get_offset(), offset_size * sizeof(uint16_t));
+            memcpy(gctx->h_offset + oidx, target->get_offset(), offset_size * sizeof(uint32_t));
             target->idealoffset->offset_start = oidx;
             oidx += offset_size;
 
@@ -270,7 +284,7 @@ void preprocess_for_gpu(query_context *gctx)
             vidx += vertices_size;
 
             uint gridline_offset_size = target->get_vertical()->get_num_grid_lines();
-            memcpy(gctx->h_gridline_offset + goidx, target->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint16_t));
+            memcpy(gctx->h_gridline_offset + goidx, target->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint32_t));
             target->idealoffset->gridline_offset_start = goidx;
             goidx += gridline_offset_size;
             target->idealoffset->gridline_offset_end = goidx;
@@ -287,7 +301,7 @@ void preprocess_for_gpu(query_context *gctx)
                 liidx += layer_info_size;
 
                 uint layer_offset_size = target->get_num_layers() + 1;
-                memcpy(gctx->h_layer_offset + loidx, target->get_layer_offset(), layer_offset_size * sizeof(uint16_t));
+                memcpy(gctx->h_layer_offset + loidx, target->get_layer_offset(), layer_offset_size * sizeof(uint32_t));
                 target->idealoffset->layer_offset_start = loidx;
                 loidx += layer_offset_size;
             }
@@ -298,14 +312,14 @@ void preprocess_for_gpu(query_context *gctx)
 
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_info, gctx->h_info, gctx->num_polygons * sizeof(RasterInfo), cudaMemcpyHostToDevice));
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_status, gctx->h_status, gctx->num_status * sizeof(uint8_t), cudaMemcpyHostToDevice));
-    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_offset, gctx->h_offset, gctx->num_offset * sizeof(uint16_t), cudaMemcpyHostToDevice));
+    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_offset, gctx->h_offset, gctx->num_offset * sizeof(uint32_t), cudaMemcpyHostToDevice));
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_edge_sequences, gctx->h_edge_sequences, gctx->num_edge_sequences * sizeof(EdgeSeq), cudaMemcpyHostToDevice));
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_vertices, gctx->h_vertices, gctx->num_vertices * sizeof(Point), cudaMemcpyHostToDevice));
-    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_gridline_offset, gctx->h_gridline_offset, gctx->num_gridline_offset * sizeof(uint16_t), cudaMemcpyHostToDevice));
+    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_gridline_offset, gctx->h_gridline_offset, gctx->num_gridline_offset * sizeof(uint32_t), cudaMemcpyHostToDevice));
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_gridline_nodes, gctx->h_gridline_nodes, gctx->num_gridline_nodes * sizeof(double), cudaMemcpyHostToDevice));
     if(gctx->use_hierachy){
         CUDA_SAFE_CALL(cudaMemcpy(gctx->d_layer_info, gctx->h_layer_info, gctx->num_layer_info * sizeof(RasterInfo), cudaMemcpyHostToDevice));
-        CUDA_SAFE_CALL(cudaMemcpy(gctx->d_layer_offset, gctx->h_layer_offset, gctx->num_layer_offset * sizeof(uint16_t), cudaMemcpyHostToDevice));
+        CUDA_SAFE_CALL(cudaMemcpy(gctx->d_layer_offset, gctx->h_layer_offset, gctx->num_layer_offset * sizeof(uint32_t), cudaMemcpyHostToDevice));
     }
 
     double h_degree_per_kilometer_latitude = 360.0/40076.0;

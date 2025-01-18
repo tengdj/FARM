@@ -9,6 +9,7 @@
 #include <fstream>
 #include "../index/RTree.h"
 #include <queue>
+#include <chrono>
 
 RTree<Ideal *, double, 2, double> ideal_rtree;
 RTree<MyPolygon *, double, 2, double> poly_rtree;
@@ -101,6 +102,8 @@ int main(int argc, char** argv) {
 
 	pthread_t threads[global_ctx.num_threads];
 	query_context ctx[global_ctx.num_threads];
+
+	auto total_runtime_start = std::chrono::high_resolution_clock::now();
 	for(int i=0;i<global_ctx.num_threads;i++){
 		ctx[i] = query_context(global_ctx);
 		ctx[i].thread_id = i;
@@ -113,6 +116,10 @@ int main(int argc, char** argv) {
 		void *status;
 		pthread_join(threads[i], &status);
 	}
+	auto total_runtime_end = std::chrono::high_resolution_clock::now();
+	auto total_runtime_duration = std::chrono::duration_cast<std::chrono::milliseconds>(total_runtime_end - total_runtime_start);
+	std::cout << "rtree query: " << total_runtime_duration.count() << " ms" << std::endl;
+
 #ifdef USE_GPU
 	preprocess_for_gpu(&global_ctx);
 	timeval start = get_cur_time();
