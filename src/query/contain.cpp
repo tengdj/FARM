@@ -16,7 +16,6 @@
 // some shared parameters
 
 RTree<Ideal *, double, 2, double> ideal_rtree;
-RTree<MyPolygon *, double, 2, double> poly_rtree;
 
 bool IdealSearchCallback(Ideal *ideal, void* arg){
 	query_context *ctx = (query_context *)arg;
@@ -26,17 +25,12 @@ bool IdealSearchCallback(Ideal *ideal, void* arg){
 #ifdef USE_GPU
 	else{
 		if(ideal->getMBB()->contain(*(Point *)ctx->target)){
-			ctx->point_polygon_pairs.emplace_back(make_pair((Point *)ctx->target, ideal));
+			ctx->point_polygon_pairs.emplace_back(make_pair(ctx->target_id, ideal->id));
+
 			// ctx->point_polygon_pairs[ctx->point_polygon_pairs_idx ++] = make_pair((Point *)ctx->target, ideal);
 		}
 	}
 #endif
-	return true;
-}
-
-bool PolygonSearchCallback(MyPolygon *poly, void* arg){
-	query_context *ctx = (query_context *)arg;
-	ctx->found += poly->contain(*(Point *)ctx->target, ctx);
 	return true;
 }
 
@@ -50,11 +44,8 @@ void *query(void *args){
 	while(ctx->next_batch(100)){
 		for(int i=ctx->index;i<ctx->index_end;i++){
 			ctx->target = (void *)&gctx->points[i];
-			if(gctx->use_ideal){
-				ideal_rtree.Search((double *)(gctx->points+i), (double *)(gctx->points+i), IdealSearchCallback, (void *)ctx);
-			}else{
-				poly_rtree.Search((double *)(gctx->points+i), (double *)(gctx->points+i), PolygonSearchCallback, (void *)ctx);
-			}
+			ctx->target_id = i;
+			ideal_rtree.Search((double *)(gctx->points+i), (double *)(gctx->points+i), IdealSearchCallback, (void *)ctx);
 			ctx->report_progress();
 		}
 	}
@@ -72,21 +63,16 @@ int main(int argc, char** argv) {
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::contain;
 	
-	if(global_ctx.use_ideal){
-		global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
-		timeval start = get_cur_time();
-		for(auto p : global_ctx.source_ideals){
-			ideal_rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
-		}
-		logt("building R-Tree with %d nodes", start, global_ctx.source_ideals.size());
-	}else{
-		global_ctx.source_polygons = load_polygons_from_path(global_ctx.source_path.c_str(), global_ctx);
-		timeval start = get_cur_time();
-		for(auto p : global_ctx.source_polygons){
-			poly_rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
-		}
-		logt("building R-Tree with %d nodes", start, global_ctx.source_polygons.size());
+
+	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
+	// read all the points
+	global_ctx.load_points();
+	
+	timeval start = get_cur_time();
+	for(auto p : global_ctx.source_ideals){
+		ideal_rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
 	}
+	logt("building R-Tree with %d nodes", start, global_ctx.source_ideals.size());
 
 	auto preprocess_start = std::chrono::high_resolution_clock::now();
 	preprocess(&global_ctx);
@@ -94,20 +80,15 @@ int main(int argc, char** argv) {
 	auto preprocess_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start);
 	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
 
-	// for(int i = 0; i < global_ctx.source_ideals.size(); i ++){
-	// 	if(global_ctx.source_ideals[i]->get_num_vertices() == 817){
-	// 		global_ctx.source_ideals[i]->MyPolygon::print();
-	// 		global_ctx.source_ideals[i]->MyRaster::print();
-	// 	}
+#ifdef USE_GPU
+	auto preprocess_gpu_start = std::chrono::high_resolution_clock::now();
+	preprocess_for_gpu(&global_ctx);
+	auto preprocess_gpu_end = std::chrono::high_resolution_clock::now();
+	auto preprocess_gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_gpu_end - preprocess_gpu_start);
+	std::cout << "preprocess for gpu time: " << preprocess_gpu_duration.count() << " ms" << std::endl;
+#endif
 
-	// }
-	// return 0;
-	// read all the points
-	global_ctx.load_points();
-
-	// global_ctx.point_polygon_pairs = new pair<Point*, Ideal*>[global_ctx.target_num * 20];
-
-	
+	global_ctx.num_threads = 1;
 	auto total_runtime_start = std::chrono::high_resolution_clock::now();
 	pthread_t threads[global_ctx.num_threads];
 	query_context ctx[global_ctx.num_threads];
@@ -128,13 +109,13 @@ int main(int argc, char** argv) {
 	auto total_runtime_end = std::chrono::high_resolution_clock::now();
 	auto total_runtime_duration = std::chrono::duration_cast<std::chrono::milliseconds>(total_runtime_end - total_runtime_start);
 	std::cout << "rtree query: " << total_runtime_duration.count() << " ms" << std::endl;
+
 #ifdef USE_GPU
-	auto preprocess_gpu_start = std::chrono::high_resolution_clock::now();
-	preprocess_for_gpu(&global_ctx);
-	auto preprocess_gpu_end = std::chrono::high_resolution_clock::now();
-	auto preprocess_gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_gpu_end - preprocess_gpu_start);
-	std::cout << "preprocess for gpu time: " << preprocess_gpu_duration.count() << " ms" << std::endl;
+	auto gpu_start = std::chrono::high_resolution_clock::now();
 	global_ctx.found = cuda_contain(&global_ctx);
+	auto gpu_end = std::chrono::high_resolution_clock::now();
+	auto gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(gpu_end - gpu_start);
+	std::cout << "total gpu time: " << gpu_duration.count() << " ms" << std::endl;
 #endif
 	cout << endl;
 	printf("FOUND: %d\n", global_ctx.found);

@@ -30,8 +30,9 @@ struct IdealOffset;
 enum QueryType
 {
 	contain = 0,
-	// distance = 1,
-	within = 2
+	contain_polygon = 1,
+	within = 2,
+	within_polygon
 };
 
 class execute_step
@@ -111,7 +112,7 @@ public:
 	int small_threshold = 500;
 	int big_threshold = 400000;
 
-	QueryType query_type = QueryType::contain;
+	QueryType query_type;
 	int within_distance = 10;
 
 	string source_path;
@@ -157,8 +158,9 @@ public:
 	void *target3 = NULL;
 	query_context *global_ctx = NULL;
 	size_t target_num = 0;
-	vector<pair<Ideal *, Ideal *>> polygon_pairs;
-	vector<pair<Point *, Ideal *>> point_polygon_pairs;
+	size_t target_id = 0;
+	vector<pair<size_t, size_t>> polygon_pairs;
+	vector<pair<size_t, size_t>> point_polygon_pairs;
 	// pair<Point *, Ideal *>* point_polygon_pairs = nullptr;
 	// int point_polygon_pairs_size = 0;
 	// int point_polygon_pairs_idx = 0;
@@ -168,6 +170,9 @@ public:
 
 	// for gpu
 
+	Point* d_points = nullptr;
+	IdealOffset *h_idealoffset = nullptr;
+	IdealOffset *d_idealoffset = nullptr;
 	RasterInfo *h_info = nullptr;
 	RasterInfo *d_info = nullptr;
 	uint8_t *h_status = nullptr;
@@ -187,7 +192,6 @@ public:
 	uint32_t *h_layer_offset = nullptr;
 	uint32_t *d_layer_offset = nullptr;
 	
-
 	size_t num_polygons = 0;
 	size_t num_status = 0;
 	size_t num_offset = 0;
@@ -200,6 +204,14 @@ public:
 
 	double *d_degree_degree_per_kilometer_latitude = nullptr;
 	double *degree_per_kilometer_longitude_arr = nullptr;
+
+	char* d_BufferInput = nullptr;
+	uint *d_bufferinput_size = nullptr;
+	char* d_BufferOutput = nullptr;
+	uint *d_bufferoutput_size = nullptr;
+
+	uint8_t *h_resultmap = nullptr;
+	uint8_t* d_resultmap = nullptr;
 
 	// for hierachy
 	double min_step_x = DBL_MAX;

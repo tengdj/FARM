@@ -29,19 +29,12 @@ public:
 
 struct IdealOffset{
 	uint info_start;
-	uint info_end;
 	uint status_start;
-	uint status_end;
 	uint offset_start;
-	uint offset_end;
 	uint edge_sequences_start;
-	uint edge_sequences_end;
 	uint vertices_start;
-	uint vertices_end;
 	uint gridline_offset_start;
-	uint gridline_offset_end;
 	uint gridline_nodes_start;
-	uint gridline_nodes_end;
 	uint layer_info_start;
 	uint layer_offset_start;
 };
@@ -79,6 +72,7 @@ public:
 class Ideal : public MyPolygon, public MyRaster{
 public:
 	bool use_hierachy = false;
+	size_t id = 0;
 
 private:
 	uint32_t *offset = nullptr;
@@ -100,8 +94,6 @@ private:
 	void scanline_reandering();
 
 public:
-	IdealOffset *idealoffset = nullptr;
-
     Ideal(){
         pthread_mutex_init(&ideal_partition_lock, NULL);
     }

@@ -14,8 +14,12 @@ void cuda_create_buffer(query_context *gctx)
     size_t num_layer_info = 0;
     size_t num_layer_offset = 0;
 
+    size_t idx = 0;
+
     for (auto &ideal : gctx->source_ideals)
     {
+        ideal->id = idx ++;
+
         num_status += ideal->get_status_size();
         num_offset += ideal->get_num_pixels() + 1;
         num_edge_sequences += ideal->get_len_edge_sequences();
@@ -29,6 +33,8 @@ void cuda_create_buffer(query_context *gctx)
     }
     for (auto &ideal : gctx->target_ideals)
     {
+        ideal->id = idx ++;
+
         num_status += ideal->get_status_size();
         num_offset += ideal->get_num_pixels() + 1;
         num_edge_sequences += ideal->get_len_edge_sequences();
@@ -43,11 +49,14 @@ void cuda_create_buffer(query_context *gctx)
 
     log("CPU momory:");
 
+    gctx->h_idealoffset = new IdealOffset[num_polygons];
+    log("\t%.2f MB\tideal offset", 1.0 * sizeof(IdealOffset) * num_polygons / 1024 / 1024);
+
     gctx->h_info = new RasterInfo[num_polygons];
-    log("\t%.2f MB\t\tideal info", 1.0 * sizeof(RasterInfo) * num_polygons / 1024 / 1024);
+    log("\t%.2f MB\traster info", 1.0 * sizeof(RasterInfo) * num_polygons / 1024 / 1024);
 
     gctx->h_status = new uint8_t[num_status];
-    log("\t%.2f MB\t\tstatus", 1.0 * sizeof(uint8_t) * num_status / 1024 / 1024);
+    log("\t%.2f MB\tstatus", 1.0 * sizeof(uint8_t) * num_status / 1024 / 1024);
 
     gctx->h_offset = new uint32_t[num_offset];
     log("\t%.2f MB\toffset", 1.0 * sizeof(uint32_t) * num_offset / 1024 / 1024);
@@ -59,18 +68,26 @@ void cuda_create_buffer(query_context *gctx)
     log("\t%.2f MB\tvertices", 1.0 * sizeof(Point) * num_vertices / 1024 / 1024);
 
     gctx->h_gridline_offset = new uint32_t[num_gridline_offset];
-    log("\t%.2f MB\t\tgrid line offset", 1.0 * sizeof(uint32_t) * num_gridline_offset / 1024 / 1024);
+    log("\t%.2f MB\tgrid line offset", 1.0 * sizeof(uint32_t) * num_gridline_offset / 1024 / 1024);
 
     gctx->h_gridline_nodes = new double[num_gridline_nodes];
     log("\t%.2f MB\tgrid line nodes", 1.0 * sizeof(double) * num_gridline_nodes / 1024 / 1024);
 
     log("GPU memory:");
 
+    if(gctx->query_type == QueryType::contain || gctx->query_type == QueryType::within){
+        CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_points, sizeof(Point) * gctx->target_num));
+        log("\t%.2f MB\tpoints", 1.0 * sizeof(Point) * gctx->target_num / 1024 / 1024);     
+    }
+
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_idealoffset, sizeof(IdealOffset) * num_polygons));
+    log("\t%.2f MB\tideal offset", 1.0 * sizeof(IdealOffset) * num_polygons / 1024 / 1024);
+
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_info, sizeof(RasterInfo) * num_polygons));
-    log("\t%.2f MB\t\tideal info", 1.0 * sizeof(RasterInfo) * num_polygons / 1024 / 1024);
+    log("\t%.2f MB\traster info", 1.0 * sizeof(RasterInfo) * num_polygons / 1024 / 1024);
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_status, sizeof(uint8_t) * num_status));
-    log("\t%.2f MB\t\tstatus", 1.0 * sizeof(uint8_t) * num_status / 1024 / 1024);
+    log("\t%.2f MB\tstatus", 1.0 * sizeof(uint8_t) * num_status / 1024 / 1024);
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_offset, sizeof(uint32_t) * num_offset));
     log("\t%.2f MB\toffset", 1.0 * sizeof(uint32_t) * num_offset / 1024 / 1024);
@@ -82,7 +99,7 @@ void cuda_create_buffer(query_context *gctx)
     log("\t%.2f MB\tvertices", 1.0 * sizeof(Point) * num_vertices / 1024 / 1024);
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_gridline_offset, sizeof(uint32_t) * num_gridline_offset));
-    log("\t%.2f MB\t\tgrid line offset", 1.0 * sizeof(uint32_t) * num_gridline_offset / 1024 / 1024);
+    log("\t%.2f MB\tgrid line offset", 1.0 * sizeof(uint32_t) * num_gridline_offset / 1024 / 1024);
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_gridline_nodes, sizeof(double) * num_gridline_nodes));
     log("\t%.2f MB\tgrid line nodes", 1.0 * sizeof(double) * num_gridline_nodes / 1024 / 1024);
@@ -113,203 +130,113 @@ void cuda_create_buffer(query_context *gctx)
 
 void preprocess_for_gpu(query_context *gctx)
 {
-    bool flag1 = false, flag2 = false;
     // compact data
-    uint iidx = 0, sidx = 0, oidx = 0, eidx = 0, vidx = 0, goidx = 0, gnidx = 0, liidx = 0, loidx = 0;
-    // for(int i = 0; i < gctx->point_polygon_pairs_size; i ++)
-    for (auto &tp : gctx->point_polygon_pairs)
+    uint sidx = 0, oidx = 0, eidx = 0, vidx = 0, goidx = 0, gnidx = 0, liidx = 0, loidx = 0;
+
+    for (auto source : gctx->source_ideals)
     {
-        flag1 = true;
-        // Ideal *source = gctx->point_polygon_pairs[i].second;
-        Ideal *source = tp.second;
-        
-        // cout << source->get_dimx() << endl;
-        // for(int i = 0; i < source->get_vertical()->get_num_grid_lines(); i ++){
-        //     cout << source->get_vertical()->get_offset()[i] << " ";
-        // }
-        // cout << endl;
-
         int dimx = source->get_dimx(), dimy = source->get_dimy();
-        if (source->idealoffset == nullptr)
-        {
-            source->idealoffset = new IdealOffset{};
 
-            uint info_size = gctx->polygon_pairs.size();
-            RasterInfo rasterinfo{source->getMBB(), dimx, dimy, source->get_step_x(), source->get_step_y()};
-            memcpy(gctx->h_info + iidx, &rasterinfo, sizeof(RasterInfo));
-            source->idealoffset->info_start = iidx;
-            iidx++;
-            source->idealoffset->info_end = iidx;
+        IdealOffset& idealoffset = gctx->h_idealoffset[source->id];
+        gctx->h_info[source->id] = {*source->getMBB(), dimx, dimy, source->get_step_x(), source->get_step_y()};
 
-            uint status_size = source->get_status_size();
-            memcpy(gctx->h_status + sidx, source->get_status(), status_size);
-            source->idealoffset->status_start = sidx;
-            sidx += status_size;
-            source->idealoffset->status_end = sidx;
+        uint status_size = source->get_status_size();
+        memcpy(gctx->h_status + sidx, source->get_status(), status_size);
+        idealoffset.status_start = sidx;
+        sidx += status_size;
 
-            uint offset_size = (dimx + 1) * (dimy + 1) + 1;
-            memcpy(gctx->h_offset + oidx, source->get_offset(), offset_size * sizeof(uint32_t));
-            source->idealoffset->offset_start = oidx;
-            oidx += offset_size;
-            source->idealoffset->offset_end = oidx;
+        uint offset_size = (dimx + 1) * (dimy + 1) + 1;
+        memcpy(gctx->h_offset + oidx, source->get_offset(), offset_size * sizeof(uint32_t));
+        idealoffset.offset_start = oidx;
+        oidx += offset_size;
 
-            uint edge_sequences_size = source->get_len_edge_sequences();
-            memcpy(gctx->h_edge_sequences + eidx, source->get_edge_sequence(), edge_sequences_size * sizeof(EdgeSeq));
-            source->idealoffset->edge_sequences_start = eidx;
-            eidx += edge_sequences_size;
-            source->idealoffset->edge_sequences_end = eidx;
+        uint edge_sequences_size = source->get_len_edge_sequences();
+        memcpy(gctx->h_edge_sequences + eidx, source->get_edge_sequence(), edge_sequences_size * sizeof(EdgeSeq));
+        idealoffset.edge_sequences_start = eidx;
+        eidx += edge_sequences_size;
 
-            uint vertices_size = source->get_num_vertices();
-            memcpy(gctx->h_vertices + vidx, source->get_boundary()->p, vertices_size * sizeof(Point));
-            source->idealoffset->vertices_start = vidx;
-            vidx += vertices_size;
-            source->idealoffset->vertices_end = vidx;
+        uint vertices_size = source->get_num_vertices();
+        memcpy(gctx->h_vertices + vidx, source->get_boundary()->p, vertices_size * sizeof(Point));
+        idealoffset.vertices_start = vidx;
+        vidx += vertices_size;
 
-            uint gridline_offset_size = source->get_vertical()->get_num_grid_lines();
-            memcpy(gctx->h_gridline_offset + goidx, source->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint32_t));
-            source->idealoffset->gridline_offset_start = goidx;
-            goidx += gridline_offset_size;
-            source->idealoffset->gridline_offset_end = goidx;
+        uint gridline_offset_size = source->get_vertical()->get_num_grid_lines();
+        memcpy(gctx->h_gridline_offset + goidx, source->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint32_t));
+        idealoffset.gridline_offset_start = goidx;
+        goidx += gridline_offset_size;
 
-            uint gridline_nodes_size = source->get_vertical()->get_num_crosses();
-            memcpy(gctx->h_gridline_nodes + gnidx, source->get_vertical()->get_intersection_nodes(), gridline_nodes_size * sizeof(double));
-            source->idealoffset->gridline_nodes_start = gnidx;
-            gnidx += gridline_nodes_size;
-            source->idealoffset->gridline_nodes_end = gnidx;
+        uint gridline_nodes_size = source->get_vertical()->get_num_crosses();
+        memcpy(gctx->h_gridline_nodes + gnidx, source->get_vertical()->get_intersection_nodes(), gridline_nodes_size * sizeof(double));
+        idealoffset.gridline_nodes_start = gnidx;
+        gnidx += gridline_nodes_size;
 
-            if(gctx->use_hierachy){
-                uint layer_info_size = source->get_num_layers() + 1;
-                memcpy(gctx->h_layer_info + liidx, source->get_layer_info(), layer_info_size * sizeof(RasterInfo));
-                source->idealoffset->layer_info_start = liidx;
-                liidx += layer_info_size;
+        if(gctx->use_hierachy){
+            uint layer_info_size = source->get_num_layers() + 1;
+            memcpy(gctx->h_layer_info + liidx, source->get_layer_info(), layer_info_size * sizeof(RasterInfo));
+            idealoffset.layer_info_start = liidx;
+            liidx += layer_info_size;
 
-                uint layer_offset_size = source->get_num_layers() + 1;
-                memcpy(gctx->h_layer_offset + loidx, source->get_layer_offset(), layer_offset_size * sizeof(uint32_t));
-                source->idealoffset->layer_offset_start = loidx;
-                loidx += layer_offset_size;
-            }
+            uint layer_offset_size = source->get_num_layers() + 1;
+            memcpy(gctx->h_layer_offset + loidx, source->get_layer_offset(), layer_offset_size * sizeof(uint32_t));
+            idealoffset.layer_offset_start = loidx;
+            loidx += layer_offset_size;
         }
     }
 
-    for (auto &tp : gctx->polygon_pairs)
-    {
-        flag2 = true;
-        Ideal *source = tp.first;
-        int dimx = source->get_dimx(), dimy = source->get_dimy();
-        if (source->idealoffset == nullptr)
-        {
-            source->idealoffset = new IdealOffset{};
+    for (auto target : gctx->target_ideals){
+        int dimx = target->get_dimx(), dimy = target->get_dimy();
 
-            uint info_size = gctx->polygon_pairs.size();
-            RasterInfo rasterinfo{source->getMBB(), dimx, dimy, source->get_step_x(), source->get_step_y()};
-            memcpy(gctx->h_info + iidx, &rasterinfo, sizeof(RasterInfo));
-            source->idealoffset->info_start = iidx;
-            iidx++;
+        IdealOffset& idealoffset = gctx->h_idealoffset[target->id];
+        gctx->h_info[target->id] = {*target->getMBB(), dimx, dimy, target->get_step_x(), target->get_step_y()};
 
-            uint status_size = source->get_status_size();
-            memcpy(gctx->h_status + sidx, source->get_status(), status_size);
-            source->idealoffset->status_start = sidx;
-            sidx += status_size;
+        uint status_size = target->get_status_size();
+        memcpy(gctx->h_status + sidx, target->get_status(), status_size);
+        idealoffset.status_start = sidx;
+        sidx += status_size;
 
-            uint offset_size = (dimx + 1) * (dimy + 1) + 1;
-            memcpy(gctx->h_offset + oidx, source->get_offset(), offset_size * sizeof(uint32_t));
-            source->idealoffset->offset_start = oidx;
-            oidx += offset_size;
+        uint offset_size = (dimx + 1) * (dimy + 1) + 1;
+        memcpy(gctx->h_offset + oidx, target->get_offset(), offset_size * sizeof(uint32_t));
+        idealoffset.offset_start = oidx;
+        oidx += offset_size;
 
-            uint edge_sequences_size = source->get_len_edge_sequences();
-            memcpy(gctx->h_edge_sequences + eidx, source->get_edge_sequence(), edge_sequences_size * sizeof(EdgeSeq));
-            source->idealoffset->edge_sequences_start = eidx;
-            eidx += edge_sequences_size;
+        uint edge_sequences_size = target->get_len_edge_sequences();
+        memcpy(gctx->h_edge_sequences + eidx, target->get_edge_sequence(), edge_sequences_size * sizeof(EdgeSeq));
+        idealoffset.edge_sequences_start = eidx;
+        eidx += edge_sequences_size;
 
-            uint vertices_size = source->get_num_vertices();
-            memcpy(gctx->h_vertices + vidx, source->get_boundary()->p, vertices_size * sizeof(Point));
-            source->idealoffset->vertices_start = vidx;
-            vidx += vertices_size;
+        uint vertices_size = target->get_num_vertices();
+        memcpy(gctx->h_vertices + vidx, target->get_boundary()->p, vertices_size * sizeof(Point));
+        idealoffset.vertices_start = vidx;
+        vidx += vertices_size;
 
-            uint gridline_offset_size = source->get_vertical()->get_num_grid_lines();
-            memcpy(gctx->h_gridline_offset + goidx, source->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint32_t));
-            source->idealoffset->gridline_offset_start = goidx;
-            goidx += gridline_offset_size;
-            source->idealoffset->gridline_offset_end = goidx;
+        uint gridline_offset_size = target->get_vertical()->get_num_grid_lines();
+        memcpy(gctx->h_gridline_offset + goidx, target->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint32_t));
+        idealoffset.gridline_offset_start = goidx;
+        goidx += gridline_offset_size;
 
-            uint gridline_nodes_size = source->get_vertical()->get_num_crosses();
-            memcpy(gctx->h_gridline_nodes + gnidx, source->get_vertical()->get_intersection_nodes(), gridline_nodes_size * sizeof(double));
-            source->idealoffset->gridline_nodes_start = gnidx;
-            gnidx += gridline_nodes_size;
+        uint gridline_nodes_size = target->get_vertical()->get_num_crosses();
+        memcpy(gctx->h_gridline_nodes + gnidx, target->get_vertical()->get_intersection_nodes(), gridline_nodes_size * sizeof(double));
+        idealoffset.gridline_nodes_start = gnidx;
+        gnidx += gridline_nodes_size;
 
+        if(gctx->use_hierachy){
+            uint layer_info_size = target->get_num_layers() + 1;
+            memcpy(gctx->h_layer_info + liidx, target->get_layer_info(), layer_info_size * sizeof(RasterInfo));
+            idealoffset.layer_info_start = liidx;
+            liidx += layer_info_size;
 
-            if(gctx->use_hierachy){
-                uint layer_info_size = source->get_num_layers() + 1;
-                memcpy(gctx->h_layer_info + liidx, source->get_layer_info(), layer_info_size * sizeof(RasterInfo));
-                source->idealoffset->layer_info_start = liidx;
-                liidx += layer_info_size;
-
-                uint layer_offset_size = source->get_num_layers() + 1;
-                memcpy(gctx->h_layer_offset + loidx, source->get_layer_offset(), layer_offset_size * sizeof(uint32_t));
-                source->idealoffset->layer_offset_start = loidx;
-                loidx += layer_offset_size;
-            }
-        }
-
-        Ideal *target = tp.second;
-        dimx = target->get_dimx(), dimy = target->get_dimy();
-        if (target->idealoffset == nullptr)
-        {
-            target->idealoffset = new IdealOffset{};
-
-            uint info_size = gctx->polygon_pairs.size();
-            RasterInfo rasterinfo{target->getMBB(), dimx, dimy, target->get_step_x(), target->get_step_y()};
-            memcpy(gctx->h_info + iidx, &rasterinfo, sizeof(RasterInfo));
-            target->idealoffset->info_start = iidx;
-            iidx++;
-
-            uint status_size = target->get_status_size();
-            memcpy(gctx->h_status + sidx, target->get_status(), status_size);
-            target->idealoffset->status_start = sidx;
-            sidx += status_size;
-
-            uint offset_size = (dimx + 1) * (dimy + 1) + 1;
-            memcpy(gctx->h_offset + oidx, target->get_offset(), offset_size * sizeof(uint32_t));
-            target->idealoffset->offset_start = oidx;
-            oidx += offset_size;
-
-            uint edge_sequences_size = target->get_len_edge_sequences();
-            memcpy(gctx->h_edge_sequences + eidx, target->get_edge_sequence(), edge_sequences_size * sizeof(EdgeSeq));
-            target->idealoffset->edge_sequences_start = eidx;
-            eidx += edge_sequences_size;
-
-            uint vertices_size = target->get_num_vertices();
-            memcpy(gctx->h_vertices + vidx, target->get_boundary()->p, vertices_size * sizeof(Point));
-            target->idealoffset->vertices_start = vidx;
-            vidx += vertices_size;
-
-            uint gridline_offset_size = target->get_vertical()->get_num_grid_lines();
-            memcpy(gctx->h_gridline_offset + goidx, target->get_vertical()->get_offset(), gridline_offset_size * sizeof(uint32_t));
-            target->idealoffset->gridline_offset_start = goidx;
-            goidx += gridline_offset_size;
-            target->idealoffset->gridline_offset_end = goidx;
-
-            uint gridline_nodes_size = target->get_vertical()->get_num_crosses();
-            memcpy(gctx->h_gridline_nodes + gnidx, target->get_vertical()->get_intersection_nodes(), gridline_nodes_size * sizeof(double));
-            target->idealoffset->gridline_nodes_start = gnidx;
-            gnidx += gridline_nodes_size;
-
-            if(gctx->use_hierachy){
-                uint layer_info_size = target->get_num_layers() + 1;
-                memcpy(gctx->h_layer_info + liidx, target->get_layer_info(), layer_info_size * sizeof(RasterInfo));
-                target->idealoffset->layer_info_start = liidx;
-                liidx += layer_info_size;
-
-                uint layer_offset_size = target->get_num_layers() + 1;
-                memcpy(gctx->h_layer_offset + loidx, target->get_layer_offset(), layer_offset_size * sizeof(uint32_t));
-                target->idealoffset->layer_offset_start = loidx;
-                loidx += layer_offset_size;
-            }
+            uint layer_offset_size = target->get_num_layers() + 1;
+            memcpy(gctx->h_layer_offset + loidx, target->get_layer_offset(), layer_offset_size * sizeof(uint32_t));
+            idealoffset.layer_offset_start = loidx;
+            loidx += layer_offset_size;
         }
     }
 
-    assert(flag1 ^ flag2);
+    if(gctx->query_type == QueryType::contain || gctx->query_type == QueryType::within){
+        CUDA_SAFE_CALL(cudaMemcpy(gctx->d_points, gctx->points, gctx->target_num * sizeof(Point), cudaMemcpyHostToDevice));
+    }
 
+    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_idealoffset, gctx->h_idealoffset, gctx->num_polygons * sizeof(IdealOffset), cudaMemcpyHostToDevice));
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_info, gctx->h_info, gctx->num_polygons * sizeof(RasterInfo), cudaMemcpyHostToDevice));
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_status, gctx->h_status, gctx->num_status * sizeof(uint8_t), cudaMemcpyHostToDevice));
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_offset, gctx->h_offset, gctx->num_offset * sizeof(uint32_t), cudaMemcpyHostToDevice));
@@ -420,4 +347,16 @@ void preprocess_for_gpu(query_context *gctx)
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_degree_degree_per_kilometer_latitude, &h_degree_per_kilometer_latitude, sizeof(double), cudaMemcpyHostToDevice));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->degree_per_kilometer_longitude_arr, sizeof(h_degree_per_kilometer_longitude_arr)));
     CUDA_SAFE_CALL(cudaMemcpy(gctx->degree_per_kilometer_longitude_arr, h_degree_per_kilometer_longitude_arr, sizeof(degree_per_kilometer_longitude_arr), cudaMemcpyHostToDevice));
+
+
+    // GPU Buffer
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 8UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferinput_size, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 8UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferoutput_size, sizeof(uint)));
+
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_resultmap, gctx->batch_size * sizeof(uint8_t)));
+    gctx->h_resultmap = new uint8_t[gctx->batch_size];
+    
+
 }

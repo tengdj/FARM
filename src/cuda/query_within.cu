@@ -1,22 +1,22 @@
-// #include "geometry.cuh"
+#include "geometry.cuh"
 
-// #define WITHIN_DISTANCE 10
+#define WITHIN_DISTANCE 10
 
-// struct Batch
-// {
-//     uint s_start = 0;
-//     uint s_length = 0;
-//     int pair_id = 0;
-// };
+struct Batch
+{
+    uint s_start = 0;
+    uint s_length = 0;
+    int pair_id = 0;
+};
 
-// struct BoxDistRange
-// {
-//     int sourcePixelId;
-//     double minDist;
-//     double maxDist; // maxDist is not nessnary
-//     int pairId;
-//     int level = 0;
-// };
+struct BoxDistRange
+{
+    int sourcePixelId;
+    double minDist;
+    double maxDist; // maxDist is not nessnary
+    int pairId;
+    int level = 0;
+};
 
 // __global__ void kernel_init(PointPolygonPair *d_pairs, RasterInfo *d_info, uint size, double *distance, double *min_box_dist, double *max_box_dist)
 // {
@@ -205,183 +205,183 @@
 //     }
 // }
 
-// uint cuda_within(query_context *gctx)
-// {
-// 	CudaTimer timer, duration;
+uint cuda_within(query_context *gctx)
+{
+	CudaTimer timer;
 
-// 	duration.startTimer();
+    uint point_polygon_pairs_size = gctx->point_polygon_pairs.size();
+	uint batch_size = gctx->batch_size;
+    int found = 0;
 
-// 	size_t size = gctx->point_polygon_pairs.size();
+	printf("SIZE = %u\n", size);
 
-// 	printf("SIZE = %u\n", size);
+	PointPolygonPair *h_pairs = new PointPolygonPair[size];
+	PointPolygonPair *d_pairs = nullptr;
 
-// 	PointPolygonPair *h_pairs = new PointPolygonPair[size];
-// 	PointPolygonPair *d_pairs = nullptr;
+	for (int i = 0; i < size; ++i)
+	{
+		Point *target = gctx->point_polygon_pairs[i].first;
+		Ideal *source = gctx->point_polygon_pairs[i].second;
+		h_pairs[i] = {*source->idealoffset, *target, source->get_num_layers()};
+	}
 
-// 	for (int i = 0; i < size; ++i)
-// 	{
-// 		Point *target = gctx->point_polygon_pairs[i].first;
-// 		Ideal *source = gctx->point_polygon_pairs[i].second;
-// 		h_pairs[i] = {*source->idealoffset, *target, source->get_num_layers()};
-// 	}
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_pairs, size * sizeof(PointPolygonPair)));
+	CUDA_SAFE_CALL(cudaMemcpy(d_pairs, h_pairs, size * sizeof(PointPolygonPair), cudaMemcpyHostToDevice));
 
-// 	CUDA_SAFE_CALL(cudaMalloc((void **)&d_pairs, size * sizeof(PointPolygonPair)));
-// 	CUDA_SAFE_CALL(cudaMemcpy(d_pairs, h_pairs, size * sizeof(PointPolygonPair), cudaMemcpyHostToDevice));
+	double *h_distance = new double[size * sizeof(double)];
+	double *d_distance = nullptr;
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_distance, size * sizeof(double)));
 
-// 	double *h_distance = new double[size * sizeof(double)];
-// 	double *d_distance = nullptr;
-// 	CUDA_SAFE_CALL(cudaMalloc((void **)&d_distance, size * sizeof(double)));
+    double *d_min_box_dist = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_min_box_dist, size * sizeof(double)));	
 
-//     double *d_min_box_dist = nullptr;
-//     CUDA_SAFE_CALL(cudaMalloc((void **)&d_min_box_dist, size * sizeof(double)));	
+    double *d_max_box_dist = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_max_box_dist, size * sizeof(double)));
 
-//     double *d_max_box_dist = nullptr;
-//     CUDA_SAFE_CALL(cudaMalloc((void **)&d_max_box_dist, size * sizeof(double)));
+    char *d_BufferInput = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_BufferInput, 4UL * 1024 * 1024 * 1024));
+    uint *d_bufferinput_size = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_bufferinput_size, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(d_bufferinput_size, 0, sizeof(uint)));
+    uint h_bufferinput_size;
 
-//     char *d_BufferInput = nullptr;
-//     CUDA_SAFE_CALL(cudaMalloc((void **)&d_BufferInput, 4UL * 1024 * 1024 * 1024));
-//     uint *d_bufferinput_size = nullptr;
-//     CUDA_SAFE_CALL(cudaMalloc((void **)&d_bufferinput_size, sizeof(uint)));
-//     CUDA_SAFE_CALL(cudaMemset(d_bufferinput_size, 0, sizeof(uint)));
-//     uint h_bufferinput_size;
+    char *d_BufferOutput = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_BufferOutput, 4UL * 1024 * 1024 * 1024));
+    uint *d_bufferoutput_size = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_bufferoutput_size, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
+    uint h_bufferoutput_size;
 
-//     char *d_BufferOutput = nullptr;
-//     CUDA_SAFE_CALL(cudaMalloc((void **)&d_BufferOutput, 4UL * 1024 * 1024 * 1024));
-//     uint *d_bufferoutput_size = nullptr;
-//     CUDA_SAFE_CALL(cudaMalloc((void **)&d_bufferoutput_size, sizeof(uint)));
-//     CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
-//     uint h_bufferoutput_size;
+	int grid_size_x = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	dim3 block_size(BLOCK_SIZE, 1, 1);
+	dim3 grid_size(grid_size_x, 1, 1);
 
-// 	int grid_size_x = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-// 	dim3 block_size(BLOCK_SIZE, 1, 1);
-// 	dim3 grid_size(grid_size_x, 1, 1);
+	timer.startTimer();
 
-// 	timer.startTimer();
+	kernel_init<<<grid_size, block_size>>>(d_pairs, gctx->d_info, size, d_distance, d_min_box_dist, d_max_box_dist);
+	cudaDeviceSynchronize();
+	check_execution("kernel init");
 
-// 	kernel_init<<<grid_size, block_size>>>(d_pairs, gctx->d_info, size, d_distance, d_min_box_dist, d_max_box_dist);
-// 	cudaDeviceSynchronize();
-// 	check_execution("kernel init");
+	timer.stopTimer();
+	printf("distance initialize time: %f ms\n", timer.getElapsedTime());
 
-// 	timer.stopTimer();
-// 	printf("distance initialize time: %f ms\n", timer.getElapsedTime());
+	uint h_level = 0;
+    uint *d_level = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_level, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(d_level, 0, sizeof(uint)));
 
-// 	uint h_level = 0;
-//     uint *d_level = nullptr;
-//     CUDA_SAFE_CALL(cudaMalloc((void **)&d_level, sizeof(uint)));
-//     CUDA_SAFE_CALL(cudaMemset(d_level, 0, sizeof(uint)));
+	// grid_size_x = (size + 512 - 1) / 512;
+	// block_size.x = 512;
+	// grid_size.x = grid_size_x;
 
-// 	// grid_size_x = (size + 512 - 1) / 512;
-// 	// block_size.x = 512;
-// 	// grid_size.x = grid_size_x;
+    timer.startTimer();
+    first_cal_box_distance<<<grid_size, block_size>>>(d_pairs, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, d_min_box_dist, d_max_box_dist, d_level, size, (BoxDistRange *)d_BufferOutput, d_bufferoutput_size);
+    cudaDeviceSynchronize();
+    check_execution("first_cal_box_distance");
+    timer.stopTimer();
+    printf("kernel first calculate box distance: %f ms\n", timer.getElapsedTime());
 
-//     timer.startTimer();
-//     first_cal_box_distance<<<grid_size, block_size>>>(d_pairs, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, d_min_box_dist, d_max_box_dist, d_level, size, (BoxDistRange *)d_BufferOutput, d_bufferoutput_size);
-//     cudaDeviceSynchronize();
-//     check_execution("first_cal_box_distance");
-//     timer.stopTimer();
-//     printf("kernel first calculate box distance: %f ms\n", timer.getElapsedTime());
+	/* To delete  */
+    CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
+    CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
+    printf("h_bufferinput_size = %u\n", h_bufferinput_size);
+    printf("h_bufferoutput_size = %u\n", h_bufferoutput_size);
+    /*   To delete  */
 
-// 	/* To delete  */
-//     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-//     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-//     printf("h_bufferinput_size = %u\n", h_bufferinput_size);
-//     printf("h_bufferoutput_size = %u\n", h_bufferoutput_size);
-//     /*   To delete  */
+    while(true){
+        h_level ++;
+        CUDA_SAFE_CALL(cudaMemcpy(d_level, &h_level, sizeof(uint), cudaMemcpyHostToDevice));
+        if(h_level > gctx->num_layers) break;
 
-//     while(true){
-//         h_level ++;
-//         CUDA_SAFE_CALL(cudaMemcpy(d_level, &h_level, sizeof(uint), cudaMemcpyHostToDevice));
-//         if(h_level > gctx->num_layers) break;
+        std::swap(d_BufferInput, d_BufferOutput);
+        std::swap(d_bufferinput_size, d_bufferoutput_size);
+        std::swap(h_bufferinput_size, h_bufferoutput_size);
+        CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
 
-//         std::swap(d_BufferInput, d_BufferOutput);
-//         std::swap(d_bufferinput_size, d_bufferoutput_size);
-//         std::swap(h_bufferinput_size, h_bufferoutput_size);
-//         CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
+        grid_size_x = (h_bufferinput_size + 512 - 1) / 512;
+        block_size.x = 512;
+        grid_size.x = grid_size_x;
 
-//         grid_size_x = (h_bufferinput_size + 512 - 1) / 512;
-//         block_size.x = 512;
-//         grid_size.x = grid_size_x;
+        timer.startTimer();
+        cal_box_distance<<<grid_size, block_size>>>((BoxDistRange *)d_BufferInput, d_pairs, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, d_min_box_dist, d_max_box_dist, d_level, d_bufferinput_size, (BoxDistRange *)d_BufferOutput, d_bufferoutput_size);
+        cudaDeviceSynchronize();
+        check_execution("cal_box_distance");
+        timer.stopTimer();
+        printf("kernel calculate box distance: %f ms\n", timer.getElapsedTime());
 
-//         timer.startTimer();
-//         cal_box_distance<<<grid_size, block_size>>>((BoxDistRange *)d_BufferInput, d_pairs, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, d_min_box_dist, d_max_box_dist, d_level, d_bufferinput_size, (BoxDistRange *)d_BufferOutput, d_bufferoutput_size);
-//         cudaDeviceSynchronize();
-//         check_execution("cal_box_distance");
-//         timer.stopTimer();
-//         printf("kernel calculate box distance: %f ms\n", timer.getElapsedTime());
+		// /* To delete  */
+		CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
+		CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
+		// printf("h_bufferinput_size = %u\n", h_bufferinput_size);
+		// printf("h_bufferoutput_size = %u\n", h_bufferoutput_size);
+		// /*   To delete  */
 
-// 		// /* To delete  */
-// 		CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-// 		CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-// 		// printf("h_bufferinput_size = %u\n", h_bufferinput_size);
-// 		// printf("h_bufferoutput_size = %u\n", h_bufferoutput_size);
-// 		// /*   To delete  */
+        if(h_bufferinput_size == h_bufferoutput_size) break;
 
-//         if(h_bufferinput_size == h_bufferoutput_size) break;
+        std::swap(d_BufferInput, d_BufferOutput);
+        std::swap(d_bufferinput_size, d_bufferoutput_size);
+        std::swap(h_bufferinput_size, h_bufferoutput_size);
+        CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
 
-//         std::swap(d_BufferInput, d_BufferOutput);
-//         std::swap(d_bufferinput_size, d_bufferoutput_size);
-//         std::swap(h_bufferinput_size, h_bufferoutput_size);
-//         CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
+        grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        block_size.x = BLOCK_SIZE;
+        grid_size.x = grid_size_x;
 
-//         grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-//         block_size.x = BLOCK_SIZE;
-//         grid_size.x = grid_size_x;
+        timer.startTimer();
+        kernel_filter<<<grid_size, block_size>>>((BoxDistRange *)d_BufferInput, d_min_box_dist, d_max_box_dist, d_bufferinput_size, (BoxDistRange *)d_BufferOutput, d_bufferoutput_size);
+        cudaDeviceSynchronize();
+        check_execution("kernel_filter");
+        timer.stopTimer();
+        printf("kernel filter: %f ms\n", timer.getElapsedTime());
+    }
 
-//         timer.startTimer();
-//         kernel_filter<<<grid_size, block_size>>>((BoxDistRange *)d_BufferInput, d_min_box_dist, d_max_box_dist, d_bufferinput_size, (BoxDistRange *)d_BufferOutput, d_bufferoutput_size);
-//         cudaDeviceSynchronize();
-//         check_execution("kernel_filter");
-//         timer.stopTimer();
-//         printf("kernel filter: %f ms\n", timer.getElapsedTime());
-//     }
+    swap(d_BufferInput, d_BufferOutput);
+    swap(d_bufferinput_size, d_bufferoutput_size);
+    swap(h_bufferinput_size, h_bufferoutput_size);
+    CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
 
-//     swap(d_BufferInput, d_BufferOutput);
-//     swap(d_bufferinput_size, d_bufferoutput_size);
-//     swap(h_bufferinput_size, h_bufferoutput_size);
-//     CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
+    grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    block_size.x = BLOCK_SIZE;
+    grid_size.x = grid_size_x;
 
-//     grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-//     block_size.x = BLOCK_SIZE;
-//     grid_size.x = grid_size_x;
+    timer.startTimer();
 
-//     timer.startTimer();
+    kernel_unroll<<<grid_size, block_size>>>((BoxDistRange *)d_BufferInput, d_pairs, gctx->d_offset, gctx->d_edge_sequences, d_bufferinput_size, (Batch *)d_BufferOutput, d_bufferoutput_size);
+    cudaDeviceSynchronize();
+    check_execution("kernel_unroll");
 
-//     kernel_unroll<<<grid_size, block_size>>>((BoxDistRange *)d_BufferInput, d_pairs, gctx->d_offset, gctx->d_edge_sequences, d_bufferinput_size, (Batch *)d_BufferOutput, d_bufferoutput_size);
-//     cudaDeviceSynchronize();
-//     check_execution("kernel_unroll");
+    timer.stopTimer();
+    printf("kernel unroll: %f ms\n", timer.getElapsedTime());
 
-//     timer.stopTimer();
-//     printf("kernel unroll: %f ms\n", timer.getElapsedTime());
+    swap(d_BufferInput, d_BufferOutput);
+    swap(d_bufferinput_size, d_bufferoutput_size);
+    swap(h_bufferinput_size, h_bufferoutput_size);
+    CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
 
-//     swap(d_BufferInput, d_BufferOutput);
-//     swap(d_bufferinput_size, d_bufferoutput_size);
-//     swap(h_bufferinput_size, h_bufferoutput_size);
-//     CUDA_SAFE_CALL(cudaMemset(d_bufferoutput_size, 0, sizeof(uint)));
+    grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    block_size.x = BLOCK_SIZE;
+    grid_size.x = grid_size_x;
 
-//     grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-//     block_size.x = BLOCK_SIZE;
-//     grid_size.x = grid_size_x;
+    timer.startTimer();
 
-//     timer.startTimer();
+    kernel_refine<<<grid_size, block_size>>>((Batch *)d_BufferInput, d_pairs, gctx->d_vertices, d_bufferinput_size, d_distance);
+    cudaDeviceSynchronize();
+    check_execution("kernel_refine");
 
-//     kernel_refine<<<grid_size, block_size>>>((Batch *)d_BufferInput, d_pairs, gctx->d_vertices, d_bufferinput_size, d_distance);
-//     cudaDeviceSynchronize();
-//     check_execution("kernel_refine");
+    timer.stopTimer();
+    printf("kernel refine: %f ms\n", timer.getElapsedTime());
 
-//     timer.stopTimer();
-//     printf("kernel refine: %f ms\n", timer.getElapsedTime());
+    duration.stopTimer();
+    printf("kernel total time = %lf ms\n", duration.getElapsedTime());
 
-//     duration.stopTimer();
-//     printf("kernel total time = %lf ms\n", duration.getElapsedTime());
+	CUDA_SAFE_CALL(cudaMemcpy(h_distance, d_distance, size * sizeof(double), cudaMemcpyDeviceToHost));
+	int found = 0;
+	for (int i = 0; i < size; i++)
+	{
+		if (h_distance[i] <= WITHIN_DISTANCE)
+			found++;
+		printf("%lf\n", h_distance[i]);
+	}
 
-// 	CUDA_SAFE_CALL(cudaMemcpy(h_distance, d_distance, size * sizeof(double), cudaMemcpyDeviceToHost));
-// 	int found = 0;
-// 	for (int i = 0; i < size; i++)
-// 	{
-// 		if (h_distance[i] <= WITHIN_DISTANCE)
-// 			found++;
-// 		printf("%lf\n", h_distance[i]);
-// 	}
-
-// 	return found;
-// }
+	return found;
+}

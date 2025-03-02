@@ -10,7 +10,7 @@ INCLUDES	= -I /usr/include -I ./include -I /usr/local/include -I /usr/local/cuda
 LIBS		= -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -lboost_program_options -lgeos -lpthread
 CPPFLAGS	= -g -std=c++17 -Wno-cpp
 
-NVCCFLAGS   = -g -std=c++17 -DCUB_IGNORE_DEPRECATED_CPP_DIALECT
+NVCCFLAGS   = -g -G -std=c++17 -DCUB_IGNORE_DEPRECATED_CPP_DIALECT
 CUDALIBS    = -L/usr/local/cuda-12.2/lib64/stubs -lcuda -L/usr/local/cuda-12.2/lib64/ -lcudart
 
 

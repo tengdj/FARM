@@ -5,7 +5,6 @@ Ideal::~Ideal(){
 	if(edge_sequences) delete []edge_sequences;
 	if(vertical) delete vertical;
 	if(horizontal) delete horizontal;
-	if(idealoffset) delete idealoffset;
 }
 
 void Ideal::add_edge(int idx, int start, int end){

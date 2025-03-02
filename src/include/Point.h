@@ -17,7 +17,7 @@ const static char *point_char = "POINT";
 class Edge;
 
 class Point {
-  public:
+public:
     double x;
     double y;
     CUDA_HOSTDEV Point() {

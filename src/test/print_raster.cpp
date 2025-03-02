@@ -9,8 +9,23 @@ int main(int argc, char** argv){
 
     global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
 
-	for(auto item : global_ctx.source_ideals){
-		item->MyPolygon::print();
+	vector<MyPolygon*> polygons;
+	for (size_t i = 20; i < 25; i++)
+	{
+		bool flag = false;;
+		for(auto p : global_ctx.source_ideals){
+			if(p->get_num_vertices() > i * 1500 && p->get_num_vertices() < (i + 1) * 1500){
+				polygons.push_back(p);
+				flag = true;
+				break;
+			}
+		}
+		// assert(!flag);
+	}
+
+	for(auto p : polygons){
+		cout << p->get_num_vertices() << endl;
+		p->MyPolygon::print();
 	}
 
 	// preprocess(&global_ctx);
