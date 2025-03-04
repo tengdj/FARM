@@ -213,6 +213,10 @@ public:
 	uint8_t *h_resultmap = nullptr;
 	uint8_t* d_resultmap = nullptr;
 
+	double *d_distance = nullptr;
+	double *d_min_box_dist = nullptr;
+	double *d_max_box_dist = nullptr;
+
 	// for hierachy
 	double min_step_x = DBL_MAX;
 	double min_step_y = DBL_MAX;

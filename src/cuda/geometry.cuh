@@ -27,13 +27,6 @@ struct PixPair
 	int pair_id = 0;
 };
 
-struct PointPolygonPair
-{
-	IdealOffset source;
-	Point target;
-	uint level = 0;
-};
-
 __device__ __forceinline__ double atomicMinDouble(double *address, double val)
 {
 	unsigned long long int *address_as_ull = (unsigned long long int *)address;
@@ -44,21 +37,6 @@ __device__ __forceinline__ double atomicMinDouble(double *address, double val)
 		assumed = old;
 		old = atomicCAS(address_as_ull, assumed,
 						__double_as_longlong(fmin(val, __longlong_as_double(assumed))));
-	} while (assumed != old);
-
-	return __longlong_as_double(old);
-}
-
-__device__ __forceinline__ double atomicMaxDouble(double *address, double val)
-{
-	unsigned long long int *address_as_ull = (unsigned long long int *)address;
-	unsigned long long int old = *address_as_ull, assumed;
-
-	do
-	{
-		assumed = old;
-		old = atomicCAS(address_as_ull, assumed, __double_as_longlong(fmax(__longlong_as_double(assumed), val)));
-
 	} while (assumed != old);
 
 	return __longlong_as_double(old);
@@ -84,12 +62,10 @@ __device__ __forceinline__ int gpu_get_y(int id, int dimx, int dimy)
 
 __device__ __forceinline__ int gpu_double_to_int(double val)
 {
-	int vi = (int)val;
-	if (abs(1.0 * (vi + 1) - val) < 0.00000001)
-	{
-		vi++;
-	}
-	return vi;
+    int vi = (int)val; 
+    double diff = abs(1.0 * (vi + 1) - val);
+    int adjust = (diff < 0.00000001); 
+    return vi + adjust; 
 }
 
 __device__ __forceinline__ int gpu_get_offset_x(double s_xval, double t_xval, double step_x, int dimx)
@@ -120,9 +96,8 @@ __device__ __forceinline__ int gpu_get_offset_y(double s_yval, double t_yval, do
 __device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, int &id, uint32_t offset = 0)
 {
 	uint8_t st = (status + start + offset)[id];
-	if(st == 0) return OUT;
-	else if(st == 1) return BORDER;
-	else return IN;
+    PartitionStatus result = static_cast<PartitionStatus>((st > 1) ? 2 : st);
+    return result;
 }
 
 __device__ __forceinline__ box gpu_get_pixel_box(int x, int y, double bx_lowx, double bx_lowy, double step_x, double step_y)
@@ -136,36 +111,6 @@ __device__ __forceinline__ box gpu_get_pixel_box(int x, int y, double bx_lowx, d
 	double highy = start_y + (y + 1) * step_y;
 
 	return box(lowx, lowy, highx, highy);
-}
-
-__device__ __forceinline__ int gpu_get_pixel_id(Point &p, box &s_mbr, double step_x, double step_y, int dimx, int dimy)
-{
-	int xoff = gpu_get_offset_x(s_mbr.low[0], p.x, step_x, dimx);
-	int yoff = gpu_get_offset_y(s_mbr.low[1], p.y, step_y, dimy);
-	assert(xoff <= dimx);
-	assert(yoff <= dimy);
-	return gpu_get_id(xoff, yoff, dimx);
-}
-
-__device__ __forceinline__ int gpu_get_closest_pixel(int pixx, int pixy, int dimx, int dimy)
-{
-	if (pixx < 0)
-	{
-		pixx = 0;
-	}
-	if (pixx > dimx)
-	{
-		pixx = dimx;
-	}
-	if (pixy < 0)
-	{
-		pixy = 0;
-	}
-	if (pixy > dimy)
-	{
-		pixy = dimy;
-	}
-	return gpu_get_id(pixx, pixy, dimx);
 }
 
 __device__ __forceinline__ double degreesToRadians(double degrees)
@@ -502,4 +447,60 @@ __device__ __forceinline__ double gpu_segment_to_segment_within_batch(Point *vs1
 		// }
 	}
 	return mindist;
+}
+
+// intersection related
+
+__device__ inline int gpu_sgn(const double& x) {
+    return (x > 0) - (x < 0);
+}
+
+__device__ inline bool gpu_inter1(double a, double b, double c, double d)
+{
+   
+    double min_ab = fmin(a, b); 
+    double max_ab = fmax(a, b); 
+    double min_cd = fmin(c, d); 
+    double max_cd = fmax(c, d); 
+
+    return fmax(min_ab, min_cd) <= fmin(max_ab, max_cd);
+}
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+
+__device__ inline bool gpu_segment_intersect(const Point& a, const Point& b, const Point& c, const Point& d) {
+    if (c.cross(a, d) == 0 && c.cross(b, d) == 0)
+        return gpu_inter1(a.x, b.x, c.x, d.x) && gpu_inter1(a.y, b.y, c.y, d.y);
+    return gpu_sgn(a.cross(b, c)) != gpu_sgn(a.cross(b, d)) && gpu_sgn(c.cross(d, a)) != gpu_sgn(c.cross(d, b));
+}
+
+// __device__ inline bool gpu_segment_intersect(const Point& a, const Point& b, const Point& c, const Point& d) {
+// 	double cad = c.cross(a, d);
+// 	double cbd = c.cross(b, d);
+// 	bool is_collinear = (cad == 0) && (cbd == 0);
+
+// 	bool overlap_x = gpu_inter1(a.x, b.x, c.x, d.x);
+// 	bool overlap_y = gpu_inter1(a.y, b.y, c.y, d.y);
+// 	bool collinear_result = overlap_x && overlap_y;
+
+// 	int sgn_abc = gpu_sgn(a.cross(b, c));
+// 	int sgn_abd = gpu_sgn(a.cross(b, d));
+// 	int sgn_cda = gpu_sgn(c.cross(d, a));
+// 	int sgn_cdb = gpu_sgn(c.cross(d, b));
+// 	bool non_collinear_result = (sgn_abc != sgn_abd) && (sgn_cda != sgn_cdb);
+	
+// 	return (is_collinear && collinear_result) || (!is_collinear && non_collinear_result);
+// }
+
+__device__ inline bool gpu_segment_intersect_batch(Point *p1, Point *p2, int s1, int s2)
+{
+    bool has_intersection = false;
+
+    for (int i = 0; i < s1; i++) {
+        for (int j = 0; j < s2; j++) {
+            bool intersects = gpu_segment_intersect(p1[i], p1[i + 1], p2[j], p2[j + 1]);
+            has_intersection = has_intersection || intersects;
+        }
+    }
+
+    return has_intersection;
 }

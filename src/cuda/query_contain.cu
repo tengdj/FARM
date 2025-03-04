@@ -13,31 +13,24 @@ __global__ void kernel_filter_contain(IdealPair *pairs, Point *points, IdealOffs
 		const double &s_step_x = info[pair.source].step_x, &s_step_y = info[pair.source].step_y;
 		const int &s_dimx = info[pair.source].dimx, &s_dimy = info[pair.source].dimy;
 
-		// printf("dimx = %d dimy = %d box %lf %lf %lf %lf\n", s_dimx, s_dimy, s_mbr.low[0], s_mbr.low[1], s_mbr.high[0], s_mbr.high[1]);
-
 		int xoff = gpu_get_offset_x(s_mbr.low[0], p.x, s_step_x, s_dimx);
 		int yoff = gpu_get_offset_y(s_mbr.low[1], p.y, s_step_y, s_dimy);
 		int target = gpu_get_id(xoff, yoff, s_dimx);
 
-		// printf("x: %d, y: %d, id = %d, status: %d\n", xoff, yoff, target, gpu_show_status(status, source.status_start, target));
-
 		PartitionStatus st = gpu_show_status(status, source.status_start, target);
 
-		if (st == IN)
-		{
-			resultmap[x] = 2;
-		}
-		else if (st == OUT)
-		{
-			resultmap[x] = 0;
-		}
-		else
-		{
-			int idx = atomicAdd(d_pp_size, 1U);
+		bool is_in = (st == IN);
+		bool is_out = (st == OUT);
+		bool is_border = !(is_in || is_out);
+	
+		uint idx = 0;
+		if (is_border) {
+			idx = atomicAdd(d_pp_size, 1U);
 			ptpixpairs[idx].pair_id = x;
 			ptpixpairs[idx].pix_id = target;
 		}
-		
+	
+		resultmap[x] = is_in ? 2 : (is_out ? 0 : resultmap[x]);
 	}
 }
 

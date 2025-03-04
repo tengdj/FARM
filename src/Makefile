@@ -8,9 +8,9 @@ OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 INCLUDES	= -I /usr/include -I ./include -I /usr/local/include -I /usr/local/cuda-12.2/targets/x86_64-linux/include
 #-lgeos_c  
 LIBS		= -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -lboost_program_options -lgeos -lpthread
-CPPFLAGS	= -g -std=c++17 -Wno-cpp
+CPPFLAGS	= -O3 -std=c++17 -Wno-cpp
 
-NVCCFLAGS   = -g -G -std=c++17 -DCUB_IGNORE_DEPRECATED_CPP_DIALECT
+NVCCFLAGS   = -O3 -arch=sm_89 -std=c++17 -DCUB_IGNORE_DEPRECATED_CPP_DIALECT
 CUDALIBS    = -L/usr/local/cuda-12.2/lib64/stubs -lcuda -L/usr/local/cuda-12.2/lib64/ -lcudart
 
 
@@ -43,16 +43,16 @@ all:	contain_polygon within_polygon
 
 
 contain_polygon:	query/contain_polygon.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS)
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS)
 	
 within_polygon:	query/within_polygon.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 	
 within:	query/within.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 	
 contain:	query/contain.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 	
 print_raster:	test/print_raster.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
