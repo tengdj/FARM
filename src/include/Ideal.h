@@ -28,7 +28,6 @@ public:
 };
 
 struct IdealOffset{
-	uint info_start;
 	uint status_start;
 	uint offset_start;
 	uint edge_sequences_start;
