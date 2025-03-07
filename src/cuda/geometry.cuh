@@ -12,6 +12,7 @@ struct IdealPair
 {
 	int source;
 	int target;
+	int level;
 };
 
 struct PixMapping
@@ -142,8 +143,15 @@ __device__ __forceinline__ double haversine(double lon1, double lat1, double lon
 	return distance;
 }
 
-__device__ __forceinline__ double gpu_max_distance(Point &p, box &bx)
+__device__ __forceinline__ double gpu_max_distance(Point &p, box &bx, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
 {
+	// double dx = fmax(abs(p.x - bx.low[0]), abs(p.x - bx.high[0]));
+	// double dy = fmax(abs(p.y - bx.low[1]), abs(p.y - bx.high[1]));
+
+	// dx = dx/gpu_degree_per_kilometer_longitude(p.y, degree_per_kilometer_longitude_arr);
+	// dy = dy / *degree_per_kilometer_latitude;
+
+
 	Point q;
 	q.x = (abs(p.x - bx.low[0]) < abs(p.x - bx.high[0])) ? bx.high[0] : bx.low[0];
 	q.y = (abs(p.y - bx.low[1]) < abs(p.y - bx.high[1])) ? bx.high[1] : bx.low[1];

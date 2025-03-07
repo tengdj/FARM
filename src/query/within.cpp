@@ -27,7 +27,7 @@ bool IdealSearchCallback(Ideal *ideal, void* arg){
 #ifdef USE_GPU
 	else{
 		if(ideal->contain(*p, ctx)){
-			ctx->found ++;
+			// ctx->found ++;
 		}else{
 			ctx->point_polygon_pairs.emplace_back(make_pair(ctx->target_id, ideal->id));
 		}

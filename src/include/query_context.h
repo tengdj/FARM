@@ -223,6 +223,9 @@ public:
 	box space = {10000.0, 10000.0, -10000.0, -10000.0};
 	int num_layers = 0;
 
+	uint h_level = 0;
+	uint *d_level = nullptr;
+
 
 public:
 	// functions

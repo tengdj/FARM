@@ -44,6 +44,10 @@ const double PI = 3.14159265;
 
 // some utility function
 
+// round a number to a specified number of significant digits.
+// for example:
+// roundToSignificantDigits(12345.6789, 3) -> 12300
+// roundToSignificantDigits(0.0045678, 2) -> 0.0046
 inline double roundToSignificantDigits(double num, int n) {
     if (num == 0) {
         return 0;

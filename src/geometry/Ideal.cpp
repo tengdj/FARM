@@ -433,7 +433,7 @@ void Ideal::rasterization(int vpr){
 	if(use_hierachy)
 		num_layers = static_cast<int>(ceil(max(log(dimx + 1) / log(2.0), log(dimy + 1) / log(2.0))));
     else 
-		init_raster(boundary->num_vertices / vpr);
+	init_raster(boundary->num_vertices / vpr);
 
     rasterization();
 
