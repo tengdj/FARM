@@ -72,6 +72,8 @@ public:
 
 class MyPolygon : virtual public BaseGeometry
 {
+public:
+	box* true_mbr = nullptr;
 private:
 	size_t id = 0;
 	size_t hc_id = 0;

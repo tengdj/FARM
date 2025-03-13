@@ -72,5 +72,8 @@ dump_polygons:	datagen/dump_polygons.o $(GEOMETRY_OBJS)
 dist_point_polygon:	test/dist_point_polygon.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
 
+rtspatial:	test/rtspatial.o $(GEOMETRY_OBJS)
+	$(CXX) -o ../build/$@ $^ $(LIBS) 
+
 clean:
 	rm -fr ../build/* $(OBJS) $(CU_OBJS)

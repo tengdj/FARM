@@ -164,7 +164,7 @@ inline double degree_per_kilometer_longitude_calculate(double latitude){
 	return 360.0/(sin((90-absla)*PI/180)*40076);
 }
 
-CUDA_HOSTDEV inline double degree_per_kilometer_longitude(double latitude){
+inline double degree_per_kilometer_longitude(double latitude){
 	double absla = abs(latitude);
 	assert(absla<=90);
 	if(absla==90){

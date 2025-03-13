@@ -99,6 +99,7 @@ public:
 
 
 public:
+
   RTree();
   virtual ~RTree();
   
@@ -321,8 +322,8 @@ protected:
   /// Node for each branch level
   struct Node
   {
-    bool IsInternalNode() const                        { return (m_level > 0); } // Not a leaf, but a internal node
-    bool IsLeaf() const                                { return (m_level == 0); } // A leaf, contains data
+    bool IsInternalNode()                         { return (m_level > 0); } // Not a leaf, but a internal node
+    bool IsLeaf()                                 { return (m_level == 0); } // A leaf, contains data
     
     int m_count;                                  ///< Count
     int m_level;                                  ///< Leaf is zero, others positive
@@ -392,35 +393,6 @@ protected:
   
   Node* m_root;                                    ///< Root of tree
   ELEMTYPEREAL m_unitSphereVolume;                 ///< Unit sphere constant for required number of dimensions
-
-public:
-  // void PrintTree() const { PrintNode(m_root, 0); }
-  // void PrintNode(const Node *a_node, int depth) const {
-  //     if (!a_node)
-  //         return;
-
-  //     std::cout << std::setw(depth * 2) << ""
-  //               << "Node level: " << a_node->m_level
-  //               << " count: " << a_node->m_count << "\n";
-  //     for (int i = 0; i < a_node->m_count; ++i) {
-  //         const Branch &branch = a_node->m_branch[i];
-  //         std::cout << std::setw(depth * 2) << "" << "Branch " << i << ": [";
-  //         for (int dim = 0; dim < NUMDIMS; ++dim) {
-  //             std::cout << "(" << branch.m_rect.m_min[dim] << ", "
-  //                       << branch.m_rect.m_max[dim] << ")";
-  //             if (dim < NUMDIMS - 1)
-  //                 std::cout << ", ";
-  //         }
-  //         std::cout << "]\n";
-
-  //         if (a_node->IsInternalNode()) {
-  //             PrintNode(branch.m_child, depth + 1);
-  //         } else {
-  //             std::cout << std::setw((depth + 1) * 2) << ""
-  //                       << "Data: " << branch.m_data << "\n";
-  //         }
-  //     }
-  // }
 };
 
 
@@ -1688,7 +1660,6 @@ bool RTREE_QUAL::Search(Node* a_node, Rect* a_rect, size_t & a_foundCount, bool 
 
   return true; // Continue searching
 }
-
 
 
 #undef RTREE_TEMPLATE

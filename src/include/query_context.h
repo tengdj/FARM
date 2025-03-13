@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <map>
 #include <boost/program_options.hpp>
+#include <cfloat>
 #ifdef USE_GPU
 #include <../cuda/mygpu.h>
 #endif

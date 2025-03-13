@@ -31,7 +31,7 @@ void process_lines(std::vector<Ideal*>& local_ideals) {
         std::string wkt;
 
         getline(iss, wkt); // 提取wkt
-		// cout << wkt << endl;
+		cout << wkt << endl;
         if (wkt.empty()) {
             std::cerr << "read WKT failed\n";
             continue;
@@ -45,7 +45,8 @@ void process_lines(std::vector<Ideal*>& local_ideals) {
         //     wkt.erase(wkt.size() - 1); // 删除结尾的引号
         // }
 
-        size_t offset = 10;
+        size_t offset = wkt.find('(');
+		cout << offset << endl;
         local_ideals.push_back(read_polygon(wkt.c_str(), offset));
     }
 }
@@ -139,7 +140,7 @@ Point* load_point_wkt(const char *path, size_t &count, query_context *ctx){
 	Point *points = new Point[count];
 
 	for(int i = 0; i < count; i ++){
-		size_t offset = 5;
+		size_t offset = wkts[i].find('(');
 		points[i] = *read_vertices(wkts[i].c_str(), offset, false)->p;
 	}
 
@@ -691,7 +692,7 @@ Ideal *read_polygon(const char *wkt, size_t &offset)
 	Ideal *ideal = new Ideal();
 	skip_space(wkt, offset);
 	// left parentheses for the entire polygon
-	// assert(wkt[offset++] == '(');
+	assert(wkt[offset++] == '(');
 
 	// read the vertices of the boundary polygon
 	// the vertex must rotation in clockwise
@@ -716,7 +717,7 @@ Ideal *read_polygon(const char *wkt, size_t &offset)
 
 		skip_space(wkt, offset);
 	}
-	// assert(wkt[offset++] == ')');
+	assert(wkt[offset++] == ')');
 	ideal->getMBB();
 	return ideal;
 }

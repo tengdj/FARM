@@ -352,9 +352,9 @@ void preprocess_for_gpu(query_context *gctx)
     CUDA_SAFE_CALL(cudaMemcpy(gctx->degree_per_kilometer_longitude_arr, h_degree_per_kilometer_longitude_arr, sizeof(degree_per_kilometer_longitude_arr), cudaMemcpyHostToDevice));
 
     // GPU Buffer
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 8UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 4UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferinput_size, sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 8UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 4UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferoutput_size, sizeof(uint)));
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_resultmap, gctx->batch_size * sizeof(uint8_t)));
