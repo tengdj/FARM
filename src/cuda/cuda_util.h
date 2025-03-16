@@ -10,8 +10,22 @@
 
 #include <cuda.h>
 #include "../include/util.h"
+#include "../include/Box.h"
 
+#include <boost/archive/binary_iarchive.hpp>
+#include <boost/archive/binary_oarchive.hpp>
+#include <boost/geometry.hpp>
+#include <boost/geometry/geometries/linestring.hpp>
+#include <boost/geometry/geometries/point_xy.hpp>
+#include <boost/geometry/geometries/polygon.hpp>
+#include <boost/geometry/geometries/register/box.hpp>
+#include <boost/geometry/geometries/register/point.hpp>
+#include <thrust/device_vector.h>
+#include <rtspatial/rtspatial.h>
 
+using coord_t = float;
+using point_t = boost::geometry::model::d2::point_xy<coord_t>;
+using polygon_t = boost::geometry::model::polygon<point_t>;
 
 #define CUDA_SAFE_CALL(call) 										  	  \
 	do {																  \
@@ -160,5 +174,40 @@ inline uint float_to_uint(float xy) {
     xy += 180;
     return (uint)(xy*100000);
 }
+
+inline void CopyBoxes(
+    const std::vector<box> &boxes,
+    thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2>>>
+        &d_boxes) {
+  pinned_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2>>> h_boxes;
+
+  h_boxes.resize(boxes.size());
+
+  for (size_t i = 0; i < boxes.size(); i++) {
+    rtspatial::Point<coord_t, 2> p_min(boxes[i].low[0],
+                                       boxes[i].low[1]);
+    rtspatial::Point<coord_t, 2> p_max(boxes[i].high[0],
+                                       boxes[i].high[1]);
+
+    h_boxes[i] =
+        rtspatial::Envelope<rtspatial::Point<coord_t, 2>>(p_min, p_max);
+  }
+
+  d_boxes = h_boxes;
+}
+
+inline void CopyPoints(Point *points, size_t num,
+           thrust::device_vector<rtspatial::Point<coord_t, 2>> &d_points) {
+  pinned_vector<rtspatial::Point<coord_t, 2>> h_points;
+
+  h_points.resize(num);
+
+  for (size_t i = 0; i < num; i++) {
+    h_points[i] = rtspatial::Point<coord_t, 2>(points[i].x, points[i].y);
+  }
+
+  d_points = h_points;
+}
+
 
 #endif /* CUDA_UTIL_H_ */

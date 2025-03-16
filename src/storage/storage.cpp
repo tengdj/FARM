@@ -31,7 +31,6 @@ void process_lines(std::vector<Ideal*>& local_ideals) {
         std::string wkt;
 
         getline(iss, wkt); // 提取wkt
-		cout << wkt << endl;
         if (wkt.empty()) {
             std::cerr << "read WKT failed\n";
             continue;
@@ -46,7 +45,6 @@ void process_lines(std::vector<Ideal*>& local_ideals) {
         // }
 
         size_t offset = wkt.find('(');
-		cout << offset << endl;
         local_ideals.push_back(read_polygon(wkt.c_str(), offset));
     }
 }
