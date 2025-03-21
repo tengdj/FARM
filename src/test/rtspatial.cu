@@ -8,12 +8,18 @@
 #include "../include/Ideal.h"
 #include <chrono>
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 #include "../cuda/cuda_util.h"
 #include <rtspatial/spatial_index.cuh>
 
 #include <optix_function_table_definition.h>
 
-// some shared parameters
+__global__ void PrintResults(rtspatial::Queue<thrust::pair<uint32_t, uint32_t> >::device_t* results, uint size){
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	if (x < size){
+        printf("%d %d\n", results->data()[x].first, results->data()[x].second);
+    }
+}
 
 int main(int argc, char **argv)
 {
@@ -69,6 +75,19 @@ int main(int argc, char **argv)
     index.Query(rtspatial::Predicate::kContains, rtspatial::ArrayView<rtspatial::Point<coord_t, 2> >(d_queries),
                 d_results.data(), stream.cuda_stream());
     n_results = results.size(stream.cuda_stream());
+
+    // int grid_size_x = (n_results + 256 - 1) / 256;
+    // dim3 block_size(256, 1, 1);
+    // dim3 grid_size(grid_size_x, 1, 1);
+    // PrintResults<<<grid_size, block_size>>>(d_results.data(), n_results);
+    auto d_result_ptr = results.data();
+    thrust::device_vector<thrust::pair<uint32_t, uint32_t>> d_pairs(d_result_ptr, d_result_ptr + n_results);
+    thrust::host_vector<thrust::pair<uint32_t, uint32_t>> h_pairs = d_pairs;
+    for(int i = 0; i < n_results; i ++){
+        printf("%u %u\n", h_pairs[i].first, h_pairs[i].second);
+        global_ctx.points[h_pairs[i].second].print();
+        global_ctx.source_ideals[h_pairs[i].first]->MyPolygon::print();
+    }
     sw.stop();
     t_query = sw.ms();
 
@@ -77,3 +96,4 @@ int main(int argc, char **argv)
 
     return 0;
 }
+

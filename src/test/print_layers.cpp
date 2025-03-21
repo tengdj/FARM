@@ -7,9 +7,7 @@ int main(){
 	global_ctx.use_ideal = true;
 	global_ctx.use_hierachy = true;
 	global_ctx.num_threads = 1;
-	global_ctx.source_ideals = load_binary_file("/home/qmh/data/idl/has_child.idl", global_ctx);
-
-	global_ctx.source_ideals.resize(1);
+	global_ctx.source_ideals = load_polygon_wkt("/home/qmh/data/wkt/single_polygon.wkt");
 
 	preprocess(&global_ctx);
 	

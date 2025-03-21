@@ -356,9 +356,11 @@ void preprocess_for_gpu(query_context *gctx)
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferinput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 4UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferoutput_size, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
 
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_resultmap, gctx->batch_size * sizeof(uint8_t)));
-    gctx->h_resultmap = new uint8_t[gctx->batch_size];
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_result, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
+    gctx->h_result = new uint(0);
 
     if(gctx->query_type == QueryType::within || gctx->query_type == QueryType::within){
         CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_distance, gctx->batch_size * sizeof(double)));

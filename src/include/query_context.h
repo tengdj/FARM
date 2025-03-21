@@ -13,6 +13,7 @@
 #include <map>
 #include <boost/program_options.hpp>
 #include <cfloat>
+
 #ifdef USE_GPU
 #include <../cuda/mygpu.h>
 #endif
@@ -211,8 +212,8 @@ public:
 	char* d_BufferOutput = nullptr;
 	uint *d_bufferoutput_size = nullptr;
 
-	uint8_t *h_resultmap = nullptr;
-	uint8_t* d_resultmap = nullptr;
+	uint *h_result = nullptr;
+	uint *d_result = nullptr;
 
 	double *d_distance = nullptr;
 	double *d_min_box_dist = nullptr;
@@ -226,6 +227,10 @@ public:
 
 	uint h_level = 0;
 	uint *d_level = nullptr;
+
+	// for rt spatial index
+	pair<uint32_t, uint32_t>* d_candidate_pairs = nullptr;
+	size_t num_pairs = 0;
 
 
 public:

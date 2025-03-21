@@ -71,11 +71,17 @@ int main(int argc, char** argv) {
 	query_context global_ctx;
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::within;
-
-	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
-	// read all the points
-	global_ctx.load_points();
-
+	if(getFileExtension(global_ctx.source_path) == ".wkt"){
+		global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str());
+	}else{
+		global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
+	}
+	if(getFileExtension(global_ctx.target_path) == ".wkt"){
+		global_ctx.points = load_point_wkt(global_ctx.target_path.c_str(), global_ctx.target_num, &global_ctx);
+	}else{
+		global_ctx.load_points();
+	}
+	
 	timeval start = get_cur_time();
 	for(auto p : global_ctx.source_ideals){
 		ideal_rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
