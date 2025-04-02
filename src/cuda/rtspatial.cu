@@ -20,6 +20,7 @@ void indexFilter(query_context *gctx){
     {
         boxes.push_back(*polygon->getMBB());
     }
+
 	thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2>>> d_boxes;
     CopyBoxes(boxes, d_boxes);
 
@@ -45,20 +46,65 @@ void indexFilter(query_context *gctx){
     rtspatial::Queue<thrust::pair<uint32_t, uint32_t>> results;
     rtspatial::SharedValue<rtspatial::Queue<thrust::pair<uint32_t, uint32_t>>::device_t> d_results;
 
-    thrust::device_vector<rtspatial::Point<coord_t, 2>> d_queries;
-    results.Init(std::max(
-        1ul, (size_t)(boxes.size() * gctx->target_num)));
-    d_results.set(stream.cuda_stream(), results.DeviceObject());
+    if(gctx->query_type == QueryType::contain){
+        thrust::device_vector<rtspatial::Point<coord_t, 2>> d_queries;
+        results.Init(std::max(
+            1ul, (size_t)(boxes.size() * gctx->target_num)));
+        d_results.set(stream.cuda_stream(), results.DeviceObject());
 
-	CopyPoints(gctx->points, gctx->target_num, d_queries);
-    std::cout << "Loaded point queries " << gctx->target_num << std::endl;
+        CopyPoints(gctx->points, gctx->target_num, d_queries);
+        std::cout << "Loaded point queries " << gctx->target_num << std::endl;
 
-    sw.start();
-    index.Query(rtspatial::Predicate::kContains, rtspatial::ArrayView<rtspatial::Point<coord_t, 2>>(d_queries),
-                d_results.data(), stream.cuda_stream());
+        sw.start();
+        index.Query(rtspatial::Predicate::kContains, rtspatial::ArrayView<rtspatial::Point<coord_t, 2>>(d_queries),
+                    d_results.data(), stream.cuda_stream());
+                
+    }else if(gctx->query_type == QueryType::contain_polygon){
+        vector<box> queries;
+        for(auto polygon : gctx->target_ideals)
+        {
+            queries.push_back(*polygon->getMBB());
+        }
+
+        thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > d_queries;
+        results.Init(std::max(
+            1ul, (size_t) (boxes.size() * queries.size())));
+        d_results.set(stream.cuda_stream(), results.DeviceObject());
+        
+        CopyBoxes(queries, d_queries);
+        std::cout << "Loaded box queries " << queries.size() << std::endl;
+        
+        rtspatial::ArrayView<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > v_queries(d_queries);
+        
+        sw.start();
+        index.Query(rtspatial::Predicate::kContains, v_queries, d_results.data(),
+                    stream.cuda_stream());
+
+    }else{
+        vector<box> queries;
+        for (auto polygon : gctx->target_ideals)
+        {
+            queries.push_back(polygon->getMBB()->expand(gctx->within_distance, true));
+        }
+
+        thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > d_queries;
+        results.Init(std::max(
+            1ul, (size_t) (boxes.size() * queries.size())));
+        d_results.set(stream.cuda_stream(), results.DeviceObject());
+
+        CopyBoxes(queries, d_queries);
+        std::cout << "Loaded box queries " << queries.size() << std::endl;
+
+        rtspatial::ArrayView<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > v_queries(d_queries);
+        
+        sw.start();
+        index.Query(rtspatial::Predicate::kIntersects, v_queries, d_results.data(),
+                    stream.cuda_stream());
+
+    }
+
     n_results = results.size(stream.cuda_stream());
     sw.stop();
-
     t_query = sw.ms();
     std::cout << "RT, load " << t_load << " ms, query " << t_query
               << " ms, results: " << n_results << std::endl;

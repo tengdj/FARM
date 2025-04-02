@@ -11,7 +11,7 @@ int main(){
 
 	preprocess(&global_ctx);
 	
-	printf("num_layers = %d\n", global_ctx.num_layers);
+	printf("num_layers = %d\n", global_ctx.max_layers);
 	
 	for(auto ideal : global_ctx.source_ideals){
 		printf("dimx = %d, dimy = %d\n", ideal->get_dimx(), ideal->get_dimy());

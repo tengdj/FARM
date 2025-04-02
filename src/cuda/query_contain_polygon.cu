@@ -11,7 +11,7 @@
 // };
 
 // __global__ void kernel_filter_contain_polygon(IdealPair *pairs, IdealOffset *idealoffset, RasterInfo *info,
-// 											  uint8_t *status, uint size, uint8_t *resultmap,
+// 											  uint8_t *status, uint size, uint *result,
 // 											  PixPair *pixpairs, uint *pp_size)
 // {
 // 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -77,11 +77,9 @@
 
 // 	uint total_pixels = (i_max - i_min + 1) * (j_max - j_min + 1);
 
-// 	uint8_t is_contained = (itn == total_pixels); 
-// 	uint8_t is_outside = (etn == total_pixels);
-// 	uint8_t is_out_in = flag_out_in;
-
-// 	resultmap[x] = (is_out_in || is_outside) ? 2 : (is_contained ? 1 : 0);
+// 	bool is_contained = (itn == total_pixels); 
+//     if(is_contained) atomicAdd(result, 1);
+//     return;
 // }
 
 // __global__ void kernel_unroll_contain_polygon(PixPair *pixpairs,
@@ -166,105 +164,68 @@
 
 // uint cuda_contain_polygon(query_context *gctx)
 // {
-
-//     CudaTimer timer;
-
-//     uint polygon_pairs_size = gctx->polygon_pairs.size();
-//     printf("SIZE = %d\n", polygon_pairs_size);
-//     uint batch_size = gctx->batch_size;
-//     int found = 0;
-
-//     IdealPair *h_pairs = new IdealPair[polygon_pairs_size];
-
-//     for (int i = 0; i < polygon_pairs_size; i++)
-//     {
-//         h_pairs[i].target = gctx->polygon_pairs[i].first;
-//         h_pairs[i].source = gctx->polygon_pairs[i].second;
-//     }
-
-//     IdealPair *d_pairs = nullptr;
-//     CUDA_SAFE_CALL(cudaMalloc((void **)&d_pairs, polygon_pairs_size * sizeof(IdealPair)));
-//     CUDA_SAFE_CALL(cudaMemcpy(d_pairs, h_pairs, polygon_pairs_size * sizeof(IdealPair), cudaMemcpyHostToDevice));
-
 //     uint h_bufferinput_size, h_bufferoutput_size;
+// #ifdef DEBUG
+//     CudaTimer timer;
+//     timer.startTimer();
+// #endif
+//     /*1. Raster Model Filtering*/
 
-//     for (int i = 0; i < polygon_pairs_size; i += batch_size)
+//     int grid_size_x = (gctx->num_pairs + BLOCK_SIZE - 1) / BLOCK_SIZE;
+//     dim3 block_size(BLOCK_SIZE, 1, 1);
+//     dim3 grid_size(grid_size_x, 1, 1);
+
+//     kernel_filter_contain_polygon<<<grid_size, block_size>>>(d_pairs + start, gctx->d_idealoffset, gctx->d_info, gctx->d_status, size, gctx->d_resultmap, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size);
+//     cudaDeviceSynchronize();
+//     check_execution("kernel_filter_contain_polygon");
+
+//     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
+//     printf("h_buffer_size = %u\n", h_bufferinput_size);
+
+//     /*2. Unroll Refinement*/
+
+//     grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+//     grid_size.x = grid_size_x;
+
+//     starter.startTimer();
+//     kernel_unroll_contain_polygon<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, d_pairs + start, gctx->d_idealoffset, gctx->d_status, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_resultmap);
+//     cudaDeviceSynchronize();
+//     check_execution("kernel_unroll_contain_polygon");
+//     starter.stopTimer();
+//     printf("unroll time: %f ms\n", starter.getElapsedTime());
+
+//     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
+//     printf("h_buffer_size = %u\n", h_bufferoutput_size);
+    
+//     /*3. Refinement step*/
+
+//     grid_size_x = (h_bufferoutput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+//     grid_size.x = grid_size_x;
+
+//     kernel_refinement_contain_polygon<<<grid_size, block_size>>>((Task *)gctx->d_BufferOutput, gctx->d_vertices, gctx->d_bufferoutput_size, gctx->d_resultmap);
+//     cudaDeviceSynchronize();
+//     check_execution("kernel_refinement_contain_polygon");
+
+//     timer.stopTimer();
+//     printf("query time: %f ms\n", timer.getElapsedTime());
+
+//     CUDA_SAFE_CALL(cudaMemcpy(gctx->h_resultmap, gctx->d_resultmap, size * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+
+//     for (int i = 0; i < size; ++i)
 //     {
-//         int start = i, end = min(i + batch_size, polygon_pairs_size);
-//         int size = end - start;
-
-//         CUDA_SAFE_CALL(cudaMemset(gctx->d_resultmap, 0, size * sizeof(uint8_t)));
-//         CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
-//         CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
-
-//         timer.startTimer();
-
-//         /*1. Raster Model Filtering*/
-
-//         int grid_size_x = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-//         dim3 block_size(BLOCK_SIZE, 1, 1);
-//         dim3 grid_size(grid_size_x, 1, 1);
-
-// 		CudaTimer starter;
-// 		starter.startTimer();
-//         kernel_filter_contain_polygon<<<grid_size, block_size>>>(d_pairs + start, gctx->d_idealoffset, gctx->d_info, gctx->d_status, size, gctx->d_resultmap, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size);
-//         cudaDeviceSynchronize();
-//         check_execution("kernel_filter_contain_polygon");
-// 		starter.stopTimer();
-// 		printf("filter time: %f ms\n", starter.getElapsedTime());
-
-//         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-// 		printf("h_buffer_size = %u\n", h_bufferinput_size);
-
-//         /*2. Unroll Refinement*/
-
-//         grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-//         grid_size.x = grid_size_x;
-
-// 		starter.startTimer();
-//         kernel_unroll_contain_polygon<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, d_pairs + start, gctx->d_idealoffset, gctx->d_status, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_resultmap);
-//         cudaDeviceSynchronize();
-//         check_execution("kernel_unroll_contain_polygon");
-// 		starter.stopTimer();
-// 		printf("unroll time: %f ms\n", starter.getElapsedTime());
-
-//         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-// 		printf("h_buffer_size = %u\n", h_bufferoutput_size);
-        
-//         /*3. Refinement step*/
-
-//         grid_size_x = (h_bufferoutput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-//         grid_size.x = grid_size_x;
-
-//         kernel_refinement_contain_polygon<<<grid_size, block_size>>>((Task *)gctx->d_BufferOutput, gctx->d_vertices, gctx->d_bufferoutput_size, gctx->d_resultmap);
-//         cudaDeviceSynchronize();
-//         check_execution("kernel_refinement_contain_polygon");
-
-//         timer.stopTimer();
-//         printf("query time: %f ms\n", timer.getElapsedTime());
-
-//         CUDA_SAFE_CALL(cudaMemcpy(gctx->h_resultmap, gctx->d_resultmap, size * sizeof(uint8_t), cudaMemcpyDeviceToHost));
-
-//         for (int i = 0; i < size; ++i)
+//         if (gctx->h_resultmap[i] == 1)
+//             found++;
+//         if (gctx->h_resultmap[i] == 0)
 //         {
-//             if (gctx->h_resultmap[i] == 1)
-//                 found++;
-//             if (gctx->h_resultmap[i] == 0)
+//             Ideal *source = gctx->source_ideals[(h_pairs + start)[i].source];
+//             Ideal *target = gctx->target_ideals[(h_pairs + start)[i].target - gctx->source_ideals.size()];
+//             Point p(target->getx(0), target->gety(0));
+//             if (source->contain(p, gctx))
 //             {
-//                 Ideal *source = gctx->source_ideals[(h_pairs + start)[i].source];
-//                 Ideal *target = gctx->target_ideals[(h_pairs + start)[i].target - gctx->source_ideals.size()];
-//                 Point p(target->getx(0), target->gety(0));
-//                 if (source->contain(p, gctx))
-//                 {
-//                     found++;
-//                 }
+//                 found++;
 //             }
 //         }
 //     }
-
-//     delete[] h_pairs;
-
-//     CUDA_SAFE_CALL(cudaFree(d_pairs));
 
 //     return found;
 // }

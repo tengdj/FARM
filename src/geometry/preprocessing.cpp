@@ -79,7 +79,7 @@ void preprocess(query_context *gctx){
 		int dimx = (gctx->space.high[0] - gctx->space.low[0]) / gctx->min_step_x;
 		int dimy = (gctx->space.high[1] - gctx->space.low[1]) / gctx->min_step_y;
 
-		gctx->num_layers = static_cast<int>(ceil(max(log(dimx + 1) / log(2.0), log(dimy + 1) / log(2.0))));
+		gctx->max_layers = static_cast<int>(ceil(max(log(dimx + 1) / log(2.0), log(dimy + 1) / log(2.0))));
 		// printf("最低的一层：%d\n", num_floor);
 
 		gctx->space.low[0] = gctx->min_step_x * floor(gctx->space.low[0] / gctx->min_step_x);

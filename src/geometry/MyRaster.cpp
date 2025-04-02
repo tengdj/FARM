@@ -439,7 +439,7 @@ void MyRaster::grid_align(query_context *gctx){
 	if(step_x <= x) step_x = x, flag1 = true;
 	if(step_y <= y) step_y = y, flag2 = true;
 	
-	for(int i = gctx->num_layers;i > 0; i --){
+	for(int i = gctx->max_layers;i > 0; i --){
 		// log("%lf %lf", x, y);
 		// log("step_x = %lf, step_y = %lf", step_x, step_y);
 		

@@ -161,11 +161,6 @@ public:
 	query_context *global_ctx = NULL;
 	size_t target_num = 0;
 	size_t target_id = 0;
-	vector<pair<size_t, size_t>> polygon_pairs;
-	vector<pair<size_t, size_t>> point_polygon_pairs;
-	// pair<Point *, Ideal *>* point_polygon_pairs = nullptr;
-	// int point_polygon_pairs_size = 0;
-	// int point_polygon_pairs_idx = 0;
 
 	map<int, int> vertex_number;
 	map<int, double> latency;
@@ -201,8 +196,6 @@ public:
 	size_t num_vertices = 0;
 	size_t num_gridline_offset = 0;
 	size_t num_gridline_nodes = 0;
-	size_t num_layer_info = 0;
-	size_t num_layer_offset = 0;
 
 	double *d_degree_degree_per_kilometer_latitude = nullptr;
 	double *degree_per_kilometer_longitude_arr = nullptr;
@@ -224,6 +217,7 @@ public:
 	double min_step_y = DBL_MAX;
 	box space = {10000.0, 10000.0, -10000.0, -10000.0};
 	int num_layers = 0;
+	int max_layers = 0;
 
 	uint h_level = 0;
 	uint *d_level = nullptr;

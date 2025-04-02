@@ -34,8 +34,7 @@ struct IdealOffset{
 	uint vertices_start;
 	uint gridline_offset_start;
 	uint gridline_nodes_start;
-	uint layer_info_start;
-	uint layer_offset_start;
+	uint layer_start;
 };
 
 struct EdgeSeq{

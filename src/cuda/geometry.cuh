@@ -43,6 +43,22 @@ __device__ __forceinline__ double atomicMinDouble(double *address, double val)
 	return __longlong_as_double(old);
 }
 
+__device__ __forceinline__ double atomicExchDouble(double* address, double val)
+{
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull;
+    unsigned long long int assumed;
+    
+    unsigned long long int val_as_ull = __double_as_longlong(val);
+
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed, val_as_ull);
+    } while (assumed != old);
+    
+    return __longlong_as_double(old);
+}
+
 __device__ __forceinline__ int gpu_get_id(int x, int y, int dimx)
 {
 	return y * (dimx + 1) + x;

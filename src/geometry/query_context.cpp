@@ -133,14 +133,6 @@ void query_context::merge_global(){
 		}
 	}
 
-	for(auto &tp : polygon_pairs){
-		global_ctx->polygon_pairs.push_back(tp);
-	}
-
-	for(auto &tp : point_polygon_pairs){
-		global_ctx->point_polygon_pairs.push_back(tp);
-	}
-
 	// point_polygon_pairs_size = point_polygon_pairs_idx;
 	// global_ctx->point_polygon_pairs_size += point_polygon_pairs_size;
 	

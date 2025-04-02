@@ -37,6 +37,13 @@ using polygon_t = boost::geometry::model::polygon<point_t>;
 		}																  \
 	} while (0);
 
+#define CUDA_SWAP_BUFFER()                                                                                              \
+    do {																                                                \
+        std::swap(gctx->d_BufferInput, gctx->d_BufferOutput);                                                           \
+        std::swap(gctx->d_bufferinput_size, gctx->d_bufferoutput_size);                                                 \
+        CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));\
+        CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));                                         \
+    } while(0);                                                                                           
 class CudaTimer {
 public:
     CudaTimer() {
