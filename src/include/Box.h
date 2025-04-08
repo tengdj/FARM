@@ -8,8 +8,8 @@
 
 class box{
 public:
-	float low[2] = {BOX_GLOBAL_MIN,BOX_GLOBAL_MIN};
-	float high[2] = {BOX_GLOBAL_MAX,BOX_GLOBAL_MAX};
+	double low[2] = {BOX_GLOBAL_MIN,BOX_GLOBAL_MIN};
+	double high[2] = {BOX_GLOBAL_MAX,BOX_GLOBAL_MAX};
 
 	CUDA_HOSTDEV box(){}
 
@@ -20,7 +20,7 @@ public:
 		high[1] = b->high[1];
 	}
 	
-	CUDA_HOSTDEV box (float lowx, float lowy, float highx, float highy){
+	CUDA_HOSTDEV box (double lowx, double lowy, double highx, double highy){
 		low[0] = lowx;
 		low[1] = lowy;
 		high[0] = highx;

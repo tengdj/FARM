@@ -153,7 +153,7 @@ vector<Vertex *> VertexSequence::pack_to_polyline(){
 
 box *VertexSequence::getMBR(){
 	box *mbr = new box();
-	double bias = 0.00001;
+	float bias = 0.00001;
 	for(int i=0;i<num_vertices;i++){
 		mbr->low[0] = min(mbr->low[0], p[i].x);
 		mbr->high[0] = max(mbr->high[0], p[i].x);

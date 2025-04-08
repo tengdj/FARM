@@ -28,7 +28,7 @@ struct PixPair
 	int pair_id = 0;
 };
 
-__device__ float atomicMinFloat(float* address, float val) {
+__device__ __forceinline__ float atomicMinFloat(float* address, float val) {
     int* address_as_int = (int*)address;
     int old = *address_as_int;
     int expected;
@@ -189,10 +189,10 @@ __device__ __forceinline__ float gpu_degree_per_kilometer_longitude(float latitu
 
 
 // point to box max distance
-__device__ __forceinline__ double gpu_max_distance(Point &p, box &bx, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
+__device__ __forceinline__ float gpu_max_distance(Point &p, box &bx, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 {
-	double dx = fmax(abs(p.x - bx.low[0]), abs(p.x - bx.high[0]));
-	double dy = fmax(abs(p.y - bx.low[1]), abs(p.y - bx.high[1]));
+	float dx = fmax(abs(p.x - bx.low[0]), abs(p.x - bx.high[0]));
+	float dy = fmax(abs(p.y - bx.low[1]), abs(p.y - bx.high[1]));
 
 	dx = dx / gpu_degree_per_kilometer_longitude(p.y, degree_per_kilometer_longitude_arr);
 	dy = dy / *degree_per_kilometer_latitude;
@@ -232,36 +232,28 @@ __device__ __forceinline__ float gpu_max_distance(box &s_box, box &t_box, float 
 // box to box
 __device__ __forceinline__ float gpu_distance(box &s, box &t, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 {
-	// s intersect t
-	if (!(t.low[0] > s.high[0] || t.high[0] < s.low[0] ||
-		  t.low[1] > s.high[1] || t.high[1] < s.low[1]))
-	{
-		return 0.0f;
-	}
-
-	float dx = 0.0f;
-	float dy = 0.0f;
-
-	if(t.low[1] > s.high[1]){
-		dy = t.low[1] - s.high[1];
-	}else if(t.high[1] < s.low[1]){
-		dy = s.low[1] - t.high[1];
-	}else{
-		dy = 0;
-	}
-
-	if(t.low[0] > s.high[0]){
-		dx = t.low[0] - s.high[0];
-	}else if(t.high[0] < s.low[0]){
-		dx = s.low[0] - t.high[0];
-	}else{
-		dx = 0;
-	}
-
-	dx = dx / gpu_degree_per_kilometer_longitude(s.low[1], degree_per_kilometer_longitude_arr);
-	dy = dy / *degree_per_kilometer_latitude;
-
-	return sqrt(dx * dx + dy * dy);
+    const bool overlap_x = !(t.low[0] > s.high[0] || t.high[0] < s.low[0]);
+    const bool overlap_y = !(t.low[1] > s.high[1] || t.high[1] < s.low[1]);
+    
+    const bool boxes_intersect = overlap_x && overlap_y;
+    
+    // For x-axis
+    const float dx_case1 = t.low[0] - s.high[0];  // when t is to the right of s
+    const float dx_case2 = s.low[0] - t.high[0];  // when t is to the left of s
+    float dx = (t.low[0] > s.high[0]) * dx_case1 + 
+               (t.high[0] < s.low[0]) * dx_case2;
+    
+    // For y-axis
+    const float dy_case1 = t.low[1] - s.high[1];  // when t is above s
+    const float dy_case2 = s.low[1] - t.high[1];  // when t is below s
+    float dy = (t.low[1] > s.high[1]) * dy_case1 + 
+               (t.high[1] < s.low[1]) * dy_case2;
+    
+    const float longitude_factor = gpu_degree_per_kilometer_longitude(s.low[1], degree_per_kilometer_longitude_arr);
+    dx = dx / longitude_factor;
+    dy = dy / *degree_per_kilometer_latitude;
+    
+    return boxes_intersect ? 0.0f : sqrt(dx * dx + dy * dy);
 }
 
 // point to point
@@ -270,7 +262,7 @@ __device__ __forceinline__ double gpu_point_to_point_distance(const Point *p1, c
 	return haversine(p1->x, p1->y, p2->x, p2->y);
 }
 
-__device__ __forceinline__ double gpu_point_to_segment_distance(const Point &p, const Point &p1, const Point &p2, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
+__device__ __forceinline__ double gpu_point_to_segment_distance(const Point &p, const Point &p1, const Point &p2, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 {
     double A = p.x - p1.x;
     double B = p.y - p1.y;
@@ -361,7 +353,7 @@ __device__ __forceinline__ double gpu_get_step(box &bx, int dimx, int dimy)
 	return min(haversine(a.x, a.y, b.x, b.y) / dimx, haversine(a.x, a.y, c.x, c.y) / dimy);
 }
 
-__device__ __forceinline__ double gpu_point_to_segment_within_batch(Point &p, Point *vs, size_t seq_len, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
+__device__ __forceinline__ double gpu_point_to_segment_within_batch(Point &p, Point *vs, size_t seq_len, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 {
     double mindist = DBL_MAX;
     
@@ -370,11 +362,6 @@ __device__ __forceinline__ double gpu_point_to_segment_within_batch(Point &p, Po
     {
         double dist = gpu_point_to_segment_distance(p, vs[i], vs[i + 1], degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
         mindist = min(mindist, dist);
-
-		// if (mindist <= WITHIN_DISTANCE)
-		// {
-		// 	return mindist;
-		// }
     }
 
     return mindist;
@@ -409,7 +396,7 @@ __device__ __forceinline__ double gpu_point_to_segment_within_batch(Point &p, Po
 //     return mindist;
 // }
 
-__device__ __forceinline__ double gpu_segment_to_segment_within_batch(Point *vs1, Point *vs2, size_t s1, size_t s2, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
+__device__ __forceinline__ double gpu_segment_to_segment_within_batch(Point *vs1, Point *vs2, size_t s1, size_t s2, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 {
 	double mindist = DBL_MAX;
 	double dist;
@@ -420,10 +407,6 @@ __device__ __forceinline__ double gpu_segment_to_segment_within_batch(Point *vs1
 		{
 			mindist = dist;
 		}
-		// if (mindist <= WITHIN_DISTANCE)
-		// {
-		// 	return mindist;
-		// }
 	}
 	for (int i = 0; i < s2; i++)
 	{
@@ -432,10 +415,6 @@ __device__ __forceinline__ double gpu_segment_to_segment_within_batch(Point *vs1
 		{
 			mindist = dist;
 		}
-		// if (mindist <= WITHIN_DISTANCE)
-		// {
-		// 	return mindist;
-		// }
 	}
 	return mindist;
 }

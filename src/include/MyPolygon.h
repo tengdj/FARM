@@ -119,7 +119,6 @@ public:
 	// RTNode *get_rtree() {return rtree;}
 	size_t get_rtree_size();
 	void triangulate();
-	void build_rtree();
 
 	static VertexSequence *read_vertices(const char *wkt, size_t &offset, bool clockwise = true);
 	static MyPolygon *read_polygon(const char *wkt, size_t &offset);

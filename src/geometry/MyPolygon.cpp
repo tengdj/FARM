@@ -224,36 +224,6 @@ void MyPolygon::triangulate(){
 	polyline.clear();
 }
 
-void MyPolygon::build_rtree(){
-	triangulate();
-
-	assert(triangles && triangle_num>0);
-	if(rtree){
-		return;
-	}
-
-	RTree<Point *, double, 2, double> *rtree_tmp = new RTree<Point *, double, 2, double>();
-
-	for(int i=0;i<triangle_num;i++){
-		box pix;
-		Point *ps = triangles+3*i;
-		for(int i=0;i<3;i++){
-			pix.update(ps[i]);
-		}
-		rtree_tmp->Insert(pix.low, pix.high, ps);
-	}
-	mbr = getMBB();
-	rtree = new RTNode();
-	rtree->low[0] = mbr->low[0];
-	rtree->low[1] = mbr->low[1];
-	rtree->high[0] = mbr->high[0];
-	rtree->high[1] = mbr->high[1];
-
-	rtree_tmp->construct_pixel(rtree);
-	assert(rtree->validate());
-	delete rtree_tmp;
-}
-
 VertexSequence *MyPolygon::read_vertices(const char *wkt, size_t &offset, bool clockwise){
 	// read until the left parenthesis
 	skip_space(wkt, offset);

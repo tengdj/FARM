@@ -222,8 +222,12 @@ inline void PrintBuffer(T* d_Buffer, uint size){
     CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, d_Buffer, size * sizeof(T), cudaMemcpyDeviceToHost));
 
     for (int i = 0; i < size; i++) {
-        printf("[%d, %d, %d, %.2f], ", h_BufferOutput[i].sourcePixelId, h_BufferOutput[i].targetPixelId, h_BufferOutput[i].pairId, h_BufferOutput[i].minDist);
-        if ((i + 1) % 5 == 0) printf("\n");
+        if constexpr (std::is_fundamental<T>::value) {
+            std::cout << h_Buffer[i] << " ";
+            if ((i + 1) % 5 == 0) printf("\n");
+        }else{
+            h_Buffer[i].print();
+        }
     }
     printf("\n");
 }
