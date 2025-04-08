@@ -243,8 +243,8 @@ void preprocess_for_gpu(query_context *gctx)
         CUDA_SAFE_CALL(cudaMemcpy(gctx->d_layer_offset, gctx->h_layer_offset, gctx->num_layers * sizeof(uint32_t), cudaMemcpyHostToDevice));
     }
 
-    double h_degree_per_kilometer_latitude = 360.0/40076.0;
-    double h_degree_per_kilometer_longitude_arr[] = {
+    float h_degree_per_kilometer_latitude = 360.0/40076.0;
+    float h_degree_per_kilometer_longitude_arr[] = {
             0.008983,0.008983,0.008983,0.008983,0.008983,0.008983,0.008983,0.008984,0.008984,0.008984
             ,0.008984,0.008985,0.008985,0.008985,0.008986,0.008986,0.008986,0.008987,0.008987,0.008988
             ,0.008988,0.008989,0.008990,0.008990,0.008991,0.008991,0.008992,0.008993,0.008994,0.008994
@@ -337,28 +337,21 @@ void preprocess_for_gpu(query_context *gctx)
             ,0.514710,0.571895,0.643376,0.735281,0.857823,1.029381,1.286721,1.715622,2.573426,5.146844
     };
 
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_degree_degree_per_kilometer_latitude, sizeof(double)));
-    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_degree_degree_per_kilometer_latitude, &h_degree_per_kilometer_latitude, sizeof(double), cudaMemcpyHostToDevice));
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->degree_per_kilometer_longitude_arr, sizeof(h_degree_per_kilometer_longitude_arr)));
-    CUDA_SAFE_CALL(cudaMemcpy(gctx->degree_per_kilometer_longitude_arr, h_degree_per_kilometer_longitude_arr, sizeof(degree_per_kilometer_longitude_arr), cudaMemcpyHostToDevice));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_degree_degree_per_kilometer_latitude, sizeof(float)));
+    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_degree_degree_per_kilometer_latitude, &h_degree_per_kilometer_latitude, sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_degree_per_kilometer_longitude_arr, sizeof(h_degree_per_kilometer_longitude_arr)));
+    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_degree_per_kilometer_longitude_arr, h_degree_per_kilometer_longitude_arr, sizeof(h_degree_per_kilometer_longitude_arr), cudaMemcpyHostToDevice));
 
     // GPU Buffer
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 4UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 8UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferinput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 4UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 8UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferoutput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_result, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
-    gctx->h_result = new uint(0);
-
-    if(gctx->query_type == QueryType::within || gctx->query_type == QueryType::within){
-        CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_distance, gctx->batch_size * sizeof(double)));
-        CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_min_box_dist, gctx->batch_size * sizeof(double)));
-        CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_max_box_dist, gctx->batch_size * sizeof(double)));
-    }
 
     if(gctx->use_hierachy){
         CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_level, sizeof(uint)));

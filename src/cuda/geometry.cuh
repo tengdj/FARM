@@ -28,6 +28,23 @@ struct PixPair
 	int pair_id = 0;
 };
 
+__device__ float atomicMinFloat(float* address, float val) {
+    int* address_as_int = (int*)address;
+    int old = *address_as_int;
+    int expected;
+    
+    do {
+        expected = old;
+        int new_val;
+        if (__int_as_float(expected) <= val) {
+            break;
+        }
+        new_val = __float_as_int(val);
+        old = atomicCAS(address_as_int, expected, new_val);
+    } while (old != expected);
+    return __int_as_float(old);
+}
+
 __device__ __forceinline__ double atomicMinDouble(double *address, double val)
 {
 	unsigned long long int *address_as_ull = (unsigned long long int *)address;
@@ -161,13 +178,13 @@ __device__ __forceinline__ double haversine(double lon1, double lat1, double lon
 
 // distance related
 
-__device__ __forceinline__ double gpu_degree_per_kilometer_longitude(double latitude, double *degree_per_kilometer_longitude_arr){
-	double absla = abs(latitude);
-	assert(absla<=90);
-	if(absla==90){
+__device__ __forceinline__ float gpu_degree_per_kilometer_longitude(float latitude, float *degree_per_kilometer_longitude_arr){
+	float absla = abs(latitude);
+	assert(absla<=90.0);
+	if(absla==90.0){
 		absla = 89.9;
 	}
-	return degree_per_kilometer_longitude_arr[(int)(absla*10)];
+	return degree_per_kilometer_longitude_arr[(int)(absla*10.0)];
 }
 
 
@@ -184,7 +201,7 @@ __device__ __forceinline__ double gpu_max_distance(Point &p, box &bx, double *de
 }
 
 // point to box min distance
-__device__ __forceinline__ double gpu_distance(box &bx, Point &p, double *degree_per_kilometer_latitude, double *degree_per_kilometer_longitude_arr)
+__device__ __forceinline__ double gpu_distance(box &bx, Point &p, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 {
 	if(p.x >= bx.low[0] && p.x <= bx.high[0]&&
 	   p.y >= bx.low[1] && p.y <= bx.high[1])
@@ -192,7 +209,7 @@ __device__ __forceinline__ double gpu_distance(box &bx, Point &p, double *degree
 		return 0.0;
     }
 
-	double dx = fmax(abs(p.x - (bx.low[0] + bx.high[0]) / 2) - (bx.high[0] - bx.low[0]) / 2, 0.0);
+	float dx = fmax(abs(p.x - (bx.low[0] + bx.high[0]) / 2) - (bx.high[0] - bx.low[0]) / 2, 0.0);
 	double dy = fmax(abs(p.y - (bx.low[1] + bx.high[1]) / 2) - (bx.high[1] - bx.low[1]) / 2, 0.0);
 
 	dx = dx / gpu_degree_per_kilometer_longitude(p.y, degree_per_kilometer_longitude_arr);
@@ -201,62 +218,50 @@ __device__ __forceinline__ double gpu_distance(box &bx, Point &p, double *degree
 	return sqrt(dx*dx+dy*dy);
 }
 
-__device__ __forceinline__ double gpu_max_distance(box &s_box, box &t_box)
+__device__ __forceinline__ float gpu_max_distance(box &s_box, box &t_box, float *degree_per_kilometer_latitude, float  *degree_per_kilometer_longitude_arr)
 {
-	Point p, q;
-	p.x = min(s_box.low[0], t_box.low[0]);
-	p.y = min(s_box.low[1], t_box.low[1]);
-	q.x = max(s_box.high[0], t_box.high[0]);
-	q.y = max(s_box.high[1], t_box.high[1]);
+	float dx = fmax(s_box.high[0], t_box.high[0]) - fmin(s_box.low[0], t_box.low[0]);
+	float dy = fmax(s_box.high[1], t_box.high[1]) - fmin(s_box.low[1], t_box.low[1]);;
 
-	return haversine(p.x, p.y, q.x, q.y);
+	dx = dx / gpu_degree_per_kilometer_longitude(s_box.low[1], degree_per_kilometer_longitude_arr);
+	dy = dy / *degree_per_kilometer_latitude;
+
+	return sqrt(dx*dx+dy*dy);
 }
 
 // box to box
-__device__ __forceinline__ double gpu_distance(box &s, box &t)
+__device__ __forceinline__ float gpu_distance(box &s, box &t, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 {
 	// s intersect t
 	if (!(t.low[0] > s.high[0] || t.high[0] < s.low[0] ||
 		  t.low[1] > s.high[1] || t.high[1] < s.low[1]))
 	{
-		return 0.0;
+		return 0.0f;
 	}
 
-	Point p, q;
+	float dx = 0.0f;
+	float dy = 0.0f;
 
-	if (t.low[1] > s.high[1])
-	{
-		q.y = t.low[1];
-		p.y = s.high[1];
-	}
-	else if (s.low[1] > t.high[1])
-	{
-		q.y = s.low[1];
-		p.y = t.high[1];
-	}
-	else
-	{
-		q.y = s.low[1];
-		p.y = s.low[1];
+	if(t.low[1] > s.high[1]){
+		dy = t.low[1] - s.high[1];
+	}else if(t.high[1] < s.low[1]){
+		dy = s.low[1] - t.high[1];
+	}else{
+		dy = 0;
 	}
 
-	if (t.low[0] > s.high[0])
-	{
-		q.x = t.low[0];
-		p.x = s.high[0];
-	}
-	else if (s.low[0] > t.high[0])
-	{
-		q.x = s.low[0];
-		p.x = t.high[0];
-	}
-	else
-	{
-		q.x = s.low[0];
-		p.x = s.low[0];
+	if(t.low[0] > s.high[0]){
+		dx = t.low[0] - s.high[0];
+	}else if(t.high[0] < s.low[0]){
+		dx = s.low[0] - t.high[0];
+	}else{
+		dx = 0;
 	}
 
-	return haversine(p.x, p.y, q.x, q.y);
+	dx = dx / gpu_degree_per_kilometer_longitude(s.low[1], degree_per_kilometer_longitude_arr);
+	dy = dy / *degree_per_kilometer_latitude;
+
+	return sqrt(dx * dx + dy * dy);
 }
 
 // point to point

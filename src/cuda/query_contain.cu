@@ -126,7 +126,7 @@ void cuda_contain(query_context *gctx)
 
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
     if (h_bufferinput_size == 0) {
-        CUDA_SAFE_CALL(cudaMemcpy(gctx->h_result, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
+        CUDA_SAFE_CALL(cudaMemcpy(&gctx->found, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
         return;
     }
 #ifdef DEBUG
@@ -146,6 +146,6 @@ void cuda_contain(query_context *gctx)
     timer.stopTimer();
     printf("query time: %f ms\n", timer.getElapsedTime());
 #endif
-    CUDA_SAFE_CALL(cudaMemcpy(gctx->h_result, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
+    CUDA_SAFE_CALL(cudaMemcpy(&gctx->found, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
 	return;
 }

@@ -17,9 +17,9 @@ int main(){
 		printf("dimx = %d, dimy = %d\n", ideal->get_dimx(), ideal->get_dimy());
 		printf("step_x = %lf, step_y = %lf\n", ideal->get_step_x(), ideal->get_step_y());
 
-		ideal->getMBB()->print();
-		ideal->MyPolygon::print();
-		ideal->MyRaster::print();
+		// ideal->getMBB()->print();
+		// ideal->MyPolygon::print();
+		// ideal->MyRaster::print();
 		puts("-------------------------HIERARCHY---------------------------------");
 		for(int i = 0; i <= ideal->get_num_layers(); i ++){
 			printf("level %d:\n", i);

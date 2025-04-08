@@ -197,20 +197,15 @@ public:
 	size_t num_gridline_offset = 0;
 	size_t num_gridline_nodes = 0;
 
-	double *d_degree_degree_per_kilometer_latitude = nullptr;
-	double *degree_per_kilometer_longitude_arr = nullptr;
+	float *d_degree_degree_per_kilometer_latitude = nullptr;
+	float *d_degree_per_kilometer_longitude_arr = nullptr;
 
 	char* d_BufferInput = nullptr;
 	uint *d_bufferinput_size = nullptr;
 	char* d_BufferOutput = nullptr;
 	uint *d_bufferoutput_size = nullptr;
 
-	uint *h_result = nullptr;
 	uint *d_result = nullptr;
-
-	double *d_distance = nullptr;
-	double *d_min_box_dist = nullptr;
-	double *d_max_box_dist = nullptr;
 
 	// for hierachy
 	double min_step_x = DBL_MAX;

@@ -216,5 +216,17 @@ inline void CopyPoints(Point *points, size_t num,
   d_points = h_points;
 }
 
+template <typename T>
+inline void PrintBuffer(T* d_Buffer, uint size){
+    T* h_Buffer = new T[size];
+    CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, d_Buffer, size * sizeof(T), cudaMemcpyDeviceToHost));
+
+    for (int i = 0; i < size; i++) {
+        printf("[%d, %d, %d, %.2f], ", h_BufferOutput[i].sourcePixelId, h_BufferOutput[i].targetPixelId, h_BufferOutput[i].pairId, h_BufferOutput[i].minDist);
+        if ((i + 1) % 5 == 0) printf("\n");
+    }
+    printf("\n");
+}
+
 
 #endif /* CUDA_UTIL_H_ */

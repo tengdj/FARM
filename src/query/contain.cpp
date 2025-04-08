@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
 	std::cout << "total gpu time: " << gpu_duration.count() << " ms" << std::endl;
 #endif
 	cout << endl;
-	printf("FOUND: %d\n", global_ctx.h_result);
+	printf("FOUND: %d\n", global_ctx.found);
 	// global_ctx.print_stats();
 
 	return 0;
