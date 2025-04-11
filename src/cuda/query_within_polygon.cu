@@ -31,7 +31,7 @@ struct BoxDistRange
 
 __device__ int d_level;
 
-__global__ void kernel_init(pair<uint32_t, uint32_t> *pairs, uint source_size, BoxDistRange *buffer, float *max_box_dist, uint size)
+__global__ void kernel_init_distance(pair<uint32_t, uint32_t> *pairs, uint source_size, BoxDistRange *buffer, float *max_box_dist, uint size)
 {
     const int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (pair_id < size)
@@ -328,7 +328,7 @@ void cuda_within_polygon(query_context *gctx)
     dim3 block_size(BLOCK_SIZE, 1, 1);
     dim3 grid_size(grid_size_x, 1, 1);
 
-    kernel_init<<<grid_size, block_size>>>(gctx->d_candidate_pairs, gctx->source_ideals.size(), (BoxDistRange *)gctx->d_BufferInput, d_max_box_dist, gctx->num_pairs);
+    kernel_init_distance<<<grid_size, block_size>>>(gctx->d_candidate_pairs, gctx->source_ideals.size(), (BoxDistRange *)gctx->d_BufferInput, d_max_box_dist, gctx->num_pairs);
     cudaDeviceSynchronize();
     check_execution("kernel_init");
 

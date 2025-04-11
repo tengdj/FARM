@@ -205,6 +205,7 @@ public:
 	char* d_BufferOutput = nullptr;
 	uint *d_bufferoutput_size = nullptr;
 
+	uint8_t *d_flags = nullptr;
 	uint *d_result = nullptr;
 
 	// for hierachy

@@ -157,8 +157,8 @@ void dump_polygons_to_file(vector<Ideal *> polygons, const char *path);
 void indexFilter(query_context *gctx);
 void cuda_create_buffer(query_context *gctx);
 void preprocess_for_gpu(query_context *gctx);
-void cuda_contain(query_context *gctx);
-uint cuda_contain_polygon(query_context *gctx);
+void cuda_contain(query_context *gctx, bool polygon);
+void cuda_contain_polygon(query_context *gctx);
 uint cuda_within(query_context *gctx);
 void cuda_within_polygon(query_context *gctx);
 #endif

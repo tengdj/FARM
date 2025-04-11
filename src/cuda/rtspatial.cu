@@ -120,14 +120,14 @@ void indexFilter(query_context *gctx){
     // PrintResults<<<grid_size, block_size>>>(gctx->d_candidate_pairs, gctx->num_pairs);
     // cudaDeviceSynchronize();
 
-    // pair<uint32_t, uint32_t>* h_candidate_pairs = new pair<uint32_t, uint32_t>[n_results];
-    // cudaMemcpy(h_candidate_pairs, gctx->d_candidate_pairs, n_results * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
-    // for(int i = 0; i < n_results; i ++){
-    //     printf("pair%d\n", i);
-    //     int source = h_candidate_pairs[i].first;
-    //     int target = h_candidate_pairs[i].second;
-    //     gctx->source_ideals[source]->MyPolygon::print();
-    //     gctx->target_ideals[target]->MyPolygon::print();
-    // }
+    pair<uint32_t, uint32_t>* h_candidate_pairs = new pair<uint32_t, uint32_t>[n_results];
+    cudaMemcpy(h_candidate_pairs, gctx->d_candidate_pairs, n_results * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
+    for(int i = 0; i < n_results; i ++){
+        printf("pair%d\n", i);
+        int source = h_candidate_pairs[i].first;
+        int target = h_candidate_pairs[i].second;
+        gctx->source_ideals[source]->MyPolygon::print();
+        gctx->target_ideals[target]->MyPolygon::print();
+    }
     
 }

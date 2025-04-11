@@ -167,6 +167,29 @@ inline uint64_t d_MurmurHash2_x64( const void * key, int len, uint32_t seed ){
     return h;
 }
 
+__device__ __forceinline__ int binary_search_count(const double *arr, uint32_t start, uint32_t end, double target)
+{
+	int count = 0;
+	uint32_t left = start;
+	uint32_t right = end;
+
+	while (left < right)
+	{
+		uint32_t mid = (left + right) / 2;
+		if (arr[mid] <= target)
+		{
+			count = mid - start + 1;
+			left = mid + 1;
+		}
+		else
+		{
+			right = mid;
+		}
+	}
+
+	return count;
+}
+
 __device__
 inline uint float_to_uint(float xy) {
 //    uint ret = 0;

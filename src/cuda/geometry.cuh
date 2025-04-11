@@ -10,9 +10,9 @@ const double EARTH_RADIUS_KM = 6371.0;
 
 struct IdealPair
 {
-	int source;
-	int target;
-	int level;
+	uint32_t source;
+	uint32_t target;
+	int pair_id;
 };
 
 struct PixMapping
@@ -127,7 +127,7 @@ __device__ __forceinline__ int gpu_get_offset_y(double s_yval, double t_yval, do
 // 	return BORDER;
 // }
 
-__device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, int &id, uint32_t offset = 0)
+__device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint start, int id, uint32_t offset = 0)
 {
 	uint8_t st = (status + start + offset)[id];
     PartitionStatus result = static_cast<PartitionStatus>((st > 1) ? 2 : st);

@@ -19,10 +19,12 @@ int main(int argc, char** argv) {
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::contain;
 	
-	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
-	if(!global_ctx.batch_size) global_ctx.batch_size = global_ctx.source_ideals.size();
-	// read all the points
-	global_ctx.load_points();
+	// global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
+	// // read all the points
+	// global_ctx.load_points();
+
+	global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str());
+	global_ctx.points = load_point_wkt(global_ctx.target_path.c_str(), global_ctx.target_num, &global_ctx);
 
 	// 如果显存空间不够了，就先传到cpu里
 	// 或者加一个load_factor
@@ -42,7 +44,7 @@ int main(int argc, char** argv) {
 	std::cout << "preprocess for gpu time: " << preprocess_gpu_duration.count() << " ms" << std::endl;
 
 	auto gpu_start = std::chrono::high_resolution_clock::now();
-	cuda_contain(&global_ctx);
+	cuda_contain(&global_ctx, false);
 	auto gpu_end = std::chrono::high_resolution_clock::now();
 	auto gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(gpu_end - gpu_start);
 	std::cout << "total gpu time: " << gpu_duration.count() << " ms" << std::endl;
