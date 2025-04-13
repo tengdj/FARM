@@ -28,6 +28,7 @@ class Ideal;
 struct EdgeSeq;
 struct RasterInfo;
 struct IdealOffset;
+struct IdealPair;
 
 enum QueryType
 {

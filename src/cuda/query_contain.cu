@@ -114,13 +114,14 @@ __global__ void kernel_refinement_contain(pair<uint32_t, uint32_t> *pairs,
 	atomicAdd(result, (uint)(ret));
 }
 
-__global__ void filter_check_contain(pair<uint32_t,uint32_t>* pairs, 
+__global__ void filter_check_contain(pair<uint32_t,uint32_t>* pairs, uint source_size,
 	    							 IdealOffset *idealoffset, RasterInfo *info, 
 									 uint8_t *status, Point *vertices, uint size, uint8_t *flags, 
 									 PixMapping *ptpixpairs, uint *pp_size)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x >= size) return;
+	pairs[x].second += source_size;
 
 	const pair<uint32_t, uint32_t> pair = pairs[x];
 	const uint32_t src_idx = pair.first;
@@ -246,7 +247,7 @@ void cuda_contain(query_context *gctx, bool polygon)
 		);
 	}else{
 		filter_check_contain<<<grid_size, block_size>>>(
-			gctx->d_candidate_pairs, gctx->d_idealoffset,
+			gctx->d_candidate_pairs, gctx->source_ideals.size(), gctx->d_idealoffset,
 			gctx->d_info, gctx->d_status, gctx->d_vertices, gctx->num_pairs, 
 			gctx->d_flags, (PixMapping *)gctx->d_BufferInput, gctx->d_bufferinput_size
 		);
@@ -254,14 +255,14 @@ void cuda_contain(query_context *gctx, bool polygon)
 	cudaDeviceSynchronize();
     check_execution("kernel_filter_contain");
 
-
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
+	printf("h_bufferinput_size = %d\n", h_bufferinput_size);
     
     if (h_bufferinput_size == 0) {
         CUDA_SAFE_CALL(cudaMemcpy(&gctx->found, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
         return;
     }
-    
+
 	// Refinement Step
 
     const int refine_grid_size = (h_bufferinput_size + block_size - 1) / block_size;
@@ -285,18 +286,21 @@ void cuda_contain(query_context *gctx, bool polygon)
     cudaDeviceSynchronize();
     check_execution("kernel_refinement_contain");
 
-    if(!polygon) CUDA_SAFE_CALL(cudaMemcpy(&gctx->found, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
-	uint8_t* h_Buffer = new uint8_t[gctx->num_pairs];
-    CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, gctx->d_flags, gctx->num_pairs * sizeof(uint8_t), cudaMemcpyDeviceToHost));
-	int _sum = 0;
-    for (int i = 0; i < gctx->num_pairs; i++) {
-		if(h_Buffer[i] == 1) _sum ++;
-		std::cout << (int)h_Buffer[i] << " ";
-		if ((i + 1) % 5 == 0) printf("\n");
-    }
-    printf("\n");
+	if(!polygon) CUDA_SAFE_CALL(cudaMemcpy(&gctx->found, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
 
-	printf("sum = %d\n", _sum);
+	// uint8_t* h_Buffer = new uint8_t[gctx->num_pairs];
+    // CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, gctx->d_flags, gctx->num_pairs * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+	// int _sum = 0;
+    // for (int i = 0; i < gctx->num_pairs; i++) {
+	// 	if(h_Buffer[i] == 1) _sum ++;
+	// 	std::cout << (int)h_Buffer[i] << " ";
+	// 	if ((i + 1) % 5 == 0) printf("\n");
+    // }
+    // printf("\n");
+
+	// printf("sum = %d\n", _sum);
+    
+
 }
 
 // #include "geometry.cuh"

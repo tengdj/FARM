@@ -8,13 +8,6 @@
 
 const double EARTH_RADIUS_KM = 6371.0;
 
-struct IdealPair
-{
-	uint32_t source;
-	uint32_t target;
-	int pair_id;
-};
-
 struct PixMapping
 {
 	int pair_id = 0;

@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
 
 	auto gpu_start = std::chrono::high_resolution_clock::now();
 	cuda_contain(&global_ctx, true);
-	// cuda_contain_polygon(&global_ctx);
+	cuda_contain_polygon(&global_ctx);
 	auto gpu_end = std::chrono::high_resolution_clock::now();
 	auto gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(gpu_end - gpu_start);
 	std::cout << "total gpu time: " << gpu_duration.count() << " ms" << std::endl;

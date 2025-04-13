@@ -27,6 +27,13 @@ public:
 	}
 };
 
+struct IdealPair
+{
+	uint32_t source;
+	uint32_t target;
+	int pair_id;
+};
+
 struct IdealOffset{
 	uint status_start;
 	uint offset_start;

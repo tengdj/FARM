@@ -10,24 +10,13 @@ struct Task
     int pair_id = 0;
 };
 
-__global__ void kernel_init(pair<uint32_t, uint32_t> *pairs, uint source_size, uint size)
-{
-    const int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (pair_id < size)
-    {
-        // target id follows source id
-        pairs[pair_id].second += source_size;
-    }
-}
-
 // flags: 0(not contain), 1(maybe contain), 2(contain)
 __global__ void kernel_filter_contain_polygon(pair<uint32_t,uint32_t>* pairs, IdealOffset *idealoffset,
                                              RasterInfo *info, uint8_t *status, uint size, 
                                              PixPair *pixpairs, uint *pp_size, uint8_t *flags)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	// if (x >= size || flags[x] != 1) return; 
-	if (x >= size) return; 
+	if (x >= size || flags[x] != 1) return;  
 
 	const pair<uint32_t, uint32_t> pair = pairs[x];
     const uint32_t src_idx = pair.first;
@@ -92,9 +81,7 @@ __global__ void kernel_filter_contain_polygon(pair<uint32_t,uint32_t>* pairs, Id
 	bool is_contained = (itn == total_pixels); 
 	bool is_outside = (etn == total_pixels); 
     
-    // if(is_contained) flags[x] = 2;
-	// else if(is_outside || flag_out) flags[x] = 0;
-    // else flags[x] = 1;
+    if(is_outside || flag_out) flags[x] = 0;
     return;
 }
 
@@ -127,9 +114,7 @@ __global__ void kernel_unroll_contain_polygon(PixPair *pixpairs, pair<uint32_t, 
 	uint s_vertices_start = source.vertices_start;
 	uint t_vertices_start = target.vertices_start;
 
-	printf("%d %p %p\n", pair_id, es_offset + s_offset_start, es_offset + t_offset_start);
-
-	const int max_size = 8;
+	const int max_size = 16;
 
 	for (int i = 0; i < s_num_sequence; ++i)
 	{
@@ -172,33 +157,25 @@ __global__ void kernel_refinement_contain_polygon(Task *tasks, Point *d_vertices
 	bool has_intersection = should_process && gpu_segment_intersect_batch((d_vertices + s1), (d_vertices + s2), len1, len2);
 
 	if (has_intersection) {
-        flags[pair_id] = 2;
-    }else{
-		flags[pair_id] = 0;
-	}
+        flags[pair_id] = 0;
+    }
 }
 
 __global__ void statistic_result(uint8_t *flags, uint size, uint *result){
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     if (x >= size) return;
-
-	assert(flags[x] != 1);
-	if(flags[x] == 2) atomicAdd(result, 1);
+	if(flags[x] == 1) atomicAdd(result, 1);
 }
 
 void cuda_contain_polygon(query_context *gctx)
 {
     uint h_bufferinput_size, h_bufferoutput_size;
+	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
 
+	/*1. Raster Model Filtering*/
 	int grid_size_x = (gctx->num_pairs + BLOCK_SIZE - 1) / BLOCK_SIZE;
     dim3 block_size(BLOCK_SIZE, 1, 1);
     dim3 grid_size(grid_size_x, 1, 1);
-
-	kernel_init<<<grid_size, block_size>>>(gctx->d_candidate_pairs, gctx->source_ideals.size(), gctx->num_pairs);
-    cudaDeviceSynchronize();
-    check_execution("kernel_filter_contain_polygon");
-
-    /*1. Raster Model Filtering*/
 
     kernel_filter_contain_polygon<<<grid_size, block_size>>>(gctx->d_candidate_pairs, gctx->d_idealoffset, gctx->d_info, gctx->d_status, gctx->num_pairs, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->d_flags);
     cudaDeviceSynchronize();
@@ -207,7 +184,6 @@ void cuda_contain_polygon(query_context *gctx)
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
     printf("h_buffer_size = %u\n", h_bufferinput_size);
 	
-	return;
     /*2. Unroll Refinement*/
 
     grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -235,6 +211,20 @@ void cuda_contain_polygon(query_context *gctx)
     statistic_result<<<grid_size, block_size>>>(gctx->d_flags, gctx->num_pairs, gctx->d_result);
     cudaDeviceSynchronize();
     check_execution("statistic_result");
+
+	// uint8_t* h_Buffer = new uint8_t[gctx->num_pairs];
+    // CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, gctx->d_flags, gctx->num_pairs * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+	// int _sum = 0;
+    // for (int i = 0; i < gctx->num_pairs; i++) {
+	// 	if(h_Buffer[i] == 2) _sum ++;
+	// 	std::cout << (int)h_Buffer[i] << " ";
+	// 	if ((i + 1) % 5 == 0) printf("\n");
+    // }
+    // printf("\n");
+
+	// printf("sum = %d\n", _sum);
+
+	CUDA_SAFE_CALL(cudaMemcpy(&gctx->found, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
 
     return;
 }
