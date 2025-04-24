@@ -205,25 +205,42 @@ inline uint float_to_uint(float xy) {
     return (uint)(xy*100000);
 }
 
-inline void CopyBoxes(
-    const std::vector<box> &boxes,
-    thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2>>>
-        &d_boxes) {
-  pinned_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2>>> h_boxes;
+// inline void CopyBoxes(const std::vector<box> &boxes, 
+//                       thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2>>> &d_boxes) 
+// {
+//   pinned_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2>>> h_boxes;
 
-  h_boxes.resize(boxes.size());
+//   h_boxes.resize(boxes.size());
 
-  for (size_t i = 0; i < boxes.size(); i++) {
-    rtspatial::Point<coord_t, 2> p_min(boxes[i].low[0],
-                                       boxes[i].low[1]);
-    rtspatial::Point<coord_t, 2> p_max(boxes[i].high[0],
-                                       boxes[i].high[1]);
+//   for (size_t i = 0; i < boxes.size(); i++) {
+//     rtspatial::Point<coord_t, 2> p_min(boxes[i].low[0],
+//                                        boxes[i].low[1]);
+//     rtspatial::Point<coord_t, 2> p_max(boxes[i].high[0],
+//                                        boxes[i].high[1]);
 
-    h_boxes[i] =
-        rtspatial::Envelope<rtspatial::Point<coord_t, 2>>(p_min, p_max);
-  }
+//     h_boxes[i] =
+//         rtspatial::Envelope<rtspatial::Point<coord_t, 2>>(p_min, p_max);
+//   }
 
-  d_boxes = h_boxes;
+//   d_boxes = h_boxes;
+// }
+
+inline void CopyBoxes(const std::vector<box> &boxes, 
+    thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2>>> &d_boxes) 
+{
+    // 首先把boxes复制到设备上
+    thrust::device_vector<box> d_input_boxes = boxes;
+
+    // 调整输出向量大小
+    d_boxes.resize(boxes.size());
+
+    // 在设备上执行转换
+    thrust::transform(d_input_boxes.begin(), d_input_boxes.end(), d_boxes.begin(),
+    [] __device__ (const box& b) {
+    rtspatial::Point<coord_t, 2> p_min(b.low[0], b.low[1]);
+    rtspatial::Point<coord_t, 2> p_max(b.high[0], b.high[1]);
+    return rtspatial::Envelope<rtspatial::Point<coord_t, 2>>(p_min, p_max);
+    });
 }
 
 inline void CopyPoints(Point *points, size_t num,
@@ -246,7 +263,7 @@ inline void PrintBuffer(T* d_Buffer, uint size){
 
     for (int i = 0; i < size; i++) {
         if constexpr (std::is_fundamental<T>::value) {
-            std::cout << h_Buffer[i] << " ";
+            std::cout << (float)h_Buffer[i] << " ";
             if ((i + 1) % 5 == 0) printf("\n");
         }else{
             h_Buffer[i].print();

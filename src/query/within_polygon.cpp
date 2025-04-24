@@ -7,7 +7,6 @@
 
 #include "../include/Ideal.h"
 #include <fstream>
-#include "../index/RTree.h"
 #include <queue>
 #include <boost/program_options.hpp>
 
@@ -24,7 +23,7 @@ int main(int argc, char** argv) {
 	// the target is also the source
 	global_ctx.target_num = global_ctx.target_ideals.size();
 
-	indexFilter(&global_ctx);
+	//indexFilter(&global_ctx);
 	
 	auto preprocess_start = std::chrono::high_resolution_clock::now();
 	preprocess(&global_ctx);

@@ -93,7 +93,7 @@ __global__ void kernel_unroll_contain_polygon(PixPair *pixpairs, pair<uint32_t, 
 	const int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
 	if(idx >= *size) return;
-
+	
 	int p = pixpairs[idx].source_pixid;
 	int p2 = pixpairs[idx].target_pixid;
 	int pair_id = pixpairs[idx].pair_id;
@@ -156,9 +156,7 @@ __global__ void kernel_refinement_contain_polygon(Task *tasks, Point *d_vertices
 
 	bool has_intersection = should_process && gpu_segment_intersect_batch((d_vertices + s1), (d_vertices + s2), len1, len2);
 
-	if (has_intersection) {
-        flags[pair_id] = 0;
-    }
+	if (has_intersection) flags[pair_id] = 0;
 }
 
 __global__ void statistic_result(uint8_t *flags, uint size, uint *result){

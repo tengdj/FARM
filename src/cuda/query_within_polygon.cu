@@ -43,7 +43,7 @@
 //     }
 // }
 
-// __global__ void cal_box_distance(BoxDistRange *candidate, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *layer_info, uint32_t *layer_offset, uint8_t *status, float *max_box_dist, uint *size, BoxDistRange *buffer, uint *buffer_size, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
+// __global__ void cal_box_distance_polygon(BoxDistRange *candidate, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *layer_info, uint32_t *layer_offset, uint8_t *status, float *max_box_dist, uint *size, BoxDistRange *buffer, uint *buffer_size, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 // {
 //     const int candidate_id = blockIdx.x * blockDim.x + threadIdx.x;
 //     if(candidate_id == 0) printf("d_level %d\n", d_level);
@@ -169,7 +169,7 @@
 //     }
 // }
 
-// __global__ void kernel_filter(BoxDistRange *bufferinput, float *max_box_dist, uint *size, BoxDistRange *bufferoutput, uint *bufferoutput_size)
+// __global__ void kernel_filter_within_polygon(BoxDistRange *bufferinput, float *max_box_dist, uint *size, BoxDistRange *bufferoutput, uint *bufferoutput_size)
 // {
 //     const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
 //     if (bufferId < *size)
@@ -246,7 +246,7 @@
 //     }
 // }
 
-// __global__ void kernel_unroll(BoxDistRange *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, uint32_t *es_offset, EdgeSeq *edge_sequences, uint* size, Task *tasks, uint *task_size)
+// __global__ void kernel_unroll_within_polygon(BoxDistRange *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, uint32_t *es_offset, EdgeSeq *edge_sequences, uint* size, Task *tasks, uint *task_size)
 // {
 //     const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
 //     if (bufferId < *size)
@@ -284,7 +284,7 @@
 //     }
 // }
 
-// __global__ void kernel_refine(Task *tasks, Point *vertices, uint *size, float *max_box_dist, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
+// __global__ void kernel_refine_within_polygon(Task *tasks, Point *vertices, uint *size, float *max_box_dist, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 // {
 //     const int taskId = blockIdx.x * blockDim.x + threadIdx.x;
 //     if (taskId < *size)
@@ -316,7 +316,6 @@
 // void cuda_within_polygon(query_context *gctx)
 // {
 //     uint h_bufferinput_size, h_bufferoutput_size;
-
 // #ifdef DEBUG
 //     CudaTimer timer;
 //     timer.startTimer();
@@ -344,9 +343,9 @@
 //         block_size.x = BLOCK_SIZE;
 //         grid_size.x = grid_size_x;
 
-//         cal_box_distance<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs, gctx->d_idealoffset, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, d_max_box_dist, gctx->d_bufferinput_size, (BoxDistRange *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
+//         cal_box_distance_polygon<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs, gctx->d_idealoffset, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, d_max_box_dist, gctx->d_bufferinput_size, (BoxDistRange *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
 //         cudaDeviceSynchronize();
-//         check_execution("cal_box_distance");
+//         check_execution("cal_box_distance_polygon");
 
 //         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
 //         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
@@ -364,9 +363,9 @@
 //         block_size.x = BLOCK_SIZE;
 //         grid_size.x = grid_size_x;
 
-//         kernel_filter<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, d_max_box_dist, gctx->d_bufferinput_size, (BoxDistRange *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
+//         kernel_filter_within_polygon<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, d_max_box_dist, gctx->d_bufferinput_size, (BoxDistRange *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
 //         cudaDeviceSynchronize();
-//         check_execution("kernel_filter");
+//         check_execution("kernel_filter_within_polygon");
 
 //         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
 //         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
@@ -465,9 +464,9 @@
 //         block_size.x = BLOCK_SIZE;
 //         grid_size.x = grid_size_x;
 
-//         kernel_unroll<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs, gctx->d_idealoffset, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
+//         kernel_unroll_within_polygon<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs, gctx->d_idealoffset, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
 //         cudaDeviceSynchronize();
-//         check_execution("kernel_unroll");
+//         check_execution("kernel_unroll_within_polygon");
 
 //         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
 //         printf("h_bufferoutput_size = %d\n", h_bufferoutput_size);
@@ -478,9 +477,9 @@
 //         block_size.x = BLOCK_SIZE;
 //         grid_size.x = grid_size_x;
 
-//         kernel_refine<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_vertices, gctx->d_bufferinput_size, d_max_box_dist, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
+//         kernel_refine_within_polygon<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_vertices, gctx->d_bufferinput_size, d_max_box_dist, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
 //         cudaDeviceSynchronize();
-//         check_execution("kernel_refine");
+//         check_execution("kernel_refine_within_polygon");
 //     }
 
 //     grid_size_x = (gctx->num_pairs + BLOCK_SIZE - 1) / BLOCK_SIZE;

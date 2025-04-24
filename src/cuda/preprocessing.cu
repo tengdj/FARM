@@ -13,11 +13,11 @@ void cuda_create_buffer(query_context *gctx)
     size_t num_gridline_nodes = 0;
     size_t num_layers = 0;
 
-    size_t idx = 0;
+    // size_t idx = 0;
 
     for (auto &ideal : gctx->source_ideals)
     {
-        ideal->id = idx ++;
+        // ideal->id = idx ++;
 
         num_status += ideal->get_status_size();
         num_offset += ideal->get_num_pixels() + 1;
@@ -31,7 +31,7 @@ void cuda_create_buffer(query_context *gctx)
     }
     for (auto &ideal : gctx->target_ideals)
     {
-        ideal->id = idx ++;
+        ideal->id += gctx->source_ideals.size();
 
         num_status += ideal->get_status_size();
         num_offset += ideal->get_num_pixels() + 1;
@@ -350,8 +350,8 @@ void preprocess_for_gpu(query_context *gctx)
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferoutput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
 
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_flags, gctx->num_pairs * sizeof(uint8_t)));
-    CUDA_SAFE_CALL(cudaMemset(gctx->d_flags, 0, gctx->num_pairs * sizeof(uint8_t)));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_flags, gctx->batch_size * gctx->vpr * 10 * sizeof(uint8_t)));
+    // CUDA_SAFE_CALL(cudaMemset(gctx->d_flags, 0, gctx->num_pairs * sizeof(uint8_t)));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_result, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
 
@@ -359,6 +359,17 @@ void preprocess_for_gpu(query_context *gctx)
         CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_level, sizeof(uint)));
         CUDA_SAFE_CALL(cudaMemset(gctx->d_level, 0, sizeof(uint)));
     }
-    
 
+    if(gctx->num_pairs > 0 && !gctx->d_candidate_pairs){
+        CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_candidate_pairs, gctx->batch_size * 10 * sizeof(pair<uint32_t, uint32_t>)));
+        // CUDA_SAFE_CALL(cudaMemcpy(gctx->d_candidate_pairs, gctx->h_candidate_pairs, gctx->num_pairs * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyHostToDevice));    
+    }
+}
+
+void ResetDevice(query_context *gctx){
+    CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(gctx->d_flags, 0, gctx->num_pairs * sizeof(uint8_t)));
+    CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(gctx->d_level, 0, sizeof(uint)));
 }

@@ -110,7 +110,7 @@ public:
 	bool perform_refine = true;
 	bool collect_latency = false;
 	float sample_rate = 1.0;
-	int batch_size = 0;
+	size_t batch_size = 0;
 
 	int small_threshold = 500;
 	int big_threshold = 400000;
@@ -220,6 +220,7 @@ public:
 	uint *d_level = nullptr;
 
 	// for rt spatial index
+	pair<uint32_t, uint32_t>* h_candidate_pairs = nullptr;
 	pair<uint32_t, uint32_t>* d_candidate_pairs = nullptr;
 	size_t num_pairs = 0;
 

@@ -1,8 +1,8 @@
 #include "geometry.cuh"
 
-__global__ void kernel_filter_contain(pair<uint32_t,uint32_t>* pairs, Point *points, 
+__global__ void kernel_filter_contain(pair<uint32_t,uint32_t> *pairs, Point *points, 
 	    							 IdealOffset *idealoffset, RasterInfo *info, 
-									 uint8_t *status, uint size, uint *result, 
+									 uint8_t *status, uint size, uint *result, uint8_t *flags, 
 									 PixMapping *ptpixpairs, uint *pp_size)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -37,6 +37,7 @@ __global__ void kernel_filter_contain(pair<uint32_t,uint32_t>* pairs, Point *poi
 	}
 
 	atomicAdd(result, (uint)(is_in));
+	flags[x] = (uint8_t)(!is_in);
 }
 
 __global__ void kernel_refinement_contain(pair<uint32_t, uint32_t> *pairs,
@@ -44,7 +45,7 @@ __global__ void kernel_refinement_contain(pair<uint32_t, uint32_t> *pairs,
 											IdealOffset *idealoffset, RasterInfo *info,
 											uint32_t *es_offset, EdgeSeq *edge_sequences,
 											Point *vertices, uint32_t *gridline_offset,
-											double *gridline_nodes, uint *size, uint *result)
+											double *gridline_nodes, uint *size, uint *result, uint8_t *flags)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x >= *size)
@@ -112,6 +113,7 @@ __global__ void kernel_refinement_contain(pair<uint32_t, uint32_t> *pairs,
 	ret ^= (nc & 1);
 
 	atomicAdd(result, (uint)(ret));
+	flags[pair_id] = (uint8_t)(!ret);
 }
 
 __global__ void filter_check_contain(pair<uint32_t,uint32_t>* pairs, uint source_size,
@@ -229,6 +231,15 @@ __global__ void refine_check_contain(pair<uint32_t, uint32_t> *pairs, PixMapping
 	flags[pair_id] = (uint8_t)(ret);
 }
 
+__global__ void collect_valid_pairs(pair<uint32_t, uint32_t> *pairs, uint8_t *flags, uint size, pair<uint32_t, uint32_t> *buffer, uint *buffer_size){
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	if (x >= size && flags[x] == 0) return;
+
+	uint idx = atomicAdd(buffer_size, 1U);
+	buffer[idx].first = pairs[x].first;
+	buffer[idx].second = pairs[x].second;
+}
+
 void cuda_contain(query_context *gctx, bool polygon)
 {
     uint h_bufferinput_size = 0;
@@ -241,9 +252,10 @@ void cuda_contain(query_context *gctx, bool polygon)
     const int grid_size = (gctx->num_pairs + block_size - 1) / block_size;
 	if(!polygon){
 		kernel_filter_contain<<<grid_size, block_size>>>(
-			gctx->d_candidate_pairs, gctx->d_points, gctx->d_idealoffset,
+			gctx->d_candidate_pairs, gctx->d_points + gctx->index, gctx->d_idealoffset,
 			gctx->d_info, gctx->d_status, gctx->num_pairs, 
-			gctx->d_result, (PixMapping *)gctx->d_BufferInput, gctx->d_bufferinput_size
+			gctx->d_result, gctx->d_flags, (PixMapping *)gctx->d_BufferInput, 
+			gctx->d_bufferinput_size
 		);
 	}else{
 		filter_check_contain<<<grid_size, block_size>>>(
@@ -269,10 +281,10 @@ void cuda_contain(query_context *gctx, bool polygon)
     if(!polygon){
 		kernel_refinement_contain<<<refine_grid_size, block_size>>>(
 			gctx->d_candidate_pairs, (PixMapping *)gctx->d_BufferInput,
-			gctx->d_points, gctx->d_idealoffset, gctx->d_info,
+			gctx->d_points + gctx->index, gctx->d_idealoffset, gctx->d_info,
 			gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices,
 			gctx->d_gridline_offset, gctx->d_gridline_nodes,
-			gctx->d_bufferinput_size, gctx->d_result
+			gctx->d_bufferinput_size, gctx->d_result, gctx->d_flags
 		);
 	}else{
 		refine_check_contain<<<refine_grid_size, block_size>>>(
@@ -286,7 +298,7 @@ void cuda_contain(query_context *gctx, bool polygon)
     cudaDeviceSynchronize();
     check_execution("kernel_refinement_contain");
 
-	if(!polygon) CUDA_SAFE_CALL(cudaMemcpy(&gctx->found, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
+	if(gctx->query_type == contain) CUDA_SAFE_CALL(cudaMemcpy(&gctx->found, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
 
 	// uint8_t* h_Buffer = new uint8_t[gctx->num_pairs];
     // CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, gctx->d_flags, gctx->num_pairs * sizeof(uint8_t), cudaMemcpyDeviceToHost));
@@ -299,7 +311,6 @@ void cuda_contain(query_context *gctx, bool polygon)
     // printf("\n");
 
 	// printf("sum = %d\n", _sum);
-    
 
 }
 

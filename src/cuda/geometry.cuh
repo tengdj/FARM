@@ -194,7 +194,7 @@ __device__ __forceinline__ float gpu_max_distance(Point &p, box &bx, float *degr
 }
 
 // point to box min distance
-__device__ __forceinline__ double gpu_distance(box &bx, Point &p, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
+__device__ __forceinline__ float gpu_distance(box &bx, Point &p, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 {
 	if(p.x >= bx.low[0] && p.x <= bx.high[0]&&
 	   p.y >= bx.low[1] && p.y <= bx.high[1])

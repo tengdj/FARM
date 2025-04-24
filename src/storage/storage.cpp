@@ -449,6 +449,8 @@ vector<Ideal *> load_binary_file(const char *path, query_context &global_ctx)
 		delete lh;
 	}
 	logt("loaded %ld polygons", start, polygons.size());
+	global_ctx.index = 0;
+	for(int i = 0; i < polygons.size(); i ++) polygons[i]->id = i; 
 	return polygons;
 }
 

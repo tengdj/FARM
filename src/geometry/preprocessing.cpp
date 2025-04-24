@@ -17,7 +17,7 @@ void *rasterization_unit(void *args){
 			ctx->report_progress();
 		}
 	}
-	ctx->merge_global();
+	// ctx->merge_global();
 	return NULL;
 }
 

@@ -132,7 +132,11 @@ void query_context::merge_global(){
 			global_ctx->latency[it.first] = lt;
 		}
 	}
-
+	
+	for(int i = 0; i < num_pairs; i ++){
+		global_ctx->h_candidate_pairs[global_ctx->num_pairs ++] = h_candidate_pairs[i];
+	}
+	
 	// point_polygon_pairs_size = point_polygon_pairs_idx;
 	// global_ctx->point_polygon_pairs_size += point_polygon_pairs_size;
 	
@@ -250,7 +254,7 @@ query_context get_parameters(int argc, char **argv){
 		("small_threshold", po::value<int>(&global_ctx.small_threshold), "low threshold for complex polygon")
 		("sample_rate", po::value<float>(&global_ctx.sample_rate), "sample rate")
 		("latency,l","collect the latency information")
-		("batch_size", po::value<int>(&global_ctx.batch_size), "batch size")
+		("batch_size", po::value<size_t>(&global_ctx.batch_size), "batch size")
 		;
 	po::variables_map vm;
 	try{
