@@ -5,8 +5,8 @@
 
 #include <optix_function_table_definition.h>
 
-rtspatial::SpatialIndex<coord_t, 2> rt_index;
-size_t box_size;
+rtspatial::SpatialIndex<coord_t, 2> *rt_index;
+size_t *offset;
 rtspatial::Queue<thrust::pair<uint32_t, uint32_t>> *results = nullptr;
 
 __global__ void PrintResults(pair<uint32_t, uint32_t>* results, uint size){
@@ -16,27 +16,29 @@ __global__ void PrintResults(pair<uint32_t, uint32_t>* results, uint size){
     }
 }
 
-__global__ void convertPairsToIdealPairs(
-    const thrust::pair<uint32_t, uint32_t>* inputPairs,
-    IdealPair* outputIdealPairs,
-    int numElements)
+__global__ void PairsCopy(
+    thrust::pair<uint32_t, uint32_t> *inputPairs,
+    pair<uint32_t, uint32_t> *outputPairs,
+    size_t numElements, size_t offset, size_t target_start)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     
     if (idx < numElements) {
-        outputIdealPairs[idx].source = inputPairs[idx].first;
-        outputIdealPairs[idx].target = inputPairs[idx].second;
-        outputIdealPairs[idx].pair_id = idx;
+        outputPairs[idx + offset].first = inputPairs[idx].first;
+        outputPairs[idx + offset].second = inputPairs[idx].second + target_start;
     }
 }
 
 void indexBuild(query_context *gctx){
+    rt_index = new rtspatial::SpatialIndex<coord_t, 2>;
+    offset = new size_t(0);
+    results = new rtspatial::Queue<thrust::pair<uint32_t, uint32_t>>();
+
     vector<box> boxes;
     for (auto polygon : gctx->source_ideals)
     {
         boxes.push_back(*polygon->getMBB());
     }
-    box_size = boxes.size();
     thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2>>> d_boxes;
     CopyBoxes(boxes, d_boxes);
 
@@ -48,9 +50,9 @@ void indexBuild(query_context *gctx){
     config.prefer_fast_build_query = false;
     config.max_geometries = d_boxes.size();
 
-    rt_index.Init(config);
+    rt_index->Init(config);
     sw.start();
-    rt_index.Insert(
+    rt_index->Insert(
         rtspatial::ArrayView<rtspatial::Envelope<rtspatial::Point<coord_t, 2>>>(d_boxes),
         stream.cuda_stream());
     stream.Sync();
@@ -59,8 +61,11 @@ void indexBuild(query_context *gctx){
     double t_load = sw.ms();
     std::cout << "RT, load " << t_load << " ms" << std::endl;
 
-    results = new rtspatial::Queue<thrust::pair<uint32_t, uint32_t>>();
-    results->Init(std::max(1ul, (size_t) (gctx->batch_size * box_size * 0.004)));
+    double load_factor = 0.0002;
+    // double load_factor = 1;
+
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_candidate_pairs, gctx->target_num * boxes.size() * load_factor * sizeof(pair<uint32_t, uint32_t>)));
+    results->Init(std::max(1ul, (size_t) (gctx->target_num * boxes.size() * load_factor)));
 }
 
 void indexQuery(query_context *gctx){
@@ -81,7 +86,7 @@ void indexQuery(query_context *gctx){
         std::cout << "Loaded point queries " << gctx->target_num << std::endl;
 
         sw.start();
-        rt_index.Query(rtspatial::Predicate::kContains, rtspatial::ArrayView<rtspatial::Point<coord_t, 2>>(d_queries),
+        rt_index->Query(rtspatial::Predicate::kContains, rtspatial::ArrayView<rtspatial::Point<coord_t, 2>>(d_queries),
                     d_results.data(), stream.cuda_stream());
                 
     }else if(gctx->query_type == QueryType::contain_polygon){
@@ -101,7 +106,7 @@ void indexQuery(query_context *gctx){
         rtspatial::ArrayView<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > v_queries(d_queries);
         
         sw.start();
-        rt_index.Query(rtspatial::Predicate::kContains, v_queries, d_results.data(),
+        rt_index->Query(rtspatial::Predicate::kContains, v_queries, d_results.data(),
                     stream.cuda_stream());
 
     }else if(gctx->query_type == QueryType::within){
@@ -119,12 +124,12 @@ void indexQuery(query_context *gctx){
         d_results.set(stream.cuda_stream(), results->DeviceObject());
         
         CopyBoxes(queries, d_queries);
-        std::cout << "Loaded box queries " << queries.size() << std::endl;
+        // std::cout << "Loaded box queries " << queries.size() << std::endl;
 
         rtspatial::ArrayView<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > v_queries(d_queries);
         
         // sw.start();
-        rt_index.Query(rtspatial::Predicate::kIntersects, v_queries, d_results.data(),
+        rt_index->Query(rtspatial::Predicate::kIntersects, v_queries, d_results.data(),
                    stream.cuda_stream());
 
     }else{
@@ -144,7 +149,7 @@ void indexQuery(query_context *gctx){
         rtspatial::ArrayView<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > v_queries(d_queries);
         
         sw.start();
-        rt_index.Query(rtspatial::Predicate::kIntersects, v_queries, d_results.data(),
+        rt_index->Query(rtspatial::Predicate::kIntersects, v_queries, d_results.data(),
                     stream.cuda_stream());
 
     }
@@ -152,21 +157,18 @@ void indexQuery(query_context *gctx){
     n_results = results->size(stream.cuda_stream());
     // sw.stop();
     t_query = sw.ms();
-    std::cout << "RT, query " << t_query
-              << " ms, results: " << n_results << std::endl;
+    // std::cout << "RT, query " << t_query
+    //           << " ms, results: " << n_results << std::endl;
 
     auto d_result_ptr = results->data();
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_candidate_pairs, n_results * sizeof(pair<uint32_t, uint32_t>)));
-    gctx->num_pairs = n_results;
-    cudaMemcpy(gctx->d_candidate_pairs, d_result_ptr, n_results * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToDevice);
 
-    // int threadsPerBlock = 256;
-    // int blocksPerGrid = (n_results + threadsPerBlock - 1) / threadsPerBlock;
-    // convertPairsToIdealPairs<<<blocksPerGrid, threadsPerBlock>>>(
-    //     d_result_ptr, 
-    //     gctx->d_candidate_pairs,
-    //     n_results);
-
+    gctx->num_pairs += n_results;
+    // cudaMemcpy(gctx->d_candidate_pairs + *offset, d_result_ptr, n_results * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToDevice);
+ 
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (n_results + threadsPerBlock - 1) / threadsPerBlock;
+    PairsCopy<<<blocksPerGrid, threadsPerBlock>>>(d_result_ptr, gctx->d_candidate_pairs, n_results, *offset, gctx->index);
+    cudaDeviceSynchronize();
 
     // int grid_size_x = (n_results + 256 - 1) / 256;
 	// dim3 block_size(256, 1, 1);
@@ -177,23 +179,52 @@ void indexQuery(query_context *gctx){
     // printf("n_results = %d\n", n_results);
 
     // pair<uint32_t, uint32_t>* h_candidate_pairs = new pair<uint32_t, uint32_t>[n_results];
-    // cudaMemcpy(h_candidate_pairs, gctx->d_candidate_pairs, n_results * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
-    // for(int i = 0; i < 100; i ++){
-    //     printf("pair%d\n", i);
+    // cudaMemcpy(h_candidate_pairs, gctx->d_candidate_pairs + *offset, n_results * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
+    // for(int i = 0; i < n_results; i ++){
+    //     // printf("pair%d\n", i);
     //     int source = h_candidate_pairs[i].first;
     //     int target = h_candidate_pairs[i].second;
-    //     gctx->points[target].print();
-    //     gctx->source_ideals[source]->MyPolygon::print();
+    //     printf("%d\n", target);
+    //     // gctx->points[target].print();
+    //     // gctx->source_ideals[source]->MyPolygon::print();
     //     // gctx->target_ideals[target]->MyPolygon::print();
     // }
+
+    *offset += n_results;
     
 }
 
 void indexDestroy(query_context *gctx){
-    CUDA_SAFE_CALL(cudaFree(gctx->d_candidate_pairs));
-    if(gctx->index_end - gctx->index < gctx->batch_size)
-    {
-        delete results;
-        results = nullptr;
-    }
+    delete results;
+    results = nullptr;
+    delete rt_index;
+    rt_index = nullptr;
+
+    printf("num_pairs = %u\n", *offset);
+
+    // compress d_candidate_pairs
+    // pair<uint32_t, uint32_t> *new_ptr;
+    // CUDA_SAFE_CALL(cudaMalloc((void **)&new_ptr, (*offset) * sizeof(pair<uint32_t, uint32_t>)));
+    // CUDA_SAFE_CALL(cudaMemcpy(new_ptr, gctx->d_candidate_pairs, (*offset) * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToDevice));
+    // CUDA_SAFE_CALL(cudaFree(gctx->d_candidate_pairs));
+    // gctx->d_candidate_pairs = new_ptr;
+
+    // pair<uint32_t, uint32_t>* h_candidate_pairs = new pair<uint32_t, uint32_t>[*offset];
+    // cudaMemcpy(h_candidate_pairs, gctx->d_candidate_pairs, *offset * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
+    // for(int i = 0; i < *offset; i ++){
+    //     // printf("pair%d\n", i);
+    //     int source = h_candidate_pairs[i].first;
+    //     int target = h_candidate_pairs[i].second;
+    //     printf("%d\n", target);
+    //     // gctx->points[target].print();
+    //     // gctx->source_ideals[source]->MyPolygon::print();
+    //     // gctx->target_ideals[target]->MyPolygon::print();
+    // }
+
+    delete offset;
+    offset = nullptr;
+
+    gctx->index = 0;
+    gctx->index_end = 0;
+    return;
 }

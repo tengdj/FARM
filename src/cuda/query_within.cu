@@ -134,7 +134,7 @@ __global__ void cal_box_distance(BoxDistRange *candidate, pair<uint32_t, uint32_
                     return;
                 }
                 if(min_distance > WITHIN_DISTANCE) continue;
-
+                
                 uint idx = atomicAdd(buffer_size, 1);
                 buffer[idx] = {id, pair_id, min_distance, max_distance};
                 atomicMinFloat(max_box_dist + pair_id, max_distance);
@@ -216,22 +216,22 @@ __global__ void statistic_result(float *max_box_dist, uint size, uint *result){
 
 void cuda_within(query_context *gctx)
 {
+     size_t batch_size = gctx->index_end - gctx->index;
+    printf("batch size: %d\n", batch_size);
 	uint h_bufferinput_size, h_bufferoutput_size; 
  
     float *d_max_box_dist = nullptr;
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_max_box_dist, gctx->num_pairs * sizeof(float)));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_max_box_dist, batch_size * sizeof(float)));
 
-    int grid_size_x = (gctx->num_pairs + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    int grid_size_x = (batch_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     dim3 block_size(BLOCK_SIZE, 1, 1);
     dim3 grid_size(grid_size_x, 1, 1);
 
-    printf("gctx->num_pairs = %u\n", gctx->num_pairs);
-
-    kernel_init<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, d_max_box_dist, gctx->num_pairs, gctx->d_flags);
+    kernel_init<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, d_max_box_dist, batch_size, gctx->d_flags);
     cudaDeviceSynchronize();
     check_execution("kernel init");
 
-    h_bufferinput_size = gctx->num_pairs;
+    h_bufferinput_size = batch_size;
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_bufferinput_size, &h_bufferinput_size, sizeof(uint), cudaMemcpyHostToDevice));
 
     int h_level = 0;
@@ -243,7 +243,7 @@ void cuda_within(query_context *gctx)
         block_size.x = BLOCK_SIZE;
         grid_size.x = grid_size_x;
 
-        cal_box_distance<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs, gctx->d_points + gctx->index, gctx->d_idealoffset, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, d_max_box_dist, gctx->d_bufferinput_size, (BoxDistRange *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
+        cal_box_distance<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_points, gctx->d_idealoffset, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, d_max_box_dist, gctx->d_bufferinput_size, (BoxDistRange *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
         cudaDeviceSynchronize();
         check_execution("cal_box_distance");
 
@@ -281,7 +281,7 @@ void cuda_within(query_context *gctx)
     block_size.x = BLOCK_SIZE;
     grid_size.x = grid_size_x;
 
-    kernel_unroll<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs, gctx->d_points + gctx->index, gctx->d_idealoffset, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
+    kernel_unroll<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_points, gctx->d_idealoffset, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
     cudaDeviceSynchronize();
     check_execution("kernel_unroll");
 
@@ -291,20 +291,22 @@ void cuda_within(query_context *gctx)
     block_size.x = BLOCK_SIZE;
     grid_size.x = grid_size_x;
 
-    kernel_refine<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_candidate_pairs, gctx->d_points + gctx->index, gctx->d_vertices, gctx->d_bufferinput_size, d_max_box_dist, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
+    kernel_refine<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_points, gctx->d_vertices, gctx->d_bufferinput_size, d_max_box_dist, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
     cudaDeviceSynchronize();
     check_execution("kernel_refine");
 
-    grid_size_x = (gctx->num_pairs + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    grid_size_x = (batch_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     block_size.x = BLOCK_SIZE;
     grid_size.x = grid_size_x;
 
-    statistic_result<<<grid_size, block_size>>>(d_max_box_dist, gctx->num_pairs, gctx->d_result);
+    statistic_result<<<grid_size, block_size>>>(d_max_box_dist, batch_size, gctx->d_result);
     cudaDeviceSynchronize();
     check_execution("statistic_result");
 
     uint h_result;
     CUDA_SAFE_CALL(cudaMemcpy(&h_result, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
     gctx->found += h_result;
+
+    CUDA_SAFE_CALL(cudaFree(d_max_box_dist));
 	return;
 }

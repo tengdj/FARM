@@ -14,11 +14,15 @@ __global__ void kernel_filter_contain(pair<uint32_t,uint32_t> *pairs, Point *poi
 	const IdealOffset source = idealoffset[src_idx];
 	const Point p = points[pt_idx];
 
+	// printf("%d\n", pt_idx);
+
 	const box s_mbr = info[src_idx].mbr;
 	const double s_step_x = info[src_idx].step_x;
 	const double s_step_y = info[src_idx].step_y;
 	const int s_dimx = info[src_idx].dimx;
 	const int s_dimy = info[src_idx].dimy;
+
+	// printf("step_x = %lf, step_y = %lf, dimx = %d, dimy = %d\n", s_step_x, s_step_y, s_dimx, s_dimy);
 
 	const int xoff = gpu_get_offset_x(s_mbr.low[0], p.x, s_step_x, s_dimx);
 	const int yoff = gpu_get_offset_y(s_mbr.low[1], p.y, s_step_y, s_dimy);
@@ -242,25 +246,24 @@ __global__ void collect_valid_pairs(pair<uint32_t, uint32_t> *pairs, uint8_t *fl
 
 void cuda_contain(query_context *gctx, bool polygon)
 {
+	size_t batch_size = gctx->index_end - gctx->index;
     uint h_bufferinput_size = 0;
-
-    CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
 
 	// Filtering Step
     const int block_size = BLOCK_SIZE;
-    const int grid_size = (gctx->num_pairs + block_size - 1) / block_size;
+    const int grid_size = (batch_size + block_size - 1) / block_size;
 	if(!polygon){
+		printf("%u %u %u\n", gctx->index, gctx->index_end, batch_size);
 		kernel_filter_contain<<<grid_size, block_size>>>(
-			gctx->d_candidate_pairs, gctx->d_points + gctx->index, gctx->d_idealoffset,
-			gctx->d_info, gctx->d_status, gctx->num_pairs, 
+			gctx->d_candidate_pairs + gctx->index, gctx->d_points, gctx->d_idealoffset,
+			gctx->d_info, gctx->d_status, batch_size, 
 			gctx->d_result, gctx->d_flags, (PixMapping *)gctx->d_BufferInput, 
 			gctx->d_bufferinput_size
 		);
 	}else{
 		filter_check_contain<<<grid_size, block_size>>>(
-			gctx->d_candidate_pairs, gctx->source_ideals.size(), gctx->d_idealoffset,
-			gctx->d_info, gctx->d_status, gctx->d_vertices, gctx->num_pairs, 
+			gctx->d_candidate_pairs + gctx->index, gctx->source_ideals.size(), gctx->d_idealoffset,
+			gctx->d_info, gctx->d_status, gctx->d_vertices, batch_size, 
 			gctx->d_flags, (PixMapping *)gctx->d_BufferInput, gctx->d_bufferinput_size
 		);
 	}
@@ -280,15 +283,15 @@ void cuda_contain(query_context *gctx, bool polygon)
     const int refine_grid_size = (h_bufferinput_size + block_size - 1) / block_size;
     if(!polygon){
 		kernel_refinement_contain<<<refine_grid_size, block_size>>>(
-			gctx->d_candidate_pairs, (PixMapping *)gctx->d_BufferInput,
-			gctx->d_points + gctx->index, gctx->d_idealoffset, gctx->d_info,
+			gctx->d_candidate_pairs + gctx->index, (PixMapping *)gctx->d_BufferInput,
+			gctx->d_points, gctx->d_idealoffset, gctx->d_info,
 			gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices,
 			gctx->d_gridline_offset, gctx->d_gridline_nodes,
 			gctx->d_bufferinput_size, gctx->d_result, gctx->d_flags
 		);
 	}else{
 		refine_check_contain<<<refine_grid_size, block_size>>>(
-			gctx->d_candidate_pairs, (PixMapping *)gctx->d_BufferInput,
+			gctx->d_candidate_pairs + gctx->index, (PixMapping *)gctx->d_BufferInput,
 			gctx->d_idealoffset, gctx->d_info,
 			gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices,
 			gctx->d_gridline_offset, gctx->d_gridline_nodes,
@@ -299,18 +302,19 @@ void cuda_contain(query_context *gctx, bool polygon)
     check_execution("kernel_refinement_contain");
 
 	if(gctx->query_type == contain) CUDA_SAFE_CALL(cudaMemcpy(&gctx->found, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
+		
+	uint8_t* h_Buffer = new uint8_t[batch_size];
+	CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, gctx->d_flags, batch_size * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+	int _sum = 0;
+	for (int i = 0; i < batch_size; i++) {
+		if(h_Buffer[i] == 1) _sum ++;
+		// std::cout << (int)h_Buffer[i] << " ";
+		// if ((i + 1) % 5 == 0) printf("\n");
+	}
+	printf("\n");
 
-	// uint8_t* h_Buffer = new uint8_t[gctx->num_pairs];
-    // CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, gctx->d_flags, gctx->num_pairs * sizeof(uint8_t), cudaMemcpyDeviceToHost));
-	// int _sum = 0;
-    // for (int i = 0; i < gctx->num_pairs; i++) {
-	// 	if(h_Buffer[i] == 1) _sum ++;
-	// 	std::cout << (int)h_Buffer[i] << " ";
-	// 	if ((i + 1) % 5 == 0) printf("\n");
-    // }
-    // printf("\n");
-
-	// printf("sum = %d\n", _sum);
+	printf("sum = %d\n", _sum);
+	// }
 
 }
 
