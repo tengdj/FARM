@@ -272,5 +272,4 @@ inline void PrintBuffer(T* d_Buffer, uint size){
     printf("\n");
 }
 
-
 #endif /* CUDA_UTIL_H_ */

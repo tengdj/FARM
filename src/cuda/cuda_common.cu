@@ -129,4 +129,3 @@ void gpu_info::clear(){
 gpu_info::~gpu_info(){
 	clear();
 }
-

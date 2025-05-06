@@ -110,7 +110,9 @@ public:
 	bool perform_refine = true;
 	bool collect_latency = false;
 	float sample_rate = 1.0;
-	size_t batch_size = 0;
+	double load_factor = 1.0;
+	size_t batch_size = INT_MAX;
+	
 
 	int small_threshold = 500;
 	int big_threshold = 400000;

@@ -250,11 +250,12 @@ query_context get_parameters(int argc, char **argv){
 		("target,t", po::value<string>(&global_ctx.target_path), "path to the target")
 		("threads,n", po::value<int>(&global_ctx.num_threads), "number of threads")
 		("vpr,v", po::value<int>(&global_ctx.vpr), "number of vertices per raster")
-		("big_threshold,b", po::value<int>(&global_ctx.big_threshold), "up threshold for complex polygon")
-		("small_threshold", po::value<int>(&global_ctx.small_threshold), "low threshold for complex polygon")
-		("sample_rate", po::value<float>(&global_ctx.sample_rate), "sample rate")
-		("latency,l","collect the latency information")
-		("batch_size", po::value<size_t>(&global_ctx.batch_size), "batch size")
+		("batch_size,b", po::value<size_t>(&global_ctx.batch_size), "batch size")
+		("load_factor,l", po::value<double>(&global_ctx.load_factor), "load factor")
+		// ("big_threshold,b", po::value<int>(&global_ctx.big_threshold), "up threshold for complex polygon")
+		// ("small_threshold", po::value<int>(&global_ctx.small_threshold), "low threshold for complex polygon")
+		// ("sample_rate", po::value<float>(&global_ctx.sample_rate), "sample rate")
+		// ("latency,l","collect the latency information")
 		;
 	po::variables_map vm;
 	try{

@@ -26,6 +26,7 @@ __global__ void PairsCopy(
     if (idx < numElements) {
         outputPairs[idx + offset].first = inputPairs[idx].first;
         outputPairs[idx + offset].second = inputPairs[idx].second + target_start;
+        // 如果target是polygon那么还需要再加source ideal的数量
     }
 }
 
@@ -61,11 +62,8 @@ void indexBuild(query_context *gctx){
     double t_load = sw.ms();
     std::cout << "RT, load " << t_load << " ms" << std::endl;
 
-    double load_factor = 0.0002;
-    // double load_factor = 1;
-
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_candidate_pairs, gctx->target_num * boxes.size() * load_factor * sizeof(pair<uint32_t, uint32_t>)));
-    results->Init(std::max(1ul, (size_t) (gctx->target_num * boxes.size() * load_factor)));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_candidate_pairs, gctx->target_num * boxes.size() * gctx->load_factor * sizeof(pair<uint32_t, uint32_t>)));
+    results->Init(std::max(1ul, (size_t) (gctx->target_num * boxes.size() * gctx->load_factor)));
 }
 
 void indexQuery(query_context *gctx){
@@ -82,18 +80,16 @@ void indexQuery(query_context *gctx){
         results->Clear();
         d_results.set(stream.cuda_stream(), results->DeviceObject());
 
-        CopyPoints(gctx->points, gctx->target_num, d_queries);
-        std::cout << "Loaded point queries " << gctx->target_num << std::endl;
+        CopyPoints(gctx->points + gctx->index, gctx->index_end - gctx->index, d_queries);
 
-        sw.start();
         rt_index->Query(rtspatial::Predicate::kContains, rtspatial::ArrayView<rtspatial::Point<coord_t, 2>>(d_queries),
                     d_results.data(), stream.cuda_stream());
                 
     }else if(gctx->query_type == QueryType::contain_polygon){
         vector<box> queries;
-        for(auto polygon : gctx->target_ideals)
+        for (int i = gctx->index; i < gctx->index_end; i ++)
         {
-            queries.push_back(*polygon->getMBB());
+            queries.push_back(gctx->target_ideals[i]->getMBB());
         }
 
         thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > d_queries;
@@ -101,11 +97,9 @@ void indexQuery(query_context *gctx){
         d_results.set(stream.cuda_stream(), results->DeviceObject());
         
         CopyBoxes(queries, d_queries);
-        std::cout << "Loaded box queries " << queries.size() << std::endl;
         
         rtspatial::ArrayView<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > v_queries(d_queries);
         
-        sw.start();
         rt_index->Query(rtspatial::Predicate::kContains, v_queries, d_results.data(),
                     stream.cuda_stream());
 
@@ -124,19 +118,17 @@ void indexQuery(query_context *gctx){
         d_results.set(stream.cuda_stream(), results->DeviceObject());
         
         CopyBoxes(queries, d_queries);
-        // std::cout << "Loaded box queries " << queries.size() << std::endl;
 
         rtspatial::ArrayView<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > v_queries(d_queries);
         
-        // sw.start();
         rt_index->Query(rtspatial::Predicate::kIntersects, v_queries, d_results.data(),
                    stream.cuda_stream());
 
     }else{
         vector<box> queries;
-        for (auto polygon : gctx->target_ideals)
+        for (int i = gctx->index; i < gctx->index_end; i ++)
         {
-            queries.push_back(polygon->getMBB()->expand(gctx->within_distance, true));
+            queries.push_back(gctx->target_ideals[i]->getMBB()->expand(gctx->within_distance, true));
         }
 
         thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > d_queries;
@@ -144,22 +136,15 @@ void indexQuery(query_context *gctx){
         d_results.set(stream.cuda_stream(), results->DeviceObject());
 
         CopyBoxes(queries, d_queries);
-        std::cout << "Loaded box queries " << queries.size() << std::endl;
 
         rtspatial::ArrayView<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > v_queries(d_queries);
         
-        sw.start();
         rt_index->Query(rtspatial::Predicate::kIntersects, v_queries, d_results.data(),
                     stream.cuda_stream());
 
     }
 
     n_results = results->size(stream.cuda_stream());
-    // sw.stop();
-    t_query = sw.ms();
-    // std::cout << "RT, query " << t_query
-    //           << " ms, results: " << n_results << std::endl;
-
     auto d_result_ptr = results->data();
 
     gctx->num_pairs += n_results;
@@ -176,20 +161,6 @@ void indexQuery(query_context *gctx){
     // PrintResults<<<grid_size, block_size>>>(gctx->d_candidate_pairs, gctx->num_pairs);
     // cudaDeviceSynchronize();
 
-    // printf("n_results = %d\n", n_results);
-
-    // pair<uint32_t, uint32_t>* h_candidate_pairs = new pair<uint32_t, uint32_t>[n_results];
-    // cudaMemcpy(h_candidate_pairs, gctx->d_candidate_pairs + *offset, n_results * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
-    // for(int i = 0; i < n_results; i ++){
-    //     // printf("pair%d\n", i);
-    //     int source = h_candidate_pairs[i].first;
-    //     int target = h_candidate_pairs[i].second;
-    //     printf("%d\n", target);
-    //     // gctx->points[target].print();
-    //     // gctx->source_ideals[source]->MyPolygon::print();
-    //     // gctx->target_ideals[target]->MyPolygon::print();
-    // }
-
     *offset += n_results;
     
 }
@@ -203,22 +174,22 @@ void indexDestroy(query_context *gctx){
     printf("num_pairs = %u\n", *offset);
 
     // compress d_candidate_pairs
-    // pair<uint32_t, uint32_t> *new_ptr;
-    // CUDA_SAFE_CALL(cudaMalloc((void **)&new_ptr, (*offset) * sizeof(pair<uint32_t, uint32_t>)));
-    // CUDA_SAFE_CALL(cudaMemcpy(new_ptr, gctx->d_candidate_pairs, (*offset) * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToDevice));
-    // CUDA_SAFE_CALL(cudaFree(gctx->d_candidate_pairs));
-    // gctx->d_candidate_pairs = new_ptr;
+    pair<uint32_t, uint32_t> *new_ptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&new_ptr, (*offset) * sizeof(pair<uint32_t, uint32_t>)));
+    CUDA_SAFE_CALL(cudaMemcpy(new_ptr, gctx->d_candidate_pairs, (*offset) * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToDevice));
+    CUDA_SAFE_CALL(cudaFree(gctx->d_candidate_pairs));
+    gctx->d_candidate_pairs = new_ptr;
 
     // pair<uint32_t, uint32_t>* h_candidate_pairs = new pair<uint32_t, uint32_t>[*offset];
     // cudaMemcpy(h_candidate_pairs, gctx->d_candidate_pairs, *offset * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
-    // for(int i = 0; i < *offset; i ++){
-    //     // printf("pair%d\n", i);
+    // for(int i = 0; i < 100; i ++){
+    //     printf("pair%d\n", i);
     //     int source = h_candidate_pairs[i].first;
     //     int target = h_candidate_pairs[i].second;
-    //     printf("%d\n", target);
+    //     // printf("%d\n", target);
     //     // gctx->points[target].print();
-    //     // gctx->source_ideals[source]->MyPolygon::print();
-    //     // gctx->target_ideals[target]->MyPolygon::print();
+    //     gctx->source_ideals[source]->MyPolygon::print();
+    //     gctx->target_ideals[target]->MyPolygon::print();
     // }
 
     delete offset;

@@ -167,15 +167,16 @@ __global__ void statistic_result(uint8_t *flags, uint size, uint *result){
 
 void cuda_contain_polygon(query_context *gctx)
 {
+	size_t batch_size = gctx->index_end - gctx->index;
     uint h_bufferinput_size, h_bufferoutput_size;
 	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
+	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
 
 	/*1. Raster Model Filtering*/
-	int grid_size_x = (gctx->num_pairs + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    dim3 block_size(BLOCK_SIZE, 1, 1);
-    dim3 grid_size(grid_size_x, 1, 1);
+    const int block_size = BLOCK_SIZE;
+    int grid_size = (batch_size + block_size - 1) / block_size;
 
-    kernel_filter_contain_polygon<<<grid_size, block_size>>>(gctx->d_candidate_pairs, gctx->d_idealoffset, gctx->d_info, gctx->d_status, gctx->num_pairs, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->d_flags);
+    kernel_filter_contain_polygon<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, batch_size, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->d_flags);
     cudaDeviceSynchronize();
     check_execution("kernel_filter_contain_polygon");
 
@@ -184,10 +185,9 @@ void cuda_contain_polygon(query_context *gctx)
 	
     /*2. Unroll Refinement*/
 
-    grid_size_x = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    grid_size.x = grid_size_x;
+    grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    kernel_unroll_contain_polygon<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs, gctx->d_idealoffset, gctx->d_status, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
+    kernel_unroll_contain_polygon<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_status, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
     cudaDeviceSynchronize();
     check_execution("kernel_unroll_contain_polygon");
 
@@ -196,24 +196,22 @@ void cuda_contain_polygon(query_context *gctx)
     
     /*3. Refinement step*/
 
-    grid_size_x = (h_bufferoutput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    grid_size.x = grid_size_x;
+    grid_size = (h_bufferoutput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
     kernel_refinement_contain_polygon<<<grid_size, block_size>>>((Task *)gctx->d_BufferOutput, gctx->d_vertices, gctx->d_bufferoutput_size, gctx->d_flags, gctx->d_result);
     cudaDeviceSynchronize();
     check_execution("kernel_refinement_contain_polygon");
 
-    grid_size_x = (gctx->num_pairs + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    grid_size.x = grid_size_x;
+    grid_size = (batch_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    statistic_result<<<grid_size, block_size>>>(gctx->d_flags, gctx->num_pairs, gctx->d_result);
+    statistic_result<<<grid_size, block_size>>>(gctx->d_flags, batch_size, gctx->d_result);
     cudaDeviceSynchronize();
     check_execution("statistic_result");
 
-	// uint8_t* h_Buffer = new uint8_t[gctx->num_pairs];
-    // CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, gctx->d_flags, gctx->num_pairs * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+	// uint8_t* h_Buffer = new uint8_t[batch_size];
+    // CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, gctx->d_flags, batch_size * sizeof(uint8_t), cudaMemcpyDeviceToHost));
 	// int _sum = 0;
-    // for (int i = 0; i < gctx->num_pairs; i++) {
+    // for (int i = 0; i < batch_size; i++) {
 	// 	if(h_Buffer[i] == 2) _sum ++;
 	// 	std::cout << (int)h_Buffer[i] << " ";
 	// 	if ((i + 1) % 5 == 0) printf("\n");
@@ -222,7 +220,8 @@ void cuda_contain_polygon(query_context *gctx)
 
 	// printf("sum = %d\n", _sum);
 
-	CUDA_SAFE_CALL(cudaMemcpy(&gctx->found, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
-
+	uint h_result;
+	CUDA_SAFE_CALL(cudaMemcpy(&h_result, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
+	gctx->found += h_result;
     return;
 }
