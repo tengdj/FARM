@@ -98,13 +98,13 @@ __device__ __forceinline__ int gpu_double_to_int(double val)
 __device__ __forceinline__ int gpu_get_offset_x(double s_xval, double t_xval, double step_x, int dimx)
 {
 	int x = gpu_double_to_int((t_xval - s_xval) / step_x);
-	return min(max(x, 0), dimx);
+	return min(max(x, 0), dimx - 1);
 }
 
 __device__ __forceinline__ int gpu_get_offset_y(double s_yval, double t_yval, double step_y, int dimy)
 {
 	int y = gpu_double_to_int((t_yval - s_yval) / step_y);
-	return min(max(y, 0), dimy);
+	return min(max(y, 0), dimy - 1);
 }
 
 // __device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint &start, int &id)
@@ -467,3 +467,52 @@ __device__ inline bool gpu_segment_intersect_batch(Point *p1, Point *p2, int s1,
 
     return has_intersection;
 }
+
+__device__ inline bool gpu_segment_intersect_batch(Point *p, int s1, int s2, int e1, int e2, int pair_id, Intersection* intersections, uint* num)
+{
+    bool has_intersection = false;
+
+    for (int i = s1; i < e1; i++) {
+        for (int j = s2; j < e2; j++) {
+            bool intersects = gpu_segment_intersect(p[i], p[i + 1], p[j], p[j + 1]);
+			if(intersects){
+				Point d1 = p[i + 1] - p[i];
+				Point d2 = p[j + 1] - p[j];
+				Point r = p[j] - p[i];
+
+				double denom = d1.cross(d2);
+
+				if (std::abs(denom) < 1e-9) continue;
+				
+				double t = r.cross(d2) / denom;
+    			double u = r.cross(d1) / denom;
+				
+				if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+					Point t_d1{t * d1.x, t * d1.y};
+					Point intersect_p = p[i] + d1 * t;
+					uint idx = atomicAdd(num, 1U);
+					intersections[idx] = {intersect_p, pair_id, i, j, t, u};
+				}
+			}
+			has_intersection = has_intersection || intersects;
+        }
+    }
+
+    return has_intersection;
+}
+
+__device__ inline bool pointsEqual(const Point& p1, const Point& p2) {
+    return (p1.x == p2.x) && (p1.y == p2.y);
+}
+
+__global__ void kernel_filter_segment_contain(Segment *segments, pair<uint32_t,uint32_t> *pairs,
+											  IdealOffset *idealoffset, RasterInfo *info, 
+											  uint8_t *status, Point *vertices,  uint *size, bool *flags, 
+											  PixMapping *ptpixpairs, uint *pp_size);
+
+__global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segment *segments, 
+												pair<uint32_t, uint32_t> *pairs,
+												IdealOffset *idealoffset, RasterInfo *info,
+												uint32_t *es_offset, EdgeSeq *edge_sequences,
+												Point *vertices, uint32_t *gridline_offset,
+												double *gridline_nodes, uint *size, bool *flags);

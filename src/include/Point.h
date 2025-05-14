@@ -87,7 +87,9 @@ public:
         return v;
     }
 
+    CUDA_HOSTDEV Point operator+(const Point &p) const { return Point(x + p.x, y + p.y); }
     CUDA_HOSTDEV Point operator-(const Point &p) const { return Point(x - p.x, y - p.y); }
+    CUDA_HOSTDEV Point operator*(const double &t) const { return Point(t * x, t * y); }
 
     /// Add a point to this point.
     CUDA_HOSTDEV void operator+=(const Point &v) {

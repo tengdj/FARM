@@ -49,6 +49,32 @@ struct EdgeSeq{
 	uint length;
 };
 
+struct Intersection{
+	Point p;
+    int pair_id;
+    int edge_source_id;     
+    int edge_target_id;     
+    double t;
+    double u;
+
+	void print(){
+		printf("POINT(%lf %lf), %d %u %u %lf %lf\n", p.x, p.y, pair_id, edge_source_id, edge_target_id, t, u);
+	}
+};
+
+struct Segment{
+	bool is_source;
+	Point start;
+	Point end;
+	int edge_start;
+	int edge_end;
+	int pair_id;
+
+	void print(){
+		printf("POINT(%lf %lf) POINT(%lf %lf) %d %d %d\n", start.x, start.y, end.x, end.y, edge_start, edge_end, pair_id);
+	}
+};
+
 class Grid_line{
 	uint32_t *offset = nullptr;
 	double *intersection_nodes = nullptr;

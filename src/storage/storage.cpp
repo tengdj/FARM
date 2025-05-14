@@ -95,6 +95,8 @@ std::vector<Ideal*> load_polygon_wkt(const char* path) {
         ideals.insert(ideals.end(), local_vec.begin(), local_vec.end());
     }
 
+	for(int i = 0; i < ideals.size(); i ++) ideals[i]->id = i; 
+
     return ideals;
 }
 

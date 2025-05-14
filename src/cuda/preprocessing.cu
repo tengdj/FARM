@@ -22,7 +22,7 @@ void cuda_create_buffer(query_context *gctx)
         num_status += ideal->get_status_size();
         num_offset += ideal->get_num_pixels() + 1;
         num_edge_sequences += ideal->get_len_edge_sequences();
-        num_vertices += ideal->get_num_vertices();
+        num_vertices += ideal->get_num_vertices() + 1;
         num_gridline_offset += ideal->get_vertical()->get_num_grid_lines();
         num_gridline_nodes += ideal->get_vertical()->get_num_crosses();
         if(gctx->use_hierachy){
@@ -36,7 +36,7 @@ void cuda_create_buffer(query_context *gctx)
         num_status += ideal->get_status_size();
         num_offset += ideal->get_num_pixels() + 1;
         num_edge_sequences += ideal->get_len_edge_sequences();
-        num_vertices += ideal->get_num_vertices();
+        num_vertices += ideal->get_num_vertices() + 1;
         num_gridline_offset += ideal->get_vertical()->get_num_grid_lines();
         num_gridline_nodes += ideal->get_vertical()->get_num_crosses();
         if(gctx->use_hierachy){
@@ -154,7 +154,7 @@ void preprocess_for_gpu(query_context *gctx)
         idealoffset.edge_sequences_start = eidx;
         eidx += edge_sequences_size;
 
-        uint vertices_size = source->get_num_vertices();
+        uint vertices_size = source->get_num_vertices() + 1;
         memcpy(gctx->h_vertices + vidx, source->get_boundary()->p, vertices_size * sizeof(Point));
         idealoffset.vertices_start = vidx;
         vidx += vertices_size;
@@ -199,7 +199,7 @@ void preprocess_for_gpu(query_context *gctx)
         idealoffset.edge_sequences_start = eidx;
         eidx += edge_sequences_size;
 
-        uint vertices_size = target->get_num_vertices();
+        uint vertices_size = target->get_num_vertices() + 1;
         memcpy(gctx->h_vertices + vidx, target->get_boundary()->p, vertices_size * sizeof(Point));
         idealoffset.vertices_start = vidx;
         vidx += vertices_size;
@@ -350,7 +350,7 @@ void preprocess_for_gpu(query_context *gctx)
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
 
     // 临时的batch size
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_flags, gctx->batch_size * sizeof(uint8_t)));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_flags, gctx->batch_size * sizeof(int8_t)));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_result, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
 
@@ -359,6 +359,6 @@ void preprocess_for_gpu(query_context *gctx)
 void ResetDevice(query_context *gctx){
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMemset(gctx->d_flags, 0, gctx->batch_size * sizeof(uint8_t)));
+    CUDA_SAFE_CALL(cudaMemset(gctx->d_flags, 0, gctx->batch_size * sizeof(int8_t)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
 }

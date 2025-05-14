@@ -124,7 +124,7 @@ void indexQuery(query_context *gctx){
         rt_index->Query(rtspatial::Predicate::kIntersects, v_queries, d_results.data(),
                    stream.cuda_stream());
 
-    }else{
+    }else if(gctx->query_type == QueryType::within_polygon){
         vector<box> queries;
         for (int i = gctx->index; i < gctx->index_end; i ++)
         {
@@ -142,6 +142,25 @@ void indexQuery(query_context *gctx){
         rt_index->Query(rtspatial::Predicate::kIntersects, v_queries, d_results.data(),
                     stream.cuda_stream());
 
+    }else{
+        vector<box> queries;
+        for (int i = gctx->index; i < gctx->index_end; i ++)
+        {
+            queries.push_back(gctx->target_ideals[i]->getMBB());
+        }
+        printf("querysize = %d\n", queries.size());
+
+        thrust::device_vector<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > d_queries;
+        results->Clear();
+        d_results.set(stream.cuda_stream(), results->DeviceObject());
+        
+        CopyBoxes(queries, d_queries);
+        
+        rtspatial::ArrayView<rtspatial::Envelope<rtspatial::Point<coord_t, 2> > > v_queries(d_queries);
+        
+        rt_index->Query(rtspatial::Predicate::kIntersects, v_queries, d_results.data(),
+                    stream.cuda_stream());
+
     }
 
     n_results = results->size(stream.cuda_stream());
@@ -152,9 +171,14 @@ void indexQuery(query_context *gctx){
  
     int threadsPerBlock = 256;
     int blocksPerGrid = (n_results + threadsPerBlock - 1) / threadsPerBlock;
-    PairsCopy<<<blocksPerGrid, threadsPerBlock>>>(d_result_ptr, gctx->d_candidate_pairs, n_results, *offset, gctx->index);
-    cudaDeviceSynchronize();
+    if(gctx->query_type == QueryType::contain || gctx->query_type == QueryType::within)
+        PairsCopy<<<blocksPerGrid, threadsPerBlock>>>(d_result_ptr, gctx->d_candidate_pairs, n_results, *offset, gctx->index);
+    else{
+        PairsCopy<<<blocksPerGrid, threadsPerBlock>>>(d_result_ptr, gctx->d_candidate_pairs, n_results, *offset, gctx->index + gctx->source_ideals.size());
+    }
 
+    cudaDeviceSynchronize();
+    check_execution("PairsCopy");
     // int grid_size_x = (n_results + 256 - 1) / 256;
 	// dim3 block_size(256, 1, 1);
 	// dim3 grid_size(grid_size_x, 1, 1);
@@ -182,14 +206,14 @@ void indexDestroy(query_context *gctx){
 
     // pair<uint32_t, uint32_t>* h_candidate_pairs = new pair<uint32_t, uint32_t>[*offset];
     // cudaMemcpy(h_candidate_pairs, gctx->d_candidate_pairs, *offset * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
-    // for(int i = 0; i < 100; i ++){
+    // for(int i = 0; i < *offset; i ++){
     //     printf("pair%d\n", i);
     //     int source = h_candidate_pairs[i].first;
     //     int target = h_candidate_pairs[i].second;
-    //     // printf("%d\n", target);
+    //     // printf("source = %d target = %d\n", source, target);
     //     // gctx->points[target].print();
     //     gctx->source_ideals[source]->MyPolygon::print();
-    //     gctx->target_ideals[target]->MyPolygon::print();
+    //     gctx->target_ideals[target - gctx->source_ideals.size()]->MyPolygon::print();
     // }
 
     delete offset;

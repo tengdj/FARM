@@ -55,6 +55,9 @@ within:	query/within.o $(GEOMETRY_OBJS)
 	
 contain:	query/contain.o $(GEOMETRY_OBJS)
 	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
+
+intersection:	query/intersection.o $(GEOMETRY_OBJS)
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS)
 	
 print_raster:	test/print_raster.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 

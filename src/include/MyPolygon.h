@@ -60,6 +60,7 @@ public:
 	VertexSequence *clone();
 	VertexSequence *convexHull();
 	box *getMBR();
+	void addVertex(const Point &p);
 	void print(bool complete_ring = false);
 	bool clockwise();
 	void reverse();

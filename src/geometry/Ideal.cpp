@@ -228,6 +228,9 @@ void Ideal::evaluate_edges(){
 		assert(cur_starty<=dimy);
 		assert(cur_endy<=dimy);
 
+		set_status(get_id(cur_startx, cur_starty), BORDER);
+		set_status(get_id(cur_endx, cur_endy), BORDER);
+
 		//in the same pixel
 		if(cur_startx==cur_endx&&cur_starty==cur_endy){
 			continue;
@@ -368,6 +371,15 @@ void Ideal::evaluate_edges(){
 		}
 	}
 
+	// special case
+	if(edges_info.size() == 0 && boundary->num_vertices > 0){
+		init_edge_sequences(1);
+		set_offset(0, 0);
+		add_edge(0, 0, boundary->num_vertices - 1);
+	}else{
+		process_crosses(edges_info);
+	}
+
 	// for(int i = 0; i <= dimx; i ++) {
 	// 	set_status(get_id(i, dimy), OUT);
 	// }
@@ -377,15 +389,10 @@ void Ideal::evaluate_edges(){
 	// }
 
 
-	process_crosses(edges_info);
+	// process_crosses(edges_info);
 	process_intersection(horizontal_intersect_info, HORIZONTAL);
 	process_intersection(vertical_intersect_info, VERTICAL);
 	process_pixels_null(dimx, dimy);
-
-	// for(int i = 0; i <= get_num_pixels(); i ++){
-	// 	cout << offset[i] << " ";
-	// }
-	// cout << endl;
 }
 
 void Ideal::scanline_reandering(){
@@ -433,7 +440,7 @@ void Ideal::rasterization(int vpr){
 	if(use_hierachy)
 		num_layers = static_cast<int>(ceil(max(log(dimx + 1) / log(2.0), log(dimy + 1) / log(2.0))));
     else 
-	init_raster(boundary->num_vertices / vpr);
+		init_raster(boundary->num_vertices / vpr);
 
     rasterization();
 

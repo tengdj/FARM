@@ -29,13 +29,15 @@ struct EdgeSeq;
 struct RasterInfo;
 struct IdealOffset;
 struct IdealPair;
+struct Segment;
 
 enum QueryType
 {
 	contain = 0,
 	contain_polygon = 1,
 	within = 2,
-	within_polygon
+	within_polygon = 3,
+	intersection = 4
 };
 
 class execute_step
@@ -111,7 +113,7 @@ public:
 	bool collect_latency = false;
 	float sample_rate = 1.0;
 	double load_factor = 1.0;
-	size_t batch_size = INT_MAX;
+	size_t batch_size = 0;
 	
 
 	int small_threshold = 500;
@@ -208,7 +210,7 @@ public:
 	char* d_BufferOutput = nullptr;
 	uint *d_bufferoutput_size = nullptr;
 
-	uint8_t *d_flags = nullptr;
+	int8_t *d_flags = nullptr;
 	uint *d_result = nullptr;
 
 	// for hierachy
@@ -226,6 +228,10 @@ public:
 	pair<uint32_t, uint32_t>* d_candidate_pairs = nullptr;
 	size_t num_pairs = 0;
 
+	// for intersection
+	Segment *segments = nullptr;
+	uint num_segments = 0;
+	bool *pip = nullptr;
 
 public:
 	// functions

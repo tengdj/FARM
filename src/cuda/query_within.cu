@@ -23,7 +23,7 @@ struct BoxDistRange
 
 __device__ int d_level;
 
-__global__ void kernel_init(BoxDistRange *buffer, float *max_box_dist, uint size, uint8_t *flags)
+__global__ void kernel_init(BoxDistRange *buffer, float *max_box_dist, uint size, int8_t *flags)
 {
 	const int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
 	if (pair_id < size)
