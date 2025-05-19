@@ -242,7 +242,7 @@ __global__ void collect_valid_pairs(pair<uint32_t, uint32_t> *pairs, int8_t *fla
 
 __global__ void kernel_filter_segment_contain(Segment *segments, pair<uint32_t,uint32_t> *pairs,
 											  IdealOffset *idealoffset, RasterInfo *info, 
-											  uint8_t *status, Point *vertices,  uint *size, bool *flags, 
+											  uint8_t *status, Point *vertices,  uint *size, uint8_t *flags, 
 											  PixMapping *ptpixpairs, uint *pp_size)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -279,7 +279,7 @@ __global__ void kernel_filter_segment_contain(Segment *segments, pair<uint32_t,u
 		ptpixpairs[idx].pix_id = target;
 	}
 
-	flags[x] = is_in;
+	flags[x] = (uint8_t)is_in;
 }
 
 __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segment *segments, 
@@ -287,7 +287,7 @@ __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segmen
 												IdealOffset *idealoffset, RasterInfo *info,
 												uint32_t *es_offset, EdgeSeq *edge_sequences,
 												Point *vertices, uint32_t *gridline_offset,
-												double *gridline_nodes, uint *size, bool *flags)
+												double *gridline_nodes, uint *size, uint8_t *flags)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x >= *size)
@@ -317,6 +317,8 @@ __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segmen
 	const int yoff = gpu_get_y(target, s_dimx, s_dimy);
 	const box bx = gpu_get_pixel_box(xoff, yoff, s_mbr.low[0], s_mbr.low[1], s_step_x, s_step_y);
 
+	// printf("POINT (%lf %lf)\tLINESTRING((%lf %lf, %lf %lf, %lf %lf, %lf %lf, %lf %lf))\n", p.x, p.y, bx.low[0], bx.low[1], bx.high[0], bx.low[1], bx.high[0], bx.high[1], bx.low[0], bx.high[1], bx.low[0], bx.low[1]);
+
 	const uint32_t offset_start = offset.offset_start;
 	const uint32_t es_start = (es_offset + offset_start)[target];
 	const uint32_t es_end = (es_offset + offset_start)[target + 1];
@@ -330,9 +332,13 @@ __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segmen
 		{
 			const Point v1 = (vertices + vertices_start)[r.start + j];
 			const Point v2 = (vertices + vertices_start)[r.start + j + 1];
-
+			if(p == v1 || p == v2){
+				flags[seg_id] = 2;
+				return;  // p在边界上
+			}
 			if ((v1.y >= p.y) != (v2.y >= p.y))
 			{
+
 				const double dx = v2.x - v1.x;
 				const double dy = v2.y - v1.y;
 				const double py_diff = p.y - v1.y;
@@ -340,7 +346,11 @@ __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segmen
 				if (dy != 0.0)
 				{
 					const double int_x = dx * py_diff / dy + v1.x;
-					if (p.x <= int_x && int_x <= bx.high[0])
+					if(fabs(p.x - int_x) < 1e-9) {
+						flags[seg_id] = 2;
+						return;  // p在边界上
+					}
+					if (p.x < int_x && int_x <= bx.high[0])
 					{
 						ret = !ret;
 					}
@@ -358,7 +368,7 @@ __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segmen
 
 	ret ^= (nc & 1);
 
-	flags[seg_id] = ret;
+	flags[seg_id] = (uint8_t)ret;
 }
 
 void cuda_contain(query_context *gctx, bool polygon)

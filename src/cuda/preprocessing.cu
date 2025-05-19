@@ -361,4 +361,17 @@ void ResetDevice(query_context *gctx){
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_flags, 0, gctx->batch_size * sizeof(int8_t)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
+
+    if(gctx->query_type == intersection){
+        if (!gctx->segments)
+        {
+            delete[] gctx->segments;
+            gctx->segments = nullptr;
+        }
+        if (!gctx->pip)
+        {
+            delete[] gctx->pip;
+            gctx->pip = nullptr;
+        }
+    }
 }

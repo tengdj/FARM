@@ -113,7 +113,7 @@ public:
 	bool collect_latency = false;
 	float sample_rate = 1.0;
 	double load_factor = 1.0;
-	size_t batch_size = 0;
+	size_t batch_size = 1000000;
 	
 
 	int small_threshold = 500;
@@ -231,7 +231,7 @@ public:
 	// for intersection
 	Segment *segments = nullptr;
 	uint num_segments = 0;
-	bool *pip = nullptr;
+	uint8_t *pip = nullptr;
 
 public:
 	// functions

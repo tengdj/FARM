@@ -4,6 +4,8 @@
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>
 #include <thrust/device_ptr.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <thrust/remove.h>
 
 struct Task
 {
@@ -41,7 +43,7 @@ __global__ void kernel_filter_contain_polygon(pair<uint32_t,uint32_t>* pairs, Id
 	int i_max = gpu_get_offset_x(s_mbr.low[0], t_mbr.high[0], s_step_x, s_dimx);
 	int j_min = gpu_get_offset_y(s_mbr.low[1], t_mbr.low[1], s_step_y, s_dimy);
 	int j_max = gpu_get_offset_y(s_mbr.low[1], t_mbr.high[1], s_step_y, s_dimy);
-
+	
 	for (int i = i_min; i <= i_max; i++)
 	{
 		for (int j = j_min; j <= j_max; j++)
@@ -58,7 +60,7 @@ __global__ void kernel_filter_contain_polygon(pair<uint32_t,uint32_t>* pairs, Id
 			int _i_max = gpu_get_offset_x(t_mbr.low[0], bx.high[0], t_step_x, t_dimx);
 			int _j_min = gpu_get_offset_y(t_mbr.low[1], bx.low[1], t_step_y, t_dimy);
 			int _j_max = gpu_get_offset_y(t_mbr.low[1], bx.high[1], t_step_y, t_dimy);
-			
+
 			for (int _i = _i_min; _i <= _i_max; _i++)
 			{
 				for (int _j = _j_min; _j <= _j_max; _j++)
@@ -68,7 +70,7 @@ __global__ void kernel_filter_contain_polygon(pair<uint32_t,uint32_t>* pairs, Id
 					uint8_t target_status = gpu_show_status(status, target.status_start, p2);
 
                     flag_out = ((source_status == OUT) && (target_status == IN));
-			
+
 					if (source_status == BORDER && target_status == BORDER)
 					{
 						int idx = atomicAdd(pp_size, 1U);
@@ -119,8 +121,6 @@ __global__ void kernel_unroll_contain_polygon(PixPair *pixpairs, pair<uint32_t, 
 	int s_num_sequence = (es_offset + s_offset_start)[p + 1] - (es_offset + s_offset_start)[p];
 	int t_num_sequence = (es_offset + t_offset_start)[p2 + 1] - (es_offset + t_offset_start)[p2];
 
-	// printf("1848 = %d 1849 = %d 1850 = %d\n", es_offset[1848], es_offset[1849], es_offset[1850]);
-	
 	// printf("(es_offset + t_offset_start)[p2] = %u, (es_offset + t_offset_start)[p2 + 1] = %u\n", (es_offset + t_offset_start)[p2], (es_offset + t_offset_start)[p2 + 1]);
 	uint s_vertices_start = source.vertices_start;
 	uint t_vertices_start = target.vertices_start;
@@ -183,8 +183,13 @@ struct CompareSourceIntersections {
             return a.pair_id < b.pair_id; 
         }else if (a.edge_source_id != b.edge_source_id){
 			return a.edge_source_id < b.edge_source_id;
+		}else if (a.t != b.t){
+        	return a.t < b.t; 
+		}else if(a.edge_target_id != b.edge_target_id){
+			return a.edge_target_id < b.edge_target_id;
+		}else{
+			return a.u < b.u;
 		}
-        return a.t < b.t; 
     }
 };
 
@@ -203,9 +208,10 @@ struct CompareTargetIntersections {
 struct IntersectionEqual {
     __host__ __device__
     bool operator()(const Intersection& a, const Intersection& b) const {
-        return a.p == b.p && a.pair_id == b.pair_id;
+        return a.pair_id == b.pair_id && a.edge_source_id == b.edge_source_id && a.edge_target_id == b.edge_target_id && a.t == b.t && a.u == b.u;
     }
 };
+
 
 __global__ void find_inters_per_pair(Intersection *intersections, uint* size, uint *inters_per_pair){
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -216,30 +222,38 @@ __global__ void find_inters_per_pair(Intersection *intersections, uint* size, ui
     }
 }
 
+// 还需要整理
 __global__ void make_segments(Intersection *intersections, uint *num_intersections, Segment *segments, uint *num_segments, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, uint *inters_per_pair, bool is_source)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if(x < *num_intersections){
 		int pair_id = intersections[x].pair_id;
 		if(x + 1 >= *num_intersections || intersections[x].pair_id != intersections[x + 1].pair_id){
-			int idx = atomicAdd(num_segments, 1);
 			Intersection a = intersections[x];
 			Intersection b = intersections[x + 1 - inters_per_pair[pair_id]];
 			int a_edge_id = is_source ? a.edge_source_id : a.edge_target_id;
 			int b_edge_id = is_source ? b.edge_source_id : b.edge_target_id;
-			// pair<uint32_t, uint32_t> pair = pairs[pair_id];
-    		// uint32_t offset_idx = is_source ? pair.first : pair.second;
-			// int vertex_size = idealoffset[offset_idx + 1].vertices_start - idealoffset[offset_idx].vertices_start;
-			// segments[idx] = {is_source, a.p, b.p, a_edge_id + 1, b_edge_id + vertex_size - 1, pair_id};
+			double a_param = is_source ? a.t : a.u;
+			double b_param = is_source ? b.t : b.u;
+			if(fabs(a_param - 1) < 1e-9) a_edge_id ++;
+			if(fabs(b_param) < 1e-9) b_edge_id --;
+			int idx = atomicAdd(num_segments, 1);
 			segments[idx] = {is_source, a.p, b.p, a_edge_id + 1, b_edge_id, pair_id};
 		}else{
 			Intersection a = intersections[x];
 			Intersection b = intersections[x + 1];
 			int a_edge_id = is_source ? a.edge_source_id : a.edge_target_id;
 			int b_edge_id = is_source ? b.edge_source_id : b.edge_target_id;
+			double a_param = is_source ? a.t : a.u;
+			double b_param = is_source ? b.t : b.u;
 			int idx = atomicAdd(num_segments, 1);
 			if(a_edge_id != b_edge_id){
-				segments[idx] = {is_source, a.p, b.p, a_edge_id + 1, b_edge_id, pair_id};
+				if(fabs(a_param - 1) < 1e-9) a_edge_id ++;
+				if(fabs(b_param) < 1e-9) b_edge_id --;
+				if(a_edge_id + 1 <= b_edge_id)
+					segments[idx] = {is_source, a.p, b.p, a_edge_id + 1, b_edge_id, pair_id};
+				else
+					segments[idx] = {is_source, a.p, b.p, -1, -1, pair_id};
 			}else{	
 				segments[idx] = {is_source, a.p, b.p, -1, -1, pair_id};
 			}	
@@ -271,6 +285,8 @@ void cuda_contain_polygon(query_context *gctx)
 
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
     printf("h_buffer_size = %u\n", h_bufferinput_size);
+
+	if(h_bufferinput_size == 0) return;
 	
     /*2. Unroll Refinement*/
 
@@ -294,16 +310,93 @@ void cuda_contain_polygon(query_context *gctx)
 
 	CUDA_SWAP_BUFFER();
 
+	if(h_bufferinput_size == 0) return;
+
+	printf("num_intersections = %d\n", h_bufferinput_size);
 	// check source polygon edges 
     thrust::device_ptr<Intersection> begin = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput);
     thrust::device_ptr<Intersection> end = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput + h_bufferinput_size);
     thrust::sort(thrust::device, begin, end, CompareSourceIntersections());
 	auto new_end = thrust::unique(begin, end, IntersectionEqual());
 	h_bufferinput_size = thrust::distance(begin, new_end);
+
+	end = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput + h_bufferinput_size);
+
+	thrust::device_vector<Point> d_intersection_points(h_bufferinput_size);
+    thrust::transform(
+		begin, 
+		end, 
+		d_intersection_points.begin(),
+        [] __device__(const Intersection &intr){ 
+			return intr.p; });
+
+	thrust::device_vector<Point> d_unique_point_values(h_bufferinput_size);
+    thrust::device_vector<int> d_point_counts(h_bufferinput_size);
+
+	auto unique_new_end = thrust::reduce_by_key(
+        d_intersection_points.begin(), d_intersection_points.end(),
+        thrust::constant_iterator<int>(1),
+        d_unique_point_values.begin(),
+        d_point_counts.begin(),
+        [] __device__(const Point &a, const Point &b)
+        { return a == b; });
+
+	int unique_count = unique_new_end.first - d_unique_point_values.begin();
+    d_unique_point_values.resize(unique_count);
+    d_point_counts.resize(unique_count);
+
+	thrust::device_vector<bool> d_remove_flags(unique_count);
+    thrust::transform(d_point_counts.begin(), d_point_counts.end(), d_remove_flags.begin(),
+                      [] __device__(int count)
+                      { return count == 2; });
+		
+ 	thrust::device_vector<Point> d_points_to_remove;
+	int count_to_remove = thrust::count_if(
+        d_point_counts.begin(),
+        d_point_counts.end(),
+        [] __device__ (int count) { return count == 2; }
+    );
+
+	d_points_to_remove.resize(count_to_remove);
+
+	auto points_end = thrust::copy_if(
+        d_unique_point_values.begin(), 
+        d_unique_point_values.end(),
+        d_point_counts.begin(),
+        d_points_to_remove.begin(),
+        [] __device__ (int count) { return count == 2; }
+    );
+
+	size_t points_to_remove_count = points_end - d_points_to_remove.begin();
+	
+	auto result_end = thrust::remove_if(
+        begin, end,
+        [points_to_remove = thrust::raw_pointer_cast(d_points_to_remove.data()),
+         count = points_to_remove_count] __device__ (const Intersection& intr) {
+            // 检查当前交点的点是否在需要删除的点列表中
+            for (int i = 0; i < count; i++) {
+                if (intr.p == points_to_remove[i]) {
+                    return true;  // 删除此交点
+                }
+            }
+            return false;  // 保留此交点
+        }
+    );
+
+	h_bufferinput_size = thrust::distance(begin, result_end);
+
+	end = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput + h_bufferinput_size);
+	new_end = thrust::unique(
+		begin, 
+		end, 
+		[] __device__(const Intersection &a, const Intersection &b){ 
+			return a.p == b.p; });
+
+	h_bufferinput_size = thrust::distance(begin, new_end);
+	uint &num_intersections = h_bufferinput_size;
 	CUDA_SAFE_CALL(cudaMemcpy(gctx->d_bufferinput_size, &h_bufferinput_size, sizeof(uint), cudaMemcpyHostToDevice));
 
-	uint &num_intersections = h_bufferinput_size;
-    // PrintBuffer((Intersection *)gctx->d_BufferInput, num_intersections);
+	// PrintBuffer((Intersection *)gctx->d_BufferInput, num_intersections);
 
 	grid_size = (num_intersections + BLOCK_SIZE - 1) / BLOCK_SIZE;
 	printf("num_intersections = %d\n", num_intersections);
@@ -321,7 +414,6 @@ void cuda_contain_polygon(query_context *gctx)
 
 	// check target polygon edges 
 
-
 	begin = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput);
     end = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput + num_intersections);
     thrust::sort(thrust::device, begin, end, CompareTargetIntersections());
@@ -333,11 +425,15 @@ void cuda_contain_polygon(query_context *gctx)
     check_execution("kernel_make_segments");
 
 	CUDA_SWAP_BUFFER();
-
+			
 	uint &num_segments = h_bufferinput_size;
-	bool *pip = nullptr;
-	CUDA_SAFE_CALL(cudaMalloc((void **) &pip, num_segments));
-	CUDA_SAFE_CALL(cudaMemset(pip, 0, num_segments * sizeof(bool)));
+	
+	printf("check %u\n", num_segments);
+	
+	uint8_t *pip = nullptr;
+	CUDA_SAFE_CALL(cudaMalloc((void **) &pip, num_segments * sizeof(uint8_t)));
+	CUDA_SAFE_CALL(cudaMemset(pip, 0, num_segments * sizeof(uint8_t)));
+
 
 	grid_size = (num_segments + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
@@ -365,29 +461,33 @@ void cuda_contain_polygon(query_context *gctx)
 	
     // PrintBuffer((Segment *)gctx->d_BufferInput, num_segments);
 	
-	// PrintBuffer((bool *) pip, num_segments);
+	// // PrintBuffer((bool *) pip, num_segments);
 	
-	// int8_t* h_Buffer = new int8_t[batch_size];
-    // CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, gctx->d_flags, batch_size * sizeof(int8_t), cudaMemcpyDeviceToHost));
+	// uint8_t* h_Buffer = new uint8_t[num_segments];
+    // CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, pip, num_segments * sizeof(uint8_t), cudaMemcpyDeviceToHost));
 	// int _sum = 0;
-    // for (int i = 0; i < batch_size; i++) {
+    // for (int i = 0; i < num_segments; i++) {
 	// 	// if(h_Buffer[i] == 2) _sum ++;
 	// 	std::cout << (int)h_Buffer[i] << " ";
 	// 	if ((i + 1) % 5 == 0) printf("\n");
     // }
     // printf("\n");
 
-	// printf("sum = %d\n", _sum);
+	// // printf("sum = %d\n", _sum);
+
+	// printf("---------------------------------------------------------------------------------------------------\n");
+
 	
-	// 在多轮的情况下是不对的
 	gctx->segments = new Segment[num_segments];
 	gctx->num_segments = num_segments;
 	CUDA_SAFE_CALL(cudaMemcpy(gctx->segments, (Segment *)gctx->d_BufferInput, num_segments * sizeof(Segment), cudaMemcpyDeviceToHost));
     
-    gctx->pip = new bool[num_segments];
-	CUDA_SAFE_CALL(cudaMemcpy(gctx->pip, pip, num_segments * sizeof(bool), cudaMemcpyDeviceToHost));
+    gctx->pip = new uint8_t[num_segments];
+	CUDA_SAFE_CALL(cudaMemcpy(gctx->pip, pip, num_segments * sizeof(uint8_t), cudaMemcpyDeviceToHost));
 
-	gctx->h_candidate_pairs = new pair<uint32_t, uint32_t>[gctx->num_pairs];
 	cudaMemcpy(gctx->h_candidate_pairs, gctx->d_candidate_pairs, gctx->num_pairs * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
+
+	CUDA_SAFE_CALL(cudaFree(d_inters_per_pair));
+	CUDA_SAFE_CALL(cudaFree(pip));
     return;
 }

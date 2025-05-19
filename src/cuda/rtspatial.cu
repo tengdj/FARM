@@ -221,5 +221,7 @@ void indexDestroy(query_context *gctx){
 
     gctx->index = 0;
     gctx->index_end = 0;
+    
+    gctx->h_candidate_pairs = new pair<uint32_t, uint32_t>[gctx->num_pairs];
     return;
 }
