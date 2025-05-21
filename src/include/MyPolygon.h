@@ -61,7 +61,7 @@ public:
 	VertexSequence *convexHull();
 	box *getMBR();
 	void addVertex(const Point &p);
-	void print(bool complete_ring = false);
+	void print(bool complete_ring = true);
 	bool clockwise();
 	void reverse();
 	double area();
@@ -146,7 +146,7 @@ public:
 	// double distance_rtree(Point &start, Point &end, query_context *ctx);
 
 	// some utility functions
-	void print_without_head(bool print_hole = false, bool complete_ring = false);
+	void print_without_head(bool print_hole = false, bool complete_ring = true);
 	void print(bool print_id = true, bool print_hole = false);
 	// void print_triangles();
 	// void print_without_return(bool print_hole=false, bool complete_ring=false);

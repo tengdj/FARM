@@ -306,7 +306,6 @@ int main(int argc, char** argv) {
 		ResetDevice(&global_ctx);
 
 		auto batch_start = std::chrono::high_resolution_clock::now();
-		// cuda_contain(&global_ctx, true);
 		cuda_contain_polygon(&global_ctx);
 
         std::unordered_map<int, std::vector<Segment>> groupedSegments;
@@ -347,48 +346,37 @@ int main(int argc, char** argv) {
 
         unsigned int num_threads = global_ctx.num_threads;
         Point* vertices = global_ctx.h_vertices;
-        pair<uint32_t, uint32_t>* pairs = global_ctx.h_candidate_pairs;
+        pair<uint32_t, uint32_t>* pairs = global_ctx.h_candidate_pairs + global_ctx.index;
         IdealOffset* idealoffset = global_ctx.h_idealoffset;
 
         ThreadPool pool(num_threads);
         
-        // 使用原子计数器跟踪完成的任务数
         std::atomic<int> completed_tasks(0);
         const int total_tasks = groupedSegments.size();
         
-        // 使用共享结果容器和互斥锁
         std::vector<MyPolygon*> allPolygons;
         std::mutex resultsMutex;
 
-        // 为了减少锁竞争，使用本地结果缓冲区
         struct LocalBuffer {
             std::vector<MyPolygon*> polygons;
-            // 预分配足够大的空间
             LocalBuffer() { polygons.reserve(5000); }
         };
 
-        // 为每个线程创建本地缓冲区
         std::vector<std::shared_ptr<LocalBuffer>> localBuffers(num_threads);
         for (unsigned int i = 0; i < num_threads; ++i) {
             localBuffers[i] = std::make_shared<LocalBuffer>();
         }
 
-        // 为每组Segments提交任务
         int task_id = 0;
         for (const auto& group : groupedSegments) {
-            // 分配一个线程ID给这个任务，用于本地缓冲
             const int thread_id = task_id % num_threads;
             task_id++;
             
-            // 捕获本地缓冲区的共享指针
             std::shared_ptr<LocalBuffer> localBuffer = localBuffers[thread_id];
             
             pool.enqueue([&group, &completed_tasks, total_tasks, localBuffer, vertices, pairs, idealoffset]() {
-                // 处理这组segments并将结果添加到本地缓冲区
-
                 std::vector<MyPolygon*> groupPolygons = processSegmentsGroup(group.second, vertices, pairs, idealoffset);
 
-                // 将此组的结果添加到本地缓冲区
                 if (!groupPolygons.empty()) {
                     localBuffer->polygons.insert(
                         localBuffer->polygons.end(), 
@@ -397,7 +385,6 @@ int main(int argc, char** argv) {
                     );
                 }
                 
-                // 更新并显示进度
                 int completed = ++completed_tasks;
                 if (completed % 10 == 0 || completed == total_tasks) {
                     std::cout << "处理进度: " << completed << "/" << total_tasks 
@@ -406,20 +393,16 @@ int main(int argc, char** argv) {
             });
         }
 
-        // 等待所有任务完成
         pool.waitAll();
         std::cout << std::endl << "所有任务完成，合并结果..." << std::endl;
 
-            // 合并所有本地缓冲区的结果
         size_t totalPolygons = 0;
         for (const auto& buffer : localBuffers) {
             totalPolygons += buffer->polygons.size();
         }
         
-        // 预分配足够的空间
         allPolygons.reserve(totalPolygons);
         
-        // 合并所有本地缓冲区
         for (const auto& buffer : localBuffers) {
             allPolygons.insert(
                 allPolygons.end(),
@@ -433,9 +416,6 @@ int main(int argc, char** argv) {
         for(auto p : allPolygons){
             p->MyPolygon::print();
         }
-
-        printf("vertices size = %d\n", global_ctx.h_idealoffset[1].vertices_start);
-        printf("vertices size = %d\n", global_ctx.h_idealoffset[2].vertices_start);
 
 		auto batch_end = std::chrono::high_resolution_clock::now();
 		auto batch_duration = std::chrono::duration_cast<std::chrono::milliseconds>(batch_end - batch_start);

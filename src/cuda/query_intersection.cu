@@ -408,7 +408,7 @@ void cuda_contain_polygon(query_context *gctx)
 	cudaDeviceSynchronize();
     check_execution("kernel_find_inters_per_pair");
 	
-	make_segments<<<grid_size, block_size>>>((Intersection *)gctx->d_BufferInput, gctx->d_bufferinput_size, (Segment *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_candidate_pairs, gctx->d_idealoffset, d_inters_per_pair, true);
+	make_segments<<<grid_size, block_size>>>((Intersection *)gctx->d_BufferInput, gctx->d_bufferinput_size, (Segment *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, d_inters_per_pair, true);
 	cudaDeviceSynchronize();
     check_execution("kernel_make_segments");
 
@@ -484,8 +484,6 @@ void cuda_contain_polygon(query_context *gctx)
     
     gctx->pip = new uint8_t[num_segments];
 	CUDA_SAFE_CALL(cudaMemcpy(gctx->pip, pip, num_segments * sizeof(uint8_t), cudaMemcpyDeviceToHost));
-
-	cudaMemcpy(gctx->h_candidate_pairs, gctx->d_candidate_pairs, gctx->num_pairs * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
 
 	CUDA_SAFE_CALL(cudaFree(d_inters_per_pair));
 	CUDA_SAFE_CALL(cudaFree(pip));

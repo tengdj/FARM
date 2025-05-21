@@ -133,10 +133,6 @@ void query_context::merge_global(){
 		}
 	}
 	
-	for(int i = 0; i < num_pairs; i ++){
-		global_ctx->h_candidate_pairs[global_ctx->num_pairs ++] = h_candidate_pairs[i];
-	}
-	
 	// point_polygon_pairs_size = point_polygon_pairs_idx;
 	// global_ctx->point_polygon_pairs_size += point_polygon_pairs_size;
 	

@@ -7,13 +7,17 @@ int main(int argc, char** argv){
 	global_ctx = get_parameters(argc, argv);
 	// global_ctx.num_threads = 1;
 
-    global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str());
+    global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
 
+	unsigned long long sum = 0;
+	int size = global_ctx.source_ideals.size();
 	for(auto p : global_ctx.source_ideals){
-		if(p->get_num_vertices() > 1000){
-			p->MyPolygon::print();
-		}
+		sum += p->get_num_vertices();
+		// if(p->get_num_vertices() > 1000){
+			// p->MyPolygon::print();
+		// }
 	}
+	printf("%lu\n", sum);
 	// preprocess(&global_ctx);
 	// cout << "rasterization finished!" << endl;
 

@@ -223,5 +223,6 @@ void indexDestroy(query_context *gctx){
     gctx->index_end = 0;
     
     gctx->h_candidate_pairs = new pair<uint32_t, uint32_t>[gctx->num_pairs];
+	cudaMemcpy(gctx->h_candidate_pairs, gctx->d_candidate_pairs, gctx->num_pairs * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
     return;
 }
