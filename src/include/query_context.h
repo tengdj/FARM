@@ -113,7 +113,7 @@ public:
 	bool collect_latency = false;
 	float sample_rate = 1.0;
 	double load_factor = 1.0;
-	size_t batch_size = 1000000;
+	size_t batch_size = 0;
 	
 
 	int small_threshold = 500;
@@ -232,6 +232,8 @@ public:
 	Segment *segments = nullptr;
 	uint num_segments = 0;
 	uint8_t *pip = nullptr;
+
+	vector<MyPolygon*> intersection_polygons;
 
 public:
 	// functions

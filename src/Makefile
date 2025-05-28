@@ -10,7 +10,7 @@ INCLUDES	= -I /usr/include -I ./include -I /usr/local/include -I /usr/local/cuda
 LIBS		= -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -lboost_program_options -lgeos -lpthread
 CPPFLAGS	= -O3 -std=c++17 -Wno-cpp
 
-NVCCFLAGS   = -O3 -arch=sm_89 -std=c++17 -DCUB_IGNORE_DEPRECATED_CPP_DIALECT --expt-extended-lambda --expt-relaxed-constexpr --use_fast_math
+NVCCFLAGS   = -arch=sm_89 -std=c++17 -DCUB_IGNORE_DEPRECATED_CPP_DIALECT --expt-extended-lambda --expt-relaxed-constexpr --use_fast_math
 CUDALIBS    = -L/usr/local/cuda-12.2/lib64/stubs -lcuda -L/usr/local/cuda-12.2/lib64/ -lcudart
 
 
@@ -26,13 +26,23 @@ PARTITION_OBJS := $(patsubst %.cpp,%.o,$(PARTITION_SRCS))
 CU_SRCS := $(wildcard cuda/*.cu)
 CU_OBJS := $(patsubst %.cu,%_cu.o,$(CU_SRCS))
 
+RT_SRCS := $(wildcard rt/*.cu)
+RT_OBJS := $(patsubst %.cu,%_cu.o,$(RT_SRCS))
+
 PTXS := $(wildcard index/*.ptx)
+
+ifdef USE_RT
+CPPFLAGS += -DUSE_RT
+	LIBS  += ${CUDALIBS}
+	GEOMETRY_OBJS += ${RT_OBJS}
+endif
 
 ifdef USE_GPU
 	CPPFLAGS += -DUSE_GPU
-	LIBS  += ${CUDALIBS}
 	GEOMETRY_OBJS += ${CU_OBJS}
 endif
+
+
 
 
 %_cu.o: %.cu
@@ -58,6 +68,9 @@ contain:	query/contain.o $(GEOMETRY_OBJS)
 
 intersection:	query/intersection.o $(GEOMETRY_OBJS)
 	$(CXX) -O3 -o ../build/$@ $^ $(LIBS)
+
+intersection_cpu:	query/intersection_cpu.o $(GEOMETRY_OBJS)
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS)
 	
 print_raster:	test/print_raster.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
@@ -78,6 +91,9 @@ dist_point_polygon:	test/dist_point_polygon.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
 
 rtspatial:	test/rtspatial_cu.o $(GEOMETRY_OBJS) $(PTXS)
+	$(NVCC) -o ../build/$@ $^ $(LIBS) 
+
+float_test:	test/float_test_cu.o $(GEOMETRY_OBJS)
 	$(NVCC) -o ../build/$@ $^ $(LIBS) 
 
 clean:

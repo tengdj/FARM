@@ -49,19 +49,6 @@ struct EdgeSeq{
 	uint length;
 };
 
-struct Intersection{
-	Point p;
-    int pair_id;
-    int edge_source_id;     
-    int edge_target_id;     
-    double t;
-    double u;
-
-	void print(){
-		printf("POINT(%lf %lf), %d %u %u %lf %lf\n", p.x, p.y, pair_id, edge_source_id, edge_target_id, t, u);
-	}
-};
-
 struct Segment{
 	bool is_source;
 	Point start;
@@ -165,8 +152,10 @@ public:
 
 	// query functions
 	bool contain(Point &p, query_context *ctx, bool profile = false);
+	PartitionStatus segment_contain(Point &p);
 	bool contain(Ideal *target, query_context *ctx, bool profile = false);
 	// bool intersect(MyPolygon *target, query_context *ctx);
+	void intersection(Ideal *target, query_context *ctx);
 	double distance(Point &p, query_context *ctx, bool profile = false);
 	double distance(Ideal *target, query_context *ctx);
 	double distance(Ideal *target, int pix, query_context *ctx, bool profile = true);
@@ -186,10 +175,13 @@ void dump_to_file(const char *path, char *data, size_t size);
 void dump_polygons_to_file(vector<Ideal *> polygons, const char *path);
 
 // gpu functions
-#ifdef USE_GPU
+#ifdef USE_RT
 void indexBuild(query_context *gctx);
 void indexQuery(query_context *gctx);
 void indexDestroy(query_context *gctx);
+#endif
+
+#ifdef USE_GPU
 void ResetDevice(query_context *gctx);
 void cuda_create_buffer(query_context *gctx);
 void preprocess_for_gpu(query_context *gctx);

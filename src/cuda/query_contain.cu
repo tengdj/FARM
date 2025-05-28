@@ -242,11 +242,11 @@ __global__ void collect_valid_pairs(pair<uint32_t, uint32_t> *pairs, int8_t *fla
 
 __global__ void kernel_filter_segment_contain(Segment *segments, pair<uint32_t,uint32_t> *pairs,
 											  IdealOffset *idealoffset, RasterInfo *info, 
-											  uint8_t *status, Point *vertices,  uint *size, uint8_t *flags, 
+											  uint8_t *status, Point *vertices, uint size, uint8_t *flags, 
 											  PixMapping *ptpixpairs, uint *pp_size)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	if (x >= *size) return;
+	if (x >= size) return;
 
 	Segment seg = segments[x];
 	const pair<uint32_t, uint32_t> pair = pairs[seg.pair_id];
@@ -257,15 +257,15 @@ __global__ void kernel_filter_segment_contain(Segment *segments, pair<uint32_t,u
 	if(seg.edge_start == -1) p = (seg.start + seg.end) * 0.5;
 	else p = vertices[seg.edge_start];
 	
-	const box s_mbr = info[poly_idx].mbr;
-	const double s_step_x = info[poly_idx].step_x;
-	const double s_step_y = info[poly_idx].step_y;
-	const int s_dimx = info[poly_idx].dimx;
-	const int s_dimy = info[poly_idx].dimy;
+	const box mbr = info[poly_idx].mbr;
+	const double step_x = info[poly_idx].step_x;
+	const double step_y = info[poly_idx].step_y;
+	const int dimx = info[poly_idx].dimx;
+	const int dimy = info[poly_idx].dimy;
 	
-	const int xoff = gpu_get_offset_x(s_mbr.low[0], p.x, s_step_x, s_dimx);
-	const int yoff = gpu_get_offset_y(s_mbr.low[1], p.y, s_step_y, s_dimy);
-	const int target = gpu_get_id(xoff, yoff, s_dimx);
+	const int xoff = gpu_get_offset_x(mbr.low[0], p.x, step_x, dimx);
+	const int yoff = gpu_get_offset_y(mbr.low[1], p.y, step_y, dimy);
+	const int target = gpu_get_id(xoff, yoff, dimx);
 
 	const PartitionStatus st = gpu_show_status(status, offset.status_start, target);
 	

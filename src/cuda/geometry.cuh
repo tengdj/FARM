@@ -468,28 +468,26 @@ __device__ inline bool gpu_segment_intersect_batch(Point *p1, Point *p2, int s1,
     return has_intersection;
 }
 
-__device__ inline bool gpu_segment_intersect_batch(Point *p, int s1, int s2, int e1, int e2, int pair_id, Intersection* intersections, uint* num)
+__device__ inline void gpu_segment_intersect_batch(Point *p, int s1, int s2, int e1, int e2, int pair_id, Intersection* intersections, uint* num)
 {
-    bool has_intersection = false;
-
     for (int i = s1; i < e1; i++) {
+		bool colinear = false, isIntersection = false;
         for (int j = s2; j < e2; j++) {
-			// if(!(p[i] == p[j]) || !(p[i + 1] == p[j + 1]) || !(p[i] == p[j + 1]) || !(p[i + 1] == p[j])){
-			if(p[i] == p[j] && p[i + 1] == p[j + 1] || p[i] == p[j + 1] && p[i + 1 ]== p[j]) continue;
+			if(p[i] == p[j] && p[i + 1] == p[j + 1] || p[i] == p[j + 1] && p[i + 1]== p[j]) continue;
+			
 			Point d1 = p[i + 1] - p[i];
 			Point d2 = p[j + 1] - p[j];
 			Point r = p[j] - p[i];
 
-			double denom = d1.cross(d2);
+			float denom = d1.cross(d2);
 
-			// if (std::abs(denom) < 1e-9) continue;
+			if (std::abs(denom) < 1e-9) continue;
 			
-			double t = r.cross(d2) / denom;
-			double u = r.cross(d1) / denom;
+			float t = r.cross(d2) / denom;
+			float u = r.cross(d1) / denom;
 			
 			// if (t > 1e-9 && 1 - t > 1e-9 && u > 1e-9 && 1 - u > 1e-9) {
-			if (t > -1e-9 && t < 1 + 1e-9 && u > -1e-9 && u < 1 + 1e-9) {
-				Point t_d1{t * d1.x, t * d1.y};
+			if (t > -1e-9 && t < 1 + 1e-9 && u > -1e-9 && u < 1 + 1e-9) {	
 				Point intersect_p = p[i] + d1 * t;
 				uint idx = atomicAdd(num, 1U);
 				intersections[idx] = {intersect_p, pair_id, i, j, t, u};
@@ -497,7 +495,7 @@ __device__ inline bool gpu_segment_intersect_batch(Point *p, int s1, int s2, int
         }
     }
 
-    return true;
+    return;
 }
 
 __device__ inline bool pointsEqual(const Point& p1, const Point& p2) {
@@ -506,7 +504,7 @@ __device__ inline bool pointsEqual(const Point& p1, const Point& p2) {
 
 __global__ void kernel_filter_segment_contain(Segment *segments, pair<uint32_t,uint32_t> *pairs,
 											  IdealOffset *idealoffset, RasterInfo *info, 
-											  uint8_t *status, Point *vertices,  uint *size, uint8_t *flags, 
+											  uint8_t *status, Point *vertices,  uint size, uint8_t *flags, 
 											  PixMapping *ptpixpairs, uint *pp_size);
 
 __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segment *segments, 

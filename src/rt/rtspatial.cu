@@ -1,5 +1,5 @@
 #include "../include/Ideal.h"
-#include "cuda_util.h"
+#include "../cuda/cuda_util.h"
 #include <thrust/device_vector.h>
 #include <rtspatial/spatial_index.cuh>
 
@@ -204,23 +204,24 @@ void indexDestroy(query_context *gctx){
     CUDA_SAFE_CALL(cudaFree(gctx->d_candidate_pairs));
     gctx->d_candidate_pairs = new_ptr;
 
-    // pair<uint32_t, uint32_t>* h_candidate_pairs = new pair<uint32_t, uint32_t>[*offset];
-    // cudaMemcpy(h_candidate_pairs, gctx->d_candidate_pairs, *offset * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
-    // for(int i = 0; i < *offset; i ++){
-    //     printf("pair%d\n", i);
-    //     int source = h_candidate_pairs[i].first;
-    //     int target = h_candidate_pairs[i].second;
-    //     // printf("source = %d target = %d\n", source, target);
-    //     // gctx->points[target].print();
-    //     gctx->source_ideals[source]->MyPolygon::print();
-    //     gctx->target_ideals[target - gctx->source_ideals.size()]->MyPolygon::print();
-    // }
+    pair<uint32_t, uint32_t>* h_candidate_pairs = new pair<uint32_t, uint32_t>[*offset];
+    cudaMemcpy(h_candidate_pairs, gctx->d_candidate_pairs, *offset * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);
+    for(int i = 0; i < *offset; i ++){
+        // printf("pair%d\n", i);
+        int source = h_candidate_pairs[i].first;
+        int target = h_candidate_pairs[i].second;
+        // printf("%d\t%d\n", source, target);
+        // gctx->points[target].print();
+        gctx->source_ideals[source]->MyPolygon::print();
+        gctx->target_ideals[target - gctx->source_ideals.size()]->MyPolygon::print();
+    }
 
     delete offset;
     offset = nullptr;
 
     gctx->index = 0;
     gctx->index_end = 0;
+    gctx->target_num = gctx->num_pairs;
     
     gctx->h_candidate_pairs = new pair<uint32_t, uint32_t>[gctx->num_pairs];
 	cudaMemcpy(gctx->h_candidate_pairs, gctx->d_candidate_pairs, gctx->num_pairs * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyDeviceToHost);

@@ -11,6 +11,7 @@ DATA6="zipcode.idl"
 DATA7="water.idl"
 
 > output.txt
+# > output1.txt
 # make clean
 # make contain USE_GPU=1 -j
 # $BUILD_PATH/contain -s $IDL_PATH/$DATA3 -t $IDL_PATH/$DATA4 -r -g -b 1000000 -l 0.00005 >> output.txt
@@ -27,8 +28,19 @@ DATA7="water.idl"
 # make within_polygon USE_GPU=1 -j
 # $BUILD_PATH/within_polygon -s $IDL_PATH/$DATA2 -t $IDL_PATH/$DATA2 -r -h -g -l 0.1 > output.txt
 
-make clean
-make intersection USE_GPU=1 -j
+# make clean
+# make intersection USE_GPU=1 USE_RT=1 -j
 # $BUILD_PATH/intersection -s $IDL_PATH/$DATA1 -t $IDL_PATH/$DATA1 -r -g >> output.txt
-$BUILD_PATH/intersection -s $DATA_PATH/$DATA6 -t $DATA_PATH/$DATA7 -r -g >> output.txt
-# $BUILD_PATH/intersection -s inputA.idl -t inputB.idl -r -g -n 1 >> output.txt
+# for i in {1..10};
+# do
+# $BUILD_PATH/intersection -s $DATA_PATH/$DATA6 -t $DATA_PATH/$DATA7 -r -g -n 1 >> output1.txt
+# done
+# $BUILD_PATH/intersection -s inputA.idl -t inputB.idl -r -g -n 1 >> output1.txt
+
+
+# CPU
+make clean
+make intersection_cpu USE_RT=1  -j
+# $BUILD_PATH/intersection -s $IDL_PATH/$DATA1 -t $IDL_PATH/$DATA1 -r -g >> output.txt
+# $BUILD_PATH/intersection_cpu -s $DATA_PATH/$DATA6 -t $DATA_PATH/$DATA7 -r -n 1 >> output.txt
+$BUILD_PATH/intersection_cpu -s inputA.idl -t inputB.idl -r >> output.txt

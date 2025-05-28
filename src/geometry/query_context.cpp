@@ -132,6 +132,8 @@ void query_context::merge_global(){
 			global_ctx->latency[it.first] = lt;
 		}
 	}
+
+	global_ctx->intersection_polygons.insert(global_ctx->intersection_polygons.end(), intersection_polygons.begin(), intersection_polygons.end());
 	
 	// point_polygon_pairs_size = point_polygon_pairs_idx;
 	// global_ctx->point_polygon_pairs_size += point_polygon_pairs_size;

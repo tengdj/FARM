@@ -78,7 +78,10 @@ public:
     //	  }
 
     CUDA_HOSTDEV bool operator==(const Point &p) const { return x == p.x && y == p.y; }
-    
+    CUDA_HOSTDEV bool operator!=(const Point &p) const { return x != p.x || y != p.y; }
+    CUDA_HOSTDEV bool operator<(const Point &p) const { 
+        return x < p.x || (x == p.x && y < p.y);
+    }
 
     /// Negate this point.
     CUDA_HOSTDEV Point operator-() const {
@@ -128,6 +131,23 @@ public:
         return (a - *this).cross(b - *this);
     }
 };
+
+struct Intersection{
+	Point p;
+    int pair_id;
+    int edge_source_id;     
+    int edge_target_id;     
+    double t;
+    double u;
+
+	// Intersection(){}
+	// Intersection(Point _p, int _pair_id, int _edge_source_id, int _edge_target_id, double _t, double _u) : p(_p), pair_id(_pair_id), edge_source_id(_edge_source_id), edge_target_id(_edge_target_id), t(_t), u(_u){}
+
+	void print(){
+		printf("POINT(%lf %lf), %d %u %u %lf %lf\n", p.x, p.y, pair_id, edge_source_id, edge_target_id, t, u);
+	}
+};
+
 
 class Vertex : public Point {
   public:

@@ -1,5 +1,4 @@
 #include "../include/Ideal.h"
-#include "../index/RTree.h"
 #include "ThreadPool.h"
 #include <fstream>
 #include <queue>
@@ -50,11 +49,6 @@ std::vector<MyPolygon*> segmentsToPolygons(const std::vector<Segment>& segments,
   
         // 尝试找到一个闭合的路径
         while (!used[currentSegIdx]) {
-            // 注释
-            if(currentVertices.size() > 10000000){
-                printf("pair_id = %d\n", segments[currentSegIdx].pair_id);
-                break;
-            }
             used[currentSegIdx] = true;
             // 添加当前点到多边形
             currentVertices.push_back(currentPoint);
@@ -265,8 +259,6 @@ int main(int argc, char** argv) {
 
 	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
 	global_ctx.target_ideals = load_binary_file(global_ctx.target_path.c_str(),global_ctx);
-	// global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str());
-	// global_ctx.target_ideals = load_polygon_wkt(global_ctx.target_path.c_str());
 	global_ctx.target_num = global_ctx.target_ideals.size();
     global_ctx.batch_size = global_ctx.target_num;
 
@@ -315,34 +307,62 @@ int main(int argc, char** argv) {
         auto pointToKey = [](const Point& p, const int pair_id, bool is_source) {
             return std::to_string(p.x) + ":" + std::to_string(p.y) + ":" + std::to_string(pair_id) + ":" + std::to_string(is_source);
         };
-
-        for (int i = 0; i < global_ctx.num_segments; i ++){
-            if(global_ctx.pip[i] != 2){
-                auto& seg = global_ctx.segments[i];
-                pointToSegment[pointToKey(seg.start, seg.pair_id, seg.is_source)] = i;
-                pointToSegment[pointToKey(seg.end, seg.pair_id, seg.is_source)] = i;
+ int test = 0;
+        for (int j = 0; j < global_ctx.num_segments; j ++){
+            auto& seg = global_ctx.segments[j];
+            seg.print();
+            printf("%d\n", global_ctx.pip[j]);
+            if(global_ctx.pip[j] != 2){
+                auto& seg = global_ctx.segments[j];
+                pointToSegment[pointToKey(seg.start, seg.pair_id, seg.is_source)] ++;
+                pointToSegment[pointToKey(seg.end, seg.pair_id, seg.is_source)] ++;
+                // test +=2 ;
             }
         }
 
-        for (int i = 0; i < global_ctx.num_segments; i ++){
-            if(global_ctx.pip[i] == 1){
-                auto& segment = global_ctx.segments[i];
-                // segment.start.print();
-                // printf("%d %d\n", segment.edge_start, segment.edge_end);
-                // segment.end.print();
+        printf("---------------------------------------------------------------------------------------\n");
+
+        // for(auto item : pointToSegment){
+        //     cout << item.first << " " << item.second << endl;
+        // }
+
+
+        for (int j = 0; j < global_ctx.num_segments; j ++){
+            if(global_ctx.pip[j] == 1){
+                auto& segment = global_ctx.segments[j];
                 groupedSegments[segment.pair_id].push_back(segment);
-            }else if(global_ctx.pip[i] == 2){
-                auto& segment = global_ctx.segments[i];
-                int a = pointToSegment[pointToKey(segment.start, segment.pair_id, segment.is_source)];
-                int b = pointToSegment[pointToKey(segment.start, segment.pair_id, !segment.is_source)];
-                if(global_ctx.pip[a] == 0 && global_ctx.pip[b] == 1){
-                    // segment.start.print();
-                    // printf("%d %d\n", segment.edge_start, segment.edge_end);
-                    // segment.end.print();
-                    groupedSegments[segment.pair_id].push_back(segment);
+            }else if(global_ctx.pip[j] == 2){
+                auto& seg = global_ctx.segments[j];
+                auto a_it = pointToSegment.find(pointToKey(seg.start, seg.pair_id, seg.is_source));
+                auto b_it = pointToSegment.find(pointToKey(seg.start, seg.pair_id, !seg.is_source));
+                if(a_it != pointToSegment.end() && b_it != pointToSegment.end()){
+                    int a = pointToSegment[pointToKey(seg.start, seg.pair_id, seg.is_source)];
+                    int b = pointToSegment[pointToKey(seg.start, seg.pair_id, !seg.is_source)];
+                    if(a == 4 || b == 4){
+                        printf("a = %d b = %d\n", a, b);
+                        seg.print();
+                        cout << pointToKey(seg.start, seg.pair_id, seg.is_source) << endl;
+                        cout << pointToKey(seg.start, seg.pair_id, !seg.is_source) << endl;
+                    }
+                    if(global_ctx.pip[a] == 0 && global_ctx.pip[b] == 1){
+                        groupedSegments[seg.pair_id].push_back(seg);
+                        // test ++;
+                    }
                 }
             }
         }
+
+        // int sum = 0;
+        // for(int j = 0; j < global_ctx.num_segments; j ++){
+        //     if(global_ctx.pip[j] == 2)
+        //         sum ++;
+        // }
+
+        // printf("pip = %d\n", sum);
+
+        printf("num_segment = %d\n", test);
+
+        printf("%d\n", pointToSegment.size());
 
         unsigned int num_threads = global_ctx.num_threads;
         Point* vertices = global_ctx.h_vertices;
@@ -413,9 +433,9 @@ int main(int argc, char** argv) {
         
         std::cout << "处理完成！共生成 " << allPolygons.size() << " 个多边形" << std::endl;
         
-        for(auto p : allPolygons){
-            p->MyPolygon::print();
-        }
+        // for(auto p : allPolygons){
+        //     p->MyPolygon::print();
+        // }
 
 		auto batch_end = std::chrono::high_resolution_clock::now();
 		auto batch_duration = std::chrono::duration_cast<std::chrono::milliseconds>(batch_end - batch_start);
@@ -425,6 +445,13 @@ int main(int argc, char** argv) {
 	auto gpu_end = std::chrono::high_resolution_clock::now();
 	auto gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(gpu_end - gpu_start);
 	std::cout << "total gpu time: " << gpu_duration.count() << " ms" << std::endl;
+
+    printf("-------------------------------------------------------\n");
+    for(int i = 0; i < global_ctx.num_vertices; i ++){
+        global_ctx.h_vertices[i].print();
+    }
+    printf("-------------------------------------------------------\n");
+
 
 
 
@@ -547,6 +574,3 @@ int main(int argc, char** argv) {
 
     return 0;
 }
-
-
-
