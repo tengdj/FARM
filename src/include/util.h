@@ -41,6 +41,7 @@ namespace
 
 #define TENG_RANDOM_NUMBER 0315
 #define OSM_SRID 4326
+	const float eps = 1e-6;
 	const double PI = 3.14159265;
 
 	// some utility function

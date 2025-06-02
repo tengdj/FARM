@@ -8,7 +8,7 @@ OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 INCLUDES	= -I /usr/include -I ./include -I /usr/local/include -I /usr/local/cuda-12.2/targets/x86_64-linux/include  -I /home/qmh/optix/include
 #-lgeos_c  
 LIBS		= -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -lboost_program_options -lgeos -lpthread
-CPPFLAGS	= -O3 -std=c++17 -Wno-cpp
+CPPFLAGS	= -std=c++17 -Wno-cpp
 
 NVCCFLAGS   = -arch=sm_89 -std=c++17 -DCUB_IGNORE_DEPRECATED_CPP_DIALECT --expt-extended-lambda --expt-relaxed-constexpr --use_fast_math
 CUDALIBS    = -L/usr/local/cuda-12.2/lib64/stubs -lcuda -L/usr/local/cuda-12.2/lib64/ -lcudart
@@ -67,10 +67,10 @@ contain:	query/contain.o $(GEOMETRY_OBJS)
 	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 
 intersection:	query/intersection.o $(GEOMETRY_OBJS)
-	$(CXX) -O3 -o ../build/$@ $^ $(LIBS)
+	$(CXX) -o ../build/$@ $^ $(LIBS)
 
 intersection_cpu:	query/intersection_cpu.o $(GEOMETRY_OBJS)
-	$(CXX) -O3 -o ../build/$@ $^ $(LIBS)
+	$(CXX) -o ../build/$@ $^ $(LIBS)
 	
 print_raster:	test/print_raster.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 

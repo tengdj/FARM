@@ -77,8 +77,8 @@ public:
     //	    return r;
     //	  }
 
-    CUDA_HOSTDEV bool operator==(const Point &p) const { return x == p.x && y == p.y; }
-    CUDA_HOSTDEV bool operator!=(const Point &p) const { return x != p.x || y != p.y; }
+    CUDA_HOSTDEV bool operator==(const Point &p) const { return abs(x-p.x)<eps && abs(y-p.y)<eps; }
+    CUDA_HOSTDEV bool operator!=(const Point &p) const { return abs(x-p.x)>=eps && abs(y-p.y)>=eps; }
     CUDA_HOSTDEV bool operator<(const Point &p) const { 
         return x < p.x || (x == p.x && y < p.y);
     }

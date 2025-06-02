@@ -346,7 +346,7 @@ __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segmen
 				if (dy != 0.0)
 				{
 					const double int_x = dx * py_diff / dy + v1.x;
-					if(fabs(p.x - int_x) < 1e-9) {
+					if(fabs(p.x - int_x) < eps) {
 						flags[seg_id] = 2;
 						return;  // p在边界上
 					}

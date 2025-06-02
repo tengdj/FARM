@@ -470,23 +470,20 @@ __device__ inline bool gpu_segment_intersect_batch(Point *p1, Point *p2, int s1,
 
 __device__ inline void gpu_segment_intersect_batch(Point *p, int s1, int s2, int e1, int e2, int pair_id, Intersection* intersections, uint* num)
 {
-    for (int i = s1; i < e1; i++) {
-		bool colinear = false, isIntersection = false;
-        for (int j = s2; j < e2; j++) {
-			if(p[i] == p[j] && p[i + 1] == p[j + 1] || p[i] == p[j + 1] && p[i + 1]== p[j]) continue;
+	for (int i = s1; i < e1; i++) {
+    	for (int j = s2; j < e2; j++) {
 			
 			Point d1 = p[i + 1] - p[i];
 			Point d2 = p[j + 1] - p[j];
 			Point r = p[j] - p[i];
 
-			float denom = d1.cross(d2);
+			double denom = d1.cross(d2);
 
 			if (std::abs(denom) < 1e-9) continue;
 			
-			float t = r.cross(d2) / denom;
-			float u = r.cross(d1) / denom;
+			double t = r.cross(d2) / denom;
+			double u = r.cross(d1) / denom;
 			
-			// if (t > 1e-9 && 1 - t > 1e-9 && u > 1e-9 && 1 - u > 1e-9) {
 			if (t > -1e-9 && t < 1 + 1e-9 && u > -1e-9 && u < 1 + 1e-9) {	
 				Point intersect_p = p[i] + d1 * t;
 				uint idx = atomicAdd(num, 1U);
@@ -494,12 +491,7 @@ __device__ inline void gpu_segment_intersect_batch(Point *p, int s1, int s2, int
 			}
         }
     }
-
     return;
-}
-
-__device__ inline bool pointsEqual(const Point& p1, const Point& p2) {
-    return (p1.x == p2.x) && (p1.y == p2.y);
 }
 
 __global__ void kernel_filter_segment_contain(Segment *segments, pair<uint32_t,uint32_t> *pairs,

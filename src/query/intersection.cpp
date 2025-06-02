@@ -11,7 +11,7 @@
 #include <cmath>
 
 // 将Segments转换为多个Polygons
-std::vector<MyPolygon*> segmentsToPolygons(const std::vector<Segment>& segments, Point* vertices, pair<uint32_t, uint32_t>* pairs, IdealOffset* idealoffset){
+std::vector<MyPolygon*> segmentsToPolygons(const std::vector<Segment>& segments, Point* vertices, pair<uint32_t, uint32_t>* pairs, IdealOffset* idealoffset, const std::vector<bool>& status){
     std::vector<MyPolygon*> polygons;
     
     if (segments.empty()) return polygons;
@@ -34,8 +34,9 @@ std::vector<MyPolygon*> segmentsToPolygons(const std::vector<Segment>& segments,
     
     // 寻找并构建所有可能的多边形
     for (size_t startIdx = 0; startIdx < segments.size(); ++startIdx) {
-        if (used[startIdx]) continue;
-        
+        if (used[startIdx] || !status[startIdx]) continue;
+		// printf("START IDX POINT(%lf %lf) POINT(%lf %lf) %d %d %d\n", segments[startIdx].start.x, segments[startIdx].start.y, 
+        //     segments[startIdx].end.x, segments[startIdx].end.y, segments[startIdx].edge_start, segments[startIdx].edge_end, segments[startIdx].pair_id);
         // 开始一个新的多边形
         vector<Point> currentVertices;
         // currentVertices.reserve(100000000);
@@ -53,7 +54,11 @@ std::vector<MyPolygon*> segmentsToPolygons(const std::vector<Segment>& segments,
             // 添加当前点到多边形
             currentVertices.push_back(currentPoint);
 			const Segment& seg = segments[currentSegIdx];
-			if(seg.edge_start != -1){
+
+            // printf("POINT(%lf %lf) POINT(%lf %lf) %d %d %d status: %d\n", seg.start.x, seg.start.y, 
+            //    seg.end.x, seg.end.y, seg.edge_start, seg.edge_end, seg.pair_id, status[currentSegIdx]);
+			
+            if(seg.edge_start != -1){
                 if(seg.edge_start <= seg.edge_end){
                     for(int verId = seg.edge_start; verId <= seg.edge_end; verId ++){
                         currentVertices.push_back(vertices[verId]);
@@ -244,10 +249,10 @@ std::vector<MyPolygon*> segmentsToPolygons(const std::vector<Segment>& segments,
 //     return polygons;
 // }
 
-std::vector<MyPolygon*> processSegmentsGroup(const std::vector<Segment>& segments, Point* vertices, pair<uint32_t, uint32_t>* pairs, IdealOffset* idealoffset) {
+std::vector<MyPolygon*> processSegmentsGroup(const std::vector<Segment>& segments, Point* vertices, pair<uint32_t, uint32_t>* pairs, IdealOffset* idealoffset, const std::vector<bool>& status) {
     if (segments.empty()) return std::vector<MyPolygon*>();
     
-    std::vector<MyPolygon*> results = segmentsToPolygons(segments, vertices, pairs, idealoffset);
+    std::vector<MyPolygon*> results = segmentsToPolygons(segments, vertices, pairs, idealoffset, status);
     
     return results;
 }
@@ -259,6 +264,8 @@ int main(int argc, char** argv) {
 
 	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
 	global_ctx.target_ideals = load_binary_file(global_ctx.target_path.c_str(),global_ctx);
+    // global_ctx.source_ideals.resize(1000);
+    // global_ctx.target_ideals.resize(1000);
 	global_ctx.target_num = global_ctx.target_ideals.size();
     global_ctx.batch_size = global_ctx.target_num;
 
@@ -276,7 +283,7 @@ int main(int argc, char** argv) {
 	std::cout << "rtree query: " << rtree_query_duration.count() << " ms" << std::endl;
 	indexDestroy(&global_ctx);
 
-    global_ctx.batch_size = 1000000;
+    global_ctx.batch_size = global_ctx.num_pairs / 10;
 	auto preprocess_start = std::chrono::high_resolution_clock::now();
 	preprocess(&global_ctx);
 	auto preprocess_end = std::chrono::high_resolution_clock::now();
@@ -289,38 +296,56 @@ int main(int argc, char** argv) {
 	auto preprocess_gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_gpu_end - preprocess_gpu_start);
 	std::cout << "preprocess for gpu time: " << preprocess_gpu_duration.count() << " ms" << std::endl;
 
-	auto gpu_start = std::chrono::high_resolution_clock::now();
+	auto total_start = std::chrono::high_resolution_clock::now();
     
 	for(int i = 0; i < global_ctx.num_pairs; i += global_ctx.batch_size){
+        auto batch_start = std::chrono::high_resolution_clock::now();
 		global_ctx.index = i;
 		global_ctx.index_end = min(i + global_ctx.batch_size, global_ctx.num_pairs);
 
 		ResetDevice(&global_ctx);
 
-		auto batch_start = std::chrono::high_resolution_clock::now();
+	    auto gpu_start = std::chrono::high_resolution_clock::now();
+
 		cuda_contain_polygon(&global_ctx);
 
+        auto gpu_end = std::chrono::high_resolution_clock::now();
+        auto gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(gpu_end - gpu_start);
+        std::cout << "total gpu time: " << gpu_duration.count() << " ms" << std::endl;
+
         std::unordered_map<int, std::vector<Segment>> groupedSegments;
+        std::unordered_map<int, std::vector<bool>> groupedStatus;
+
+        for (int j = 0; j < global_ctx.num_segments; j ++){
+            if(global_ctx.pip[j] == 1){
+                auto& segment = global_ctx.segments[j];
+                groupedSegments[segment.pair_id].push_back(segment);
+                groupedStatus[segment.pair_id].push_back(true);
+            }
+        }
+
+        for (int j = 0; j < global_ctx.num_segments; j ++){
+            if(global_ctx.pip[j] == 2){
+                auto& segment = global_ctx.segments[j];
+                groupedSegments[segment.pair_id].push_back(segment);
+                groupedStatus[segment.pair_id].push_back(false);
+            }
+        }
+/*
         std::unordered_map<string, int> pointToSegment;
         printf("global_ctx.num_segments = %d\n", global_ctx.num_segments);
 
         auto pointToKey = [](const Point& p, const int pair_id, bool is_source) {
             return std::to_string(p.x) + ":" + std::to_string(p.y) + ":" + std::to_string(pair_id) + ":" + std::to_string(is_source);
         };
- int test = 0;
+
         for (int j = 0; j < global_ctx.num_segments; j ++){
-            auto& seg = global_ctx.segments[j];
-            seg.print();
-            printf("%d\n", global_ctx.pip[j]);
             if(global_ctx.pip[j] != 2){
                 auto& seg = global_ctx.segments[j];
-                pointToSegment[pointToKey(seg.start, seg.pair_id, seg.is_source)] ++;
-                pointToSegment[pointToKey(seg.end, seg.pair_id, seg.is_source)] ++;
-                // test +=2 ;
+                pointToSegment[pointToKey(seg.start, seg.pair_id, seg.is_source)] = j;
+                pointToSegment[pointToKey(seg.end, seg.pair_id, seg.is_source)] = j;
             }
         }
-
-        printf("---------------------------------------------------------------------------------------\n");
 
         // for(auto item : pointToSegment){
         //     cout << item.first << " " << item.second << endl;
@@ -333,22 +358,20 @@ int main(int argc, char** argv) {
                 groupedSegments[segment.pair_id].push_back(segment);
             }else if(global_ctx.pip[j] == 2){
                 auto& seg = global_ctx.segments[j];
-                auto a_it = pointToSegment.find(pointToKey(seg.start, seg.pair_id, seg.is_source));
-                auto b_it = pointToSegment.find(pointToKey(seg.start, seg.pair_id, !seg.is_source));
-                if(a_it != pointToSegment.end() && b_it != pointToSegment.end()){
+                // auto a_it = pointToSegment.find(pointToKey(seg.start, seg.pair_id, seg.is_source));
+                // auto b_it = pointToSegment.find(pointToKey(seg.start, seg.pair_id, !seg.is_source));
+                // if(a_it != pointToSegment.end() && b_it != pointToSegment.end()){
                     int a = pointToSegment[pointToKey(seg.start, seg.pair_id, seg.is_source)];
                     int b = pointToSegment[pointToKey(seg.start, seg.pair_id, !seg.is_source)];
-                    if(a == 4 || b == 4){
-                        printf("a = %d b = %d\n", a, b);
-                        seg.print();
-                        cout << pointToKey(seg.start, seg.pair_id, seg.is_source) << endl;
-                        cout << pointToKey(seg.start, seg.pair_id, !seg.is_source) << endl;
-                    }
+                    // printf("---------------------------------------------------------\n");       
+                    // seg.print();
+                    // global_ctx.segments[a].print();           
+                    // global_ctx.segments[b].print();    
+                    // printf("---------------------------------------------------------\n");       
                     if(global_ctx.pip[a] == 0 && global_ctx.pip[b] == 1){
                         groupedSegments[seg.pair_id].push_back(seg);
-                        // test ++;
                     }
-                }
+                // }
             }
         }
 
@@ -359,15 +382,13 @@ int main(int argc, char** argv) {
         // }
 
         // printf("pip = %d\n", sum);
-
-        printf("num_segment = %d\n", test);
-
-        printf("%d\n", pointToSegment.size());
+*/
 
         unsigned int num_threads = global_ctx.num_threads;
         Point* vertices = global_ctx.h_vertices;
         pair<uint32_t, uint32_t>* pairs = global_ctx.h_candidate_pairs + global_ctx.index;
         IdealOffset* idealoffset = global_ctx.h_idealoffset;
+        uint8_t *pip = global_ctx.pip;
 
         ThreadPool pool(num_threads);
         
@@ -393,9 +414,10 @@ int main(int argc, char** argv) {
             task_id++;
             
             std::shared_ptr<LocalBuffer> localBuffer = localBuffers[thread_id];
+            const auto& group_status = groupedStatus[group.first];
             
-            pool.enqueue([&group, &completed_tasks, total_tasks, localBuffer, vertices, pairs, idealoffset]() {
-                std::vector<MyPolygon*> groupPolygons = processSegmentsGroup(group.second, vertices, pairs, idealoffset);
+            pool.enqueue([&group, &completed_tasks, total_tasks, localBuffer, vertices, pairs, idealoffset, &group_status]() {
+                std::vector<MyPolygon*> groupPolygons = processSegmentsGroup(group.second, vertices, pairs, idealoffset, group_status);
 
                 if (!groupPolygons.empty()) {
                     localBuffer->polygons.insert(
@@ -442,135 +464,9 @@ int main(int argc, char** argv) {
 		std::cout << "batch time: " << batch_duration.count() << " ms" << std::endl;
     }
 
-	auto gpu_end = std::chrono::high_resolution_clock::now();
-	auto gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(gpu_end - gpu_start);
-	std::cout << "total gpu time: " << gpu_duration.count() << " ms" << std::endl;
-
-    printf("-------------------------------------------------------\n");
-    for(int i = 0; i < global_ctx.num_vertices; i ++){
-        global_ctx.h_vertices[i].print();
-    }
-    printf("-------------------------------------------------------\n");
-
-
-
-
-	// unsigned int num_threads = global_ctx.num_threads;
-	// Point* vertices = global_ctx.h_vertices;
-    // pair<uint32_t, uint32_t>* pairs = global_ctx.h_candidate_pairs;
-    // IdealOffset* idealoffset = global_ctx.h_idealoffset;
-
-	// ThreadPool pool(num_threads);
-	
-    // // 使用原子计数器跟踪完成的任务数
-    // std::atomic<int> completed_tasks(0);
-    // const int total_tasks = groupedSegments.size();
-    
-    // // 使用共享结果容器和互斥锁
-    // std::vector<MyPolygon*> allPolygons;
-    // std::mutex resultsMutex;
-
-    // // 为了减少锁竞争，使用本地结果缓冲区
-    // struct LocalBuffer {
-    //     std::vector<MyPolygon*> polygons;
-    //     // 预分配足够大的空间
-    //     LocalBuffer() { polygons.reserve(5000); }
-    // };
-
-    // // 为每个线程创建本地缓冲区
-    // std::vector<std::shared_ptr<LocalBuffer>> localBuffers(num_threads);
-    // for (unsigned int i = 0; i < num_threads; ++i) {
-    //     localBuffers[i] = std::make_shared<LocalBuffer>();
-    // }
-
-    // // 为每组Segments提交任务
-    // int task_id = 0;
-    // for (const auto& group : groupedSegments) {
-    //     // 分配一个线程ID给这个任务，用于本地缓冲
-    //     const int thread_id = task_id % num_threads;
-    //     task_id++;
-        
-    //     // 捕获本地缓冲区的共享指针
-    //     std::shared_ptr<LocalBuffer> localBuffer = localBuffers[thread_id];
-        
-    //     pool.enqueue([&group, &completed_tasks, total_tasks, localBuffer, vertices, pairs, idealoffset]() {
-    //         // 处理这组segments并将结果添加到本地缓冲区
-
-    //         std::vector<MyPolygon*> groupPolygons = processSegmentsGroup(group.second, vertices, pairs, idealoffset);
-
-    //         // 将此组的结果添加到本地缓冲区
-    //         if (!groupPolygons.empty()) {
-    //             localBuffer->polygons.insert(
-    //                 localBuffer->polygons.end(), 
-    //                 std::make_move_iterator(groupPolygons.begin()),
-    //                 std::make_move_iterator(groupPolygons.end())
-    //             );
-    //         }
-            
-    //         // 更新并显示进度
-    //         int completed = ++completed_tasks;
-    //         if (completed % 10 == 0 || completed == total_tasks) {
-    //             std::cout << "处理进度: " << completed << "/" << total_tasks 
-    //                       << " (" << (completed * 100 / total_tasks) << "%)\r" << std::flush;
-    //         }
-    //     });
-    // }
-
-    // // 等待所有任务完成
-    // pool.waitAll();
-    // std::cout << std::endl << "所有任务完成，合并结果..." << std::endl;
-
-    //     // 合并所有本地缓冲区的结果
-    // size_t totalPolygons = 0;
-    // for (const auto& buffer : localBuffers) {
-    //     totalPolygons += buffer->polygons.size();
-    // }
-    
-    // // 预分配足够的空间
-    // allPolygons.reserve(totalPolygons);
-    
-    // // 合并所有本地缓冲区
-    // for (const auto& buffer : localBuffers) {
-    //     allPolygons.insert(
-    //         allPolygons.end(),
-    //         std::make_move_iterator(buffer->polygons.begin()),
-    //         std::make_move_iterator(buffer->polygons.end())
-    //     );
-    // }
-    
-    // std::cout << "处理完成！共生成 " << allPolygons.size() << " 个多边形" << std::endl;
-    
-    
-    // std::vector<std::future<std::vector<MyPolygon*>>> results;
-
-    // printf("groupedSegments = %d\n", groupedSegments.size());
-    // for (const auto& group : groupedSegments) {
-    //     // printf("%d\n", group.second.size());
-    //     results.push_back(
-    //         pool.enqueue([&group, vertices, pairs, idealoffset]() {
-    //             return processSegmentsGroup(group.second, vertices, pairs, idealoffset);
-    //         })
-    //     );
-    // }
-
-	// // 收集所有结果
-    // std::vector<MyPolygon*> polygons;
-    
-    // int result_id = 0;
-    // for (auto& result : results) {
-    //     std::vector<MyPolygon*> groupPolygons = result.get();
-    //     polygons.insert(polygons.end(), groupPolygons.begin(), groupPolygons.end());
-    // }
-
-	// printf("intersection polygon size = %d\n", polygons.size());
-
-	// for(auto poly : polygons){
-	// 	poly->MyPolygon::print();
-	// }
-
-
-
-
+	auto total_end = std::chrono::high_resolution_clock::now();
+	auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start);
+	std::cout << "total query time: " << total_duration.count() << " ms" << std::endl;
 
     return 0;
 }

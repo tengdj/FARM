@@ -34,7 +34,7 @@ __global__ void comparePolygons(pair<uint32_t,uint32_t>* pairs, IdealOffset *ide
             Point p1 = (d_vertices + source.vertices_start)[i];
             Point p2 = (d_vertices + target.vertices_start)[i];
                 
-            if (!pointsEqual(p1, p2)) {
+            if (p1 != p2) {
                 flags[pair_id] = 1;
                 break;
             }

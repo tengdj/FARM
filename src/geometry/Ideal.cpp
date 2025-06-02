@@ -593,7 +593,7 @@ PartitionStatus Ideal::segment_contain(Point &p){
 				if (dy != 0.0)
 				{
 					const double int_x = dx * py_diff / dy + v1.x;
-					if(fabs(p.x - int_x) < 1e-9) {
+					if(fabs(p.x - int_x) < eps) {
 						return BORDER;
 					}
 					if (p.x < int_x && int_x <= bx.high[0])
@@ -728,27 +728,8 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
 
 	std::sort(inters.begin(), inters.end(),
 		[](const Intersection &a, const Intersection &b){
-			if (a.pair_id != b.pair_id){
-				return a.pair_id < b.pair_id;
-			}else if (a.edge_source_id != b.edge_source_id){
-				return a.edge_source_id < b.edge_source_id;
-			}else if (a.t != b.t){
-				return a.t < b.t;
-			}else if (a.edge_target_id != b.edge_target_id){
-				return a.edge_target_id < b.edge_target_id;
-			}else{
-				return a.u < b.u;
-			}
+			return a.p < b.p;
 		});
-
-	// auto new_end = std::unique(inters.begin(), inters.end(),
-    //     [](const Intersection& a, const Intersection& b) {
-    //         return a.pair_id == b.pair_id && 
-    //                a.edge_source_id == b.edge_source_id && 
-    //                a.edge_target_id == b.edge_target_id && 
-    //                a.t == b.t && 
-    //                a.u == b.u;
-    //     });
 
 	auto new_end = std::unique(inters.begin(), inters.end(),
         [](const Intersection& a, const Intersection& b) {
@@ -757,45 +738,19 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
 
 	inters.erase(new_end, inters.end());
 
-	// std::map<Point, int> countMap;
-	// for(const auto& inter : inters){
-	// 	countMap[inter.p] ++;
-	// }
-
-	// new_end = remove_if(inters.begin(), inters.end(),
-    //     [&countMap](const Intersection& inter) {
-    //         return countMap[inter.p] == 2;
-    //     });
-
-	// inters.erase(new_end, inters.end());
-
-	// std::sort(inters.begin(), inters.end(),
-    //     [](const Intersection& a, const Intersection& b) {
-    //         return a.p < b.p;
-    //     });
-
-	// new_end = std::unique(inters.begin(), inters.end(),
-    //     [](const Intersection& a, const Intersection& b) {
-    //         return a.p == b.p;
-    //     });
-
-	// inters.erase(new_end, inters.end());
-
 	int num_inters = inters.size();
 
-	printf("------------------------------------------------------------------------------\n");
-
-	for(int i = 0; i < num_inters; i ++){
-		inters[i].print();
-	}
-
-	printf("------------------------------------------------------------------------------\n");
-
-
-	return;
-
 	vector<Segment> candidates;
-	vector<PartitionStatus> status;
+	vector<PartitionStatus> temp;
+
+	std::sort(inters.begin(), inters.end(),
+		[](const Intersection &a, const Intersection &b){
+        	if (a.edge_source_id != b.edge_source_id){
+				return a.edge_source_id < b.edge_source_id;
+			}else if(a.t != b.t){
+        		return a.t < b.t;
+			}
+		});
 
 	for(int i = 0; i < num_inters; i ++){
 		// Intersection a = inters[i];
@@ -805,8 +760,8 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
 		// int b_edge_id = b.edge_source_id;
 		
 		// // 调整边界参数
-		// if(fabs(a.t - 1) < 1e-9) a_edge_id++;
-		// if(fabs(b.t) < 1e-9) b_edge_id--;
+		// if(fabs(a.t - 1) < eps) a_edge_id++;
+		// if(fabs(b.t) < eps) b_edge_id--;
 		
 		// // 判断是否需要特殊处理edge_id
 		// bool use_edge_range = (i + 1 >= num_inters) ? 
@@ -830,12 +785,17 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
 			int b_edge_id = b.edge_source_id;
 			double a_param = a.t;
 			double b_param = b.t;
-			if(fabs(a_param - 1) < 1e-9) a_edge_id ++;
-			if(fabs(b_param) < 1e-9) b_edge_id --;
-
-			candidates.push_back({true, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
-			auto p = boundary->p[a_edge_id + 1];
-			status.push_back(target->segment_contain(p));
+			if(fabs(a_param - 1.0) < eps) a_edge_id ++;
+			if(fabs(b_param) < eps) b_edge_id --;
+			if(a_edge_id == b_edge_id){
+				candidates.push_back({true, a.p, b.p, -1, -1, 0});
+				auto p = (a.p + b.p) * 0.5;
+				temp.push_back(target->segment_contain(p));
+			}else{
+				candidates.push_back({true, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
+				auto p = boundary->p[a_edge_id + 1];
+				temp.push_back(target->segment_contain(p));				
+			}
 		}else{
 			Intersection a = inters[i];
 			Intersection b = inters[i + 1];
@@ -844,33 +804,32 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
 			double a_param = a.t;
 			double b_param = b.t;
 			if(a_edge_id != b_edge_id){
-				if(fabs(a_param - 1) < 1e-9) a_edge_id ++;
-				if(fabs(b_param) < 1e-9) b_edge_id --;
-				if(a_edge_id + 1 <= b_edge_id){
-					auto p = boundary->p[a_edge_id + 1];
-					candidates.push_back({true, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
-					status.push_back(target->segment_contain(p));
-				}else{
-					auto p = (a.p + b.p) * 0.5;
+				if(fabs(a_param - 1.0) < eps) a_edge_id ++;
+				if(fabs(b_param) < eps) b_edge_id --;
+				if(a_edge_id == b_edge_id){
 					candidates.push_back({true, a.p, b.p, -1, -1, 0});
-					status.push_back(target->segment_contain(p));
+					auto p = (a.p + b.p) * 0.5;
+					temp.push_back(target->segment_contain(p));
+				}else{
+					candidates.push_back({true, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
+					auto p = boundary->p[a_edge_id + 1];
+					temp.push_back(target->segment_contain(p));
 				}
 			}else{	
-					auto p = (a.p + b.p) * 0.5;
 					candidates.push_back({true, a.p, b.p, -1, -1, 0});
-					status.push_back(target->segment_contain(p));
+					auto p = (a.p + b.p) * 0.5;
+					temp.push_back(target->segment_contain(p));
 			}	
 		}
 	}
 
 	std::sort(inters.begin(), inters.end(),
 		[](const Intersection &a, const Intersection &b){
-			if (a.pair_id != b.pair_id) {
-            	return a.pair_id < b.pair_id; 
-			}else if (a.edge_target_id != b.edge_target_id){
+			if (a.edge_target_id != b.edge_target_id){
 				return a.edge_target_id < b.edge_target_id;
-			}
-			return a.u < b.u; 
+			}else if(a.u != b.u){
+				return a.u < b.u;
+			} 
 		});
 
 	for(int i = 0; i < num_inters; i ++){
@@ -881,8 +840,8 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
 		// int b_edge_id = b.edge_target_id;
 		
 		// // 调整边界参数
-		// if(fabs(a.u - 1) < 1e-9) a_edge_id++;
-		// if(fabs(b.u) < 1e-9) b_edge_id--;
+		// if(fabs(a.u - 1) < eps) a_edge_id++;
+		// if(fabs(b.u) < eps) b_edge_id--;
 		
 		// // 判断是否需要特殊处理edge_id
 		// bool use_edge_range = (i + 1 >= num_inters) ? 
@@ -905,11 +864,17 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
 			int b_edge_id = b.edge_target_id;
 			double a_param = a.u;
 			double b_param = b.u;
-			if(fabs(a_param - 1) < 1e-9) a_edge_id ++;
-			if(fabs(b_param) < 1e-9) b_edge_id --;
-			auto p = target->boundary->p[a_edge_id + 1];
-			candidates.push_back({false, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
-			status.push_back(segment_contain(p));
+			if(fabs(a_param - 1.0) < eps) a_edge_id ++;
+			if(fabs(b_param) < eps) b_edge_id --;
+			if(a_edge_id == b_edge_id){
+				candidates.push_back({false, a.p, b.p, -1, -1, 0});
+				auto p = (a.p + b.p) * 0.5;
+				temp.push_back(segment_contain(p));
+			}else{
+				candidates.push_back({false, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
+				auto p = target->boundary->p[a_edge_id + 1];
+				temp.push_back(segment_contain(p));				
+			}
 		}else{
 			Intersection a = inters[i];
 			Intersection b = inters[i + 1];
@@ -918,57 +883,45 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
 			double a_param = a.u;
 			double b_param = b.u;
 			if(a_edge_id != b_edge_id){
-				if(fabs(a_param - 1) < 1e-9) a_edge_id ++;
-				if(fabs(b_param) < 1e-9) b_edge_id --;
-				if(a_edge_id + 1 <= b_edge_id){
-					auto p = target->boundary->p[a_edge_id + 1];
-					candidates.push_back({false, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
-					status.push_back(segment_contain(p));
-				}else{
-					auto p = (a.p + b.p) * 0.5;
+				if(fabs(a_param - 1.0) < eps) a_edge_id ++;
+				if(fabs(b_param) < eps) b_edge_id --;
+				if(a_edge_id == b_edge_id){
 					candidates.push_back({false, a.p, b.p, -1, -1, 0});
-					status.push_back(segment_contain(p));
+					auto p = (a.p + b.p) * 0.5;
+					temp.push_back(segment_contain(p));
+				}else{
+					candidates.push_back({false, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
+					auto p = target->boundary->p[a_edge_id + 1];
+					temp.push_back(segment_contain(p));
 				}
-			}else{
-				auto p = (a.p + b.p) * 0.5;	
-				candidates.push_back({false, a.p, b.p, -1, -1, 0});
-				status.push_back(segment_contain(p));	
+			}else{	
+					candidates.push_back({false, a.p, b.p, -1, -1, 0});
+					auto p = (a.p + b.p) * 0.5;
+					temp.push_back(segment_contain(p));
 			}	
 		}
 	}
 
-	std::unordered_map<string, int> pointToSegment;
-	auto pointCategoryToKey = [](const Point& p, bool is_source) {
-		return std::to_string(p.x) + ":" + std::to_string(p.y) + ":" + std::to_string(is_source);
-	};
+	vector<Segment> segments;
+	vector<bool> status;
 
-	for (int i = 0; i < candidates.size(); i++){
-		if(status[i] != BORDER){
-			auto &seg = candidates[i];
-			pointToSegment[pointCategoryToKey(seg.start, seg.is_source)] = i;
-			pointToSegment[pointCategoryToKey(seg.end, seg.is_source)] = i;
+  	for (int i = 0; i < candidates.size(); i ++){
+		if(temp[i] == IN){
+			auto& seg = candidates[i];
+			segments.push_back(seg);
+			status.push_back(true);
 		}
 	}
 
-	vector<Segment> segments;
-
   	for (int i = 0; i < candidates.size(); i ++){
-		if(status[i] == IN){
+		if(temp[i] == BORDER){
 			auto& seg = candidates[i];
 			segments.push_back(seg);
-		}else if(status[i] == BORDER){
-			auto& seg = candidates[i];
-			int a = pointToSegment[pointCategoryToKey(seg.start, seg.is_source)];
-			int b = pointToSegment[pointCategoryToKey(seg.start, !seg.is_source)];
-			if(status[a] == OUT && status[b] == IN){
-				segments.push_back(seg);
-			}
+			status.push_back(false);
 		}
 	}
 
 	auto num_segments = segments.size();
-
-	ctx->num_segments += num_segments;
 
 	std::unordered_map<std::string, std::vector<size_t>> adjacencyList;
 	std::vector<bool> used(num_segments, false);
@@ -982,7 +935,7 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
     }
 
  	for (size_t startIdx = 0; startIdx < segments.size(); ++startIdx) {
-        if (used[startIdx]) continue;
+        if (used[startIdx] || !status[startIdx]) continue;
         
         vector<Point> currentVertices;
         

@@ -190,31 +190,23 @@ inline bool segment_intersect_batch(Point *p1, Point *p2, int s1, int s2){
 
 inline void segment_intersect_batch(Point *p1, Point *p2, int s1, int s2, int e1, int e2, std::vector<Intersection>& inters){
 	for(int i = s1; i < e1; i ++){
-		Intersection inter;
-		bool colinear = false, isIntersection = false;
-		for(int j = s2; j < e2; j ++){
-			if(p1[i] == p2[j] && p1[i + 1] == p2[j + 1] || p1[i] == p2[j + 1] && p1[i + 1]== p2[j]) {
-				colinear = true;
-				continue;
-			}
-			
+		for(int j = s2; j < e2; j ++){	
+
 			Point d1 = p1[i + 1] - p1[i];
 			Point d2 = p2[j + 1] - p2[j];
 			Point r = p2[j] - p1[i];
 
 			double denom = d1.cross(d2);
-			if (std::abs(denom) < 1e-9) continue;
 
 			double t = r.cross(d2) / denom;
 			double u = r.cross(d1) / denom;
 
 			if (t > -1e-9 && t < 1 + 1e-9 && u > -1e-9 && u < 1 + 1e-9) {
-				isIntersection = true;		
 				Point intersect_p = p1[i] + d1 * t;	
-				inter = {intersect_p, 0, i, j, t, u};
+				Intersection inter = {intersect_p, 0, i, j, t, u};
+				inters.push_back(inter);
 			}
 		}
-		if(!colinear && isIntersection) inters.push_back(inter);
 	}
 	return;
 }
