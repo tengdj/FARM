@@ -902,6 +902,8 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
 		}
 	}
 
+	// return;
+
 	vector<Segment> segments;
 	vector<bool> status;
 

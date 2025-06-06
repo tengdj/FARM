@@ -62,8 +62,11 @@ void indexBuild(query_context *gctx){
     double t_load = sw.ms();
     std::cout << "RT, load " << t_load << " ms" << std::endl;
 
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_candidate_pairs, gctx->target_num * boxes.size() * gctx->load_factor * sizeof(pair<uint32_t, uint32_t>)));
-    results->Init(std::max(1ul, (size_t) (gctx->target_num * boxes.size() * gctx->load_factor)));
+    unsigned long long cnt = gctx->load_factor * gctx->target_num * boxes.size();
+    std::cout << "cnt: " << cnt << std::endl;
+
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_candidate_pairs, cnt * sizeof(pair<uint32_t, uint32_t>)));
+    results->Init(std::max(1ul, (size_t) cnt));
 }
 
 void indexQuery(query_context *gctx){

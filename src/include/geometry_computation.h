@@ -198,6 +198,8 @@ inline void segment_intersect_batch(Point *p1, Point *p2, int s1, int s2, int e1
 
 			double denom = d1.cross(d2);
 
+			if (std::abs(denom) < 1e-9) continue;
+
 			double t = r.cross(d2) / denom;
 			double u = r.cross(d1) / denom;
 

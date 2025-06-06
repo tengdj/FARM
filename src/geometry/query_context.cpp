@@ -122,6 +122,8 @@ void query_context::merge_global(){
 	global_ctx->edge_checked += edge_checked;
 	global_ctx->intersection_checked += intersection_checked;
 
+	// global_ctx->test_duration += test_duration;
+
 	for(auto &it :vertex_number){
 		const double lt = latency.at(it.first);
 		if(global_ctx->vertex_number.find(it.first)!=global_ctx->vertex_number.end()){

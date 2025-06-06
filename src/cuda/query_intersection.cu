@@ -110,7 +110,7 @@ __global__ void kernel_unroll_contain_polygon(PixPair *pixpairs, pair<uint32_t, 
 	uint s_vertices_start = source.vertices_start;
 	uint t_vertices_start = target.vertices_start;
 
-	const int max_size = 16;
+	const int max_size = 4;
 
 	for (int i = 0; i < s_num_sequence; ++i)
 	{
@@ -118,6 +118,7 @@ __global__ void kernel_unroll_contain_polygon(PixPair *pixpairs, pair<uint32_t, 
 		for (int j = 0; j < t_num_sequence; ++j)
 		{
 	 		EdgeSeq r2 = (edge_sequences + t_edge_sequences_start)[(es_offset + t_offset_start)[p2] + j];
+			// printf("r.length = %d, r2.length = %d\n", r.length, r2.length);
 			for (uint s = 0; s < r.length; s += max_size)
 			{
 				uint end_s = min(s + max_size, r.length);
@@ -249,17 +250,25 @@ void cuda_contain_polygon(query_context *gctx)
 	int threadsPerBlock = 256;
 	int blocksPerGrid = batch_size; // 每个块处理一个多边形对
 
+	auto comparePolygons_start = std::chrono::high_resolution_clock::now();
 	comparePolygons<<<blocksPerGrid, threadsPerBlock>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_vertices, batch_size, gctx->d_flags);
 	cudaDeviceSynchronize();
     check_execution("comparePolygons");
+	auto comparePolygons_end = std::chrono::high_resolution_clock::now();
+	auto comparePolygons_duration = std::chrono::duration_cast<std::chrono::milliseconds>(comparePolygons_end - comparePolygons_start);
+	std::cout << "comparePolygons time: " << comparePolygons_duration.count() << " ms" << std::endl;
 
 	/*1. Raster Model Filtering*/
     const int block_size = BLOCK_SIZE;
     int grid_size = (batch_size + block_size - 1) / block_size;
 
+	auto filter_start = std::chrono::high_resolution_clock::now();
     kernel_filter_contain_polygon<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, batch_size, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->d_flags);
     cudaDeviceSynchronize();
     check_execution("kernel_filter_contain_polygon");
+	auto filter_end = std::chrono::high_resolution_clock::now();
+	auto filter_duration = std::chrono::duration_cast<std::chrono::milliseconds>(filter_end - filter_start);
+	std::cout << "filter time: " << filter_duration.count() << " ms" << std::endl;
 
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
     printf("h_buffer_size = %u\n", h_bufferinput_size);
@@ -270,23 +279,30 @@ void cuda_contain_polygon(query_context *gctx)
 
     grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
+	auto unroll_start = std::chrono::high_resolution_clock::now();
     kernel_unroll_contain_polygon<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_status, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
     cudaDeviceSynchronize();
     check_execution("kernel_unroll_contain_polygon");
+	auto unroll_end = std::chrono::high_resolution_clock::now();
+	auto unroll_duration = std::chrono::duration_cast<std::chrono::milliseconds>(unroll_end - unroll_start);
+	std::cout << "unroll time: " << unroll_duration.count() << " ms" << std::endl;
 
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
     printf("h_buffer_size = %u\n", h_bufferoutput_size);
 
   	CUDA_SWAP_BUFFER();
-    
   
     /*3. Refinement step*/
 
     grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
+	auto refine_start = std::chrono::high_resolution_clock::now();
     kernel_refinement_contain_polygon<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_vertices, gctx->d_bufferinput_size, (Intersection *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
     cudaDeviceSynchronize();
     check_execution("kernel_refinement_contain_polygon");
+	auto refine_end = std::chrono::high_resolution_clock::now();
+	auto refine_duration = std::chrono::duration_cast<std::chrono::milliseconds>(refine_end - refine_start);
+	std::cout << "refine time: " << refine_duration.count() << " ms" << std::endl;
 
 	CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
     printf("h_buffer_size = %u\n", h_bufferoutput_size);
@@ -294,6 +310,8 @@ void cuda_contain_polygon(query_context *gctx)
 	CUDA_SWAP_BUFFER();
 
 	if(h_bufferinput_size == 0) return;
+
+	auto segment_start = std::chrono::high_resolution_clock::now();
 
 	// check source polygon edges 
     thrust::device_ptr<Intersection> begin = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput);
@@ -390,6 +408,10 @@ void cuda_contain_polygon(query_context *gctx)
 	cudaDeviceSynchronize();
     check_execution("kernel_refinement_segment_contain");	
 
+	auto segment_end = std::chrono::high_resolution_clock::now();
+	auto segment_duration = std::chrono::duration_cast<std::chrono::milliseconds>(segment_end - segment_start);
+	std::cout << "segment time: " << segment_duration.count() << " ms" << std::endl;
+
 	// printf("---------------------------------------------------------------------------------------------------\n");
 	
     // // PrintBuffer((Segment *)gctx->d_BufferInput, num_segments);
@@ -409,15 +431,20 @@ void cuda_contain_polygon(query_context *gctx)
 
 	// printf("---------------------------------------------------------------------------------------------------\n");
 
+	auto transfer_start = std::chrono::high_resolution_clock::now();
 	
-	gctx->segments = new Segment[num_segments];
+	CUDA_SAFE_CALL(cudaHostAlloc((void**)&gctx->segments, num_segments * sizeof(Segment), cudaHostAllocDefault));
 	gctx->num_segments = num_segments;
 	CUDA_SAFE_CALL(cudaMemcpy(gctx->segments, (Segment *)gctx->d_BufferInput, num_segments * sizeof(Segment), cudaMemcpyDeviceToHost));
     
-    gctx->pip = new uint8_t[num_segments];
+	CUDA_SAFE_CALL(cudaHostAlloc((void**)&gctx->pip, num_segments * sizeof(uint8_t), cudaHostAllocDefault));
 	CUDA_SAFE_CALL(cudaMemcpy(gctx->pip, pip, num_segments * sizeof(uint8_t), cudaMemcpyDeviceToHost));
 
 	CUDA_SAFE_CALL(cudaFree(d_inters_per_pair));
 	CUDA_SAFE_CALL(cudaFree(pip));
+
+	auto transfer_end = std::chrono::high_resolution_clock::now();
+	auto transfer_duration = std::chrono::duration_cast<std::chrono::milliseconds>(transfer_end - transfer_start);
+	std::cout << "transfer time: " << transfer_duration.count() << " ms" << std::endl;
     return;
 }

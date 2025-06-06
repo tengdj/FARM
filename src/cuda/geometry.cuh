@@ -471,23 +471,25 @@ __device__ inline bool gpu_segment_intersect_batch(Point *p1, Point *p2, int s1,
 __device__ inline void gpu_segment_intersect_batch(Point *p, int s1, int s2, int e1, int e2, int pair_id, Intersection* intersections, uint* num)
 {
 	for (int i = s1; i < e1; i++) {
+        Point d1 = p[i + 1] - p[i];
+        Point p_i = p[i];
+
     	for (int j = s2; j < e2; j++) {
-			
-			Point d1 = p[i + 1] - p[i];
 			Point d2 = p[j + 1] - p[j];
-			Point r = p[j] - p[i];
+			Point r = p[j] - p_i;
 
 			double denom = d1.cross(d2);
 
-			if (std::abs(denom) < 1e-9) continue;
+			if (abs(denom) < 1e-9) continue;
 			
-			double t = r.cross(d2) / denom;
-			double u = r.cross(d1) / denom;
+			double inv_denom = 1.0 / denom;
+			double t = r.cross(d2) * inv_denom;
+			double u = r.cross(d1) * inv_denom;
 			
-			if (t > -1e-9 && t < 1 + 1e-9 && u > -1e-9 && u < 1 + 1e-9) {	
-				Point intersect_p = p[i] + d1 * t;
-				uint idx = atomicAdd(num, 1U);
-				intersections[idx] = {intersect_p, pair_id, i, j, t, u};
+			if (t >= -1e-9 && t <= 1 + 1e-9 && u >= -1e-9 && u <= 1 + 1e-9) {
+                Point intersect_p = p_i + d1 * t;
+                uint idx = atomicAdd(num, 1U);
+                intersections[idx] = {intersect_p, pair_id, i, j, t, u};
 			}
         }
     }

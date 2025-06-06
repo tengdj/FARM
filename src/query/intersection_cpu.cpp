@@ -44,7 +44,6 @@ int main(int argc, char** argv) {
 	query_context global_ctx;
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::intersection;
-	// global_ctx.num_threads = 1;
 
     if(global_ctx.use_ideal){
         global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
@@ -55,7 +54,6 @@ int main(int argc, char** argv) {
 		global_ctx.target_polygons = load_polygons_from_path(global_ctx.target_path.c_str(),global_ctx);
 		global_ctx.target_num = global_ctx.target_polygons.size();
     }
-	// global_ctx.num_threads = 128;
 
     if(!global_ctx.batch_size) global_ctx.batch_size = global_ctx.target_num;
 
@@ -78,7 +76,6 @@ int main(int argc, char** argv) {
 	auto preprocess_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start);
 	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
 
-	// global_ctx.num_threads = 128;
 	timeval start = get_cur_time();
 	pthread_t threads[global_ctx.num_threads];
 	query_context ctx[global_ctx.num_threads];
@@ -99,6 +96,7 @@ int main(int argc, char** argv) {
     // }
 
 	printf("FOUND: %d\n", global_ctx.intersection_polygons.size());
+	// printf("intersec duration = %lf\n", global_ctx.test_duration);
 
 	cout << endl;
 	global_ctx.print_stats();
