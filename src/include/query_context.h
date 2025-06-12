@@ -139,6 +139,7 @@ public:
 	// result
 	double distance = 0;
 	bool contain = false;
+	double area = 0.0f;
 
 	// query statistic
 	size_t found = 0;

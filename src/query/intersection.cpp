@@ -91,6 +91,14 @@ std::vector<MyPolygon*> segmentsToPolygons(const std::vector<SegmentWithStatus>&
             // 确定segment的另一个端点
            
             Point nextPoint = currentPoint == seg.start ? seg.end : seg.start;
+
+            // 如果回到起点，我们找到了一个闭合的多边形
+            if (nextPoint == startPoint) {
+                currentVertices.push_back(nextPoint); // 添加最后一个点闭合多边形
+                foundCycle = true;
+                break;
+            }
+            
             
             // 寻找连接到nextPoint的未使用segment
             bool foundNext = false;
@@ -107,12 +115,12 @@ std::vector<MyPolygon*> segmentsToPolygons(const std::vector<SegmentWithStatus>&
                 }
             }
             
-            // 如果回到起点，我们找到了一个闭合的多边形
-            if (!foundNext && nextPoint == startPoint) {
-                currentVertices.push_back(nextPoint); // 添加最后一个点闭合多边形
-                foundCycle = true;
-                break;
-            }
+            // // 如果回到起点，我们找到了一个闭合的多边形
+            // if (!foundNext && nextPoint == startPoint) {
+            //     currentVertices.push_back(nextPoint); // 添加最后一个点闭合多边形
+            //     foundCycle = true;
+            //     break;
+            // }
             
             // 如果没有找到下一个segment，则路径不能闭合
             if (!foundNext) break;
@@ -159,8 +167,8 @@ int main(int argc, char** argv) {
     // global_ctx.source_ideals.resize(1000);
     // global_ctx.target_ideals.resize(1000);
 	global_ctx.target_num = global_ctx.target_ideals.size();
-    // global_ctx.batch_size = global_ctx.target_num;
-    
+    global_ctx.batch_size = global_ctx.target_num;
+        
 	indexBuild(&global_ctx);
 
 	auto rtree_query_start = std::chrono::high_resolution_clock::now();
@@ -308,9 +316,7 @@ int main(int argc, char** argv) {
         auto cpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(cpu_end - cpu_start);
         std::cout << "cpu time: " << cpu_duration.count() << " ms" << std::endl;
         
-        // for(auto p : allPolygons){
-        //     p->MyPolygon::print();
-        // }
+
         */
 
 		auto batch_end = std::chrono::high_resolution_clock::now();

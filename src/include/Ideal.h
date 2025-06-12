@@ -59,6 +59,7 @@ struct Segment{
 
 	void print(){
 		printf("POINT(%lf %lf) POINT(%lf %lf) %d %d %d\n", start.x, start.y, end.x, end.y, edge_start, edge_end, pair_id);
+		// printf("POINT(%lf %lf) %d\n", start.x, start.y, pair_id);
 	}
 };
 

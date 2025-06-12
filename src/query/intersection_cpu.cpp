@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
 		global_ctx.target_num = global_ctx.target_polygons.size();
     }
 
-    if(!global_ctx.batch_size) global_ctx.batch_size = global_ctx.target_num;
+    global_ctx.batch_size = global_ctx.target_num;
 
     indexBuild(&global_ctx);
 
@@ -91,9 +91,11 @@ int main(int argc, char** argv) {
 		pthread_join(threads[i], &status);
 	}
 
-    // for(auto p : global_ctx.intersection_polygons){
-    //     p->MyPolygon::print();
-    // }
+    for(auto p : global_ctx.intersection_polygons){
+        p->MyPolygon::print();
+    }
+
+	printf("AREA: %lf\n", global_ctx.area);
 
 	printf("FOUND: %d\n", global_ctx.intersection_polygons.size());
 	// printf("intersec duration = %lf\n", global_ctx.test_duration);

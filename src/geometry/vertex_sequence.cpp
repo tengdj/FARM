@@ -105,11 +105,18 @@ void VertexSequence::print(bool complete_ring){
 }
 
 double VertexSequence::area(){
-	double sum = 0;
-	for(int i=0;i<num_vertices;i++){
-		sum += (p[i].x-p[(i+1)%num_vertices].x)*(p[(i+1)%num_vertices].y+p[i].y);
+	double a = 0.0f;
+	double b = 0.0f;
+
+	puts("------------------------------------------------------------------------");
+	for(int i = 0; i < num_vertices - 1; i ++){
+		int j = i + 1;
+        a += p[i].x * p[j].y;
+        b += p[i].y * p[j].x;
+		printf("%lf %lf\n", a, b);
 	}
-	return sum/2;
+	puts("------------------------------------------------------------------------");
+	return abs(a - b) / 2.0;
 }
 
 bool VertexSequence::clockwise(){

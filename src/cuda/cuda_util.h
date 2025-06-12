@@ -11,6 +11,7 @@
 #include <cuda.h>
 #include "../include/util.h"
 #include "../include/Box.h"
+#include "../include/Ideal.h"
 
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/archive/binary_oarchive.hpp>
@@ -189,6 +190,17 @@ __device__ __forceinline__ int binary_search_count(const double *arr, uint32_t s
 	}
 
 	return count;
+}
+
+__device__ 
+inline int binary_search(const Segment* sorted_array, int left, int right, Point target) {
+    while (left < right) {
+        int mid = (left + right) >> 1;
+        if(target <= sorted_array[mid].start) right = mid;
+        else left = mid + 1;
+    }
+	if(sorted_array[left].start == target) return left;
+    else return -1; // Not Found
 }
 
 __device__

@@ -6,6 +6,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/remove.h>
+#include <thrust/adjacent_difference.h>
 
 struct Task
 {
@@ -240,6 +241,127 @@ __global__ void make_segments(Intersection *intersections, uint *num_intersectio
 	}
 }
 
+struct ExtractPairId {
+    __host__ __device__
+    int operator()(const Segment& seg) const {
+        return seg.pair_id;
+    }
+};
+
+// void find_segs_per_pair(Segment* segments, uint* size, uint* segs_per_pair){
+//     const int x = blockIdx.x * blockDim.x + threadIdx.x;
+//     if (x < *size)
+//     {
+//         int pair_id = segments[x].pair_id;
+//         atomicAdd(segs_per_pair + pair_id, 1);
+//     }
+// }
+
+__global__ void rebuild_polygons(Segment* segments, uint8_t* status, size_t size, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, Point* vertices, int* offsets, double* area){
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	if(x < size){
+		int start_idx = offsets[x];
+		int end_idx = offsets[x + 1];
+		// printf("x = %d %d %d\n", x, start_idx, end_idx);
+		for(int i = start_idx; i < end_idx; i ++){
+			if(status[i] == 0 || status[i] == 2) continue;
+			Segment seg = segments[i];
+			// 当前segment和端点
+			size_t currentSegIdx = i;
+			Point currentPoint = seg.start;
+			Point lastPoint = currentPoint;
+			Point startPoint = currentPoint;
+			printf("START POINT (%lf %lf) %d\n", currentPoint.x, currentPoint.y, seg.pair_id);
+
+			double a = 0.0f;
+			double b = 0.0f;
+
+			bool foundCycle = false;
+
+			while(status[currentSegIdx]){
+				status[currentSegIdx] = 0;
+				const Segment& seg = segments[currentSegIdx];
+				if(seg.edge_start != -1){
+                	if(seg.edge_start <= seg.edge_end){
+						for(int verId = seg.edge_start; verId <= seg.edge_end; verId ++){
+							a += lastPoint.x * vertices[verId].y;
+							b += lastPoint.y * vertices[verId].x;
+							lastPoint = vertices[verId];
+							printf("POINT (%lf %lf) %lf %lf %d\n", vertices[verId].x, vertices[verId].y, a, b, seg.pair_id);
+						}
+                	}else{
+						pair<uint32_t, uint32_t> pair = pairs[seg.pair_id];
+						uint32_t offset_idx = seg.is_source ? pair.first : pair.second;
+						for(int verId = seg.edge_start; verId < idealoffset[offset_idx + 1].vertices_start - 1; verId ++){
+							a += lastPoint.x * vertices[verId].y;
+							b += lastPoint.y * vertices[verId].x;
+							lastPoint = vertices[verId];
+							printf("POINT (%lf %lf) %lf %lf %d\n", vertices[verId].x, vertices[verId].y, a, b, seg.pair_id);
+						}
+						for(int verId = idealoffset[offset_idx].vertices_start; verId <= seg.edge_end; verId ++){
+							
+							a += lastPoint.x * vertices[verId].y;
+							b += lastPoint.y * vertices[verId].x;
+							lastPoint = vertices[verId];
+							printf("POINT (%lf %lf) %lf %lf %d\n", vertices[verId].x, vertices[verId].y, a, b, seg.pair_id);
+						}
+					}
+				}
+
+				// 确定segment的另一个端点
+            	Point nextPoint = currentPoint == seg.start ? seg.end : seg.start;
+
+				// 如果回到起点，我们找到了一个闭合的多边形
+				if (nextPoint == startPoint) {
+					printf("lastPoint: POINT(%lf %lf) startPoint: POINT(%lf %lf)\n", lastPoint.x, lastPoint.y, startPoint.x, startPoint.y);
+					a += lastPoint.x * startPoint.y;
+					b += lastPoint.y * startPoint.x;
+					printf("POINT (%lf %lf) %lf %lf %d\n", startPoint.x, startPoint.y, a, b, seg.pair_id);
+					foundCycle = true;
+					break;
+				}
+
+				// 寻找连接到nextPoint的未使用segment
+				bool foundNext = false;
+
+				int idx = binary_search(segments, start_idx, end_idx - 1, nextPoint);
+				if(idx != -1){
+					uint8_t st0 = status[idx], st1 = status[idx + 1];
+					if(st0 == 1 || st1 == 1){
+						currentSegIdx = (st0 == 1) ? idx : idx + 1;
+						currentPoint = nextPoint;
+						foundNext = true;
+					}else if(st0 == 2 || st1 == 2){
+						currentSegIdx = (st0 == 2) ? idx : idx + 1;
+						currentPoint = nextPoint;
+						foundNext = true;
+					}
+				}
+
+				// // 如果回到起点，我们找到了一个闭合的多边形
+				// if (!foundNext && nextPoint == startPoint) {
+				// 	lastPoint = currentPoint;
+				// 	a += lastPoint.x * startPoint.y;
+				// 	b += lastPoint.y * startPoint.x;
+				// 	foundCycle = true;
+				// 	break;
+				// }
+				
+				if (!foundNext) break;
+
+				a += lastPoint.x * currentPoint.y;
+				b += lastPoint.y * currentPoint.x;
+				lastPoint = currentPoint;
+				printf("POINT (%lf %lf) %lf %lf %d\n", currentPoint.x, currentPoint.y, a, b, seg.pair_id);
+			}
+			if (foundCycle) {
+				atomicAdd(area, 0.5 * fabs(a - b));
+				printf("area: %lf\n", 0.5 * fabs(a - b));
+			} 			
+		}		
+	}
+}
+
 void cuda_contain_polygon(query_context *gctx)
 {
 	size_t batch_size = gctx->index_end - gctx->index;
@@ -349,8 +471,8 @@ void cuda_contain_polygon(query_context *gctx)
 	grid_size = (num_intersections + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
     uint *d_inters_per_pair = nullptr;
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_inters_per_pair, num_intersections * sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMemset(d_inters_per_pair, 0, num_intersections * sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_inters_per_pair, batch_size * sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(d_inters_per_pair, 0, batch_size * sizeof(uint)));
 
 	find_inters_per_pair<<<grid_size, block_size>>>((Intersection *)gctx->d_BufferInput, gctx->d_bufferinput_size, d_inters_per_pair);
 	cudaDeviceSynchronize();
@@ -380,6 +502,62 @@ void cuda_contain_polygon(query_context *gctx)
 	printf("num_segqments = %d\n", num_segments);
 
 	if(num_segments == 0) return;
+
+	thrust::device_ptr<Segment> seg_begin = thrust::device_pointer_cast((Segment*)gctx->d_BufferInput);
+    thrust::device_ptr<Segment> seg_end = thrust::device_pointer_cast((Segment *)gctx->d_BufferInput + num_segments);
+    thrust::sort(thrust::device, seg_begin, seg_end, 
+		[] __device__(const Segment &a, const Segment &b) {
+			if(a.pair_id != b.pair_id){
+				return a.pair_id < b.pair_id;
+			}else if(fabs(a.start.x - b.start.x) >= 1e-9){
+				return a.start.x < b.start.x;
+			}else if(fabs(a.start.y - b.start.y) >= 1e-9){
+				return a.start.y < b.start.y;
+			}else if(fabs(a.end.x - b.end.x) >= 1e-9){
+				return a.end.x < b.end.x;
+			}else if(fabs(a.end.y - b.end.y) >= 1e-9){
+				return a.end.y < b.end.y;
+			}else{
+				return a.is_source < b.is_source;
+			}
+		});
+
+	// PrintBuffer((Segment *)gctx->d_BufferInput, num_segments);
+
+	// 生成索引 [0, 1, 2, ..., n-1]
+    thrust::device_vector<int> d_indices(num_segments);
+    thrust::sequence(d_indices.begin(), d_indices.end());
+
+	// 提取pair_id
+	thrust::device_vector<int> pair_ids(num_segments);
+	thrust::transform(seg_begin, seg_end, pair_ids.begin(), ExtractPairId());
+
+	// 创建布尔掩码：每个不同值的起点为 true
+    thrust::device_vector<int> d_flags(num_segments);
+    thrust::adjacent_difference(thrust::device, pair_ids.begin(), pair_ids.end(), d_flags.begin());
+
+    // 把非零变成1（表示新组开始）
+    thrust::transform(d_flags.begin(), d_flags.end(), d_flags.begin(),
+        [] __device__(int x){ return x != 0 ? 1 : 0; });
+
+	// 修复第一个元素（应始终为true）
+    d_flags[0] = 1;	
+
+	// 拷贝新组的索引和对应值
+    int num_groups = thrust::count(d_flags.begin(), d_flags.end(), 1);
+
+	thrust::device_vector<int> d_starts(num_groups + 1, num_segments);
+	
+    thrust::copy_if(thrust::device,
+					d_indices.begin(), d_indices.end(),
+                    d_flags.begin(), d_starts.begin(),
+                    thrust::identity<int>());
+
+	// thrust::host_vector<int> h_starts = d_starts;
+	// std::cout << "\nStart positions:\n";
+    // for (int i : h_starts) std::cout << i << " ";
+    // std::cout << std::endl;
+
 	
 	uint8_t *pip = nullptr;
 	CUDA_SAFE_CALL(cudaMalloc((void **) &pip, num_segments * sizeof(uint8_t)));
@@ -430,18 +608,34 @@ void cuda_contain_polygon(query_context *gctx)
 	// // printf("sum = %d\n", _sum);
 
 	// printf("---------------------------------------------------------------------------------------------------\n");
-
 	auto transfer_start = std::chrono::high_resolution_clock::now();
+
+	int* start_ptr = thrust::raw_pointer_cast(d_starts.data());
+	double *d_area = nullptr;
+	CUDA_SAFE_CALL(cudaMalloc((void **) &d_area, sizeof(double)));
+
+	grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+	rebuild_polygons<<<grid_size, block_size>>>((Segment *)gctx->d_BufferInput, pip, num_groups, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_vertices, start_ptr, d_area);
+	cudaDeviceSynchronize();
+    check_execution("kernel_refinement_segment_contain");	
+
+	double h_area;
+	CUDA_SAFE_CALL(cudaMemcpy(&h_area, d_area, sizeof(double), cudaMemcpyDeviceToHost));
+	printf("area = %lf\n", h_area);
+	gctx->area += h_area;
+
 	
-	CUDA_SAFE_CALL(cudaHostAlloc((void**)&gctx->segments, num_segments * sizeof(Segment), cudaHostAllocDefault));
-	gctx->num_segments = num_segments;
-	CUDA_SAFE_CALL(cudaMemcpy(gctx->segments, (Segment *)gctx->d_BufferInput, num_segments * sizeof(Segment), cudaMemcpyDeviceToHost));
+	// CUDA_SAFE_CALL(cudaHostAlloc((void**)&gctx->segments, num_segments * sizeof(Segment), cudaHostAllocDefault));
+	// gctx->num_segments = num_segments;
+	// CUDA_SAFE_CALL(cudaMemcpy(gctx->segments, (Segment *)gctx->d_BufferInput, num_segments * sizeof(Segment), cudaMemcpyDeviceToHost));
     
-	CUDA_SAFE_CALL(cudaHostAlloc((void**)&gctx->pip, num_segments * sizeof(uint8_t), cudaHostAllocDefault));
-	CUDA_SAFE_CALL(cudaMemcpy(gctx->pip, pip, num_segments * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+	// CUDA_SAFE_CALL(cudaHostAlloc((void**)&gctx->pip, num_segments * sizeof(uint8_t), cudaHostAllocDefault));
+	// CUDA_SAFE_CALL(cudaMemcpy(gctx->pip, pip, num_segments * sizeof(uint8_t), cudaMemcpyDeviceToHost));
 
 	CUDA_SAFE_CALL(cudaFree(d_inters_per_pair));
 	CUDA_SAFE_CALL(cudaFree(pip));
+	CUDA_SAFE_CALL(cudaFree(d_area));
 
 	auto transfer_end = std::chrono::high_resolution_clock::now();
 	auto transfer_duration = std::chrono::duration_cast<std::chrono::milliseconds>(transfer_end - transfer_start);

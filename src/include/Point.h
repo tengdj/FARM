@@ -77,10 +77,23 @@ public:
     //	    return r;
     //	  }
 
-    CUDA_HOSTDEV bool operator==(const Point &p) const { return abs(x-p.x)<eps && abs(y-p.y)<eps; }
-    CUDA_HOSTDEV bool operator!=(const Point &p) const { return abs(x-p.x)>=eps && abs(y-p.y)>=eps; }
+    CUDA_HOSTDEV bool operator==(const Point &p) const { return fabs(x-p.x)<eps && fabs(y-p.y)<eps; }
+    CUDA_HOSTDEV bool operator!=(const Point &p) const { return fabs(x-p.x)>=eps && fabs(y-p.y)>=eps; }
     CUDA_HOSTDEV bool operator<(const Point &p) const { 
-        return x < p.x || (x == p.x && y < p.y);
+        if(fabs(x-p.x) >= 1e-9){
+            return p.x - x > 1e-9;
+        }else if(fabs(y-p.y) >= 1e-9){
+            return p.y - y > 1e-9;
+        }else{
+            return true;
+        }
+    }
+    CUDA_HOSTDEV bool operator<=(const Point &p) const { 
+        if(fabs(x-p.x) >= 1e-9){
+            return p.x - x > -1e-9;
+        }else{
+            return p.y - y > -1e-9;
+        }
     }
 
     /// Negate this point.

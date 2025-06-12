@@ -112,7 +112,7 @@ void query_context::merge_global(){
 	global_ctx->found += found;
 	global_ctx->query_count += query_count;
 	global_ctx->refine_count += refine_count;
-
+	global_ctx->area += area;
 
 	global_ctx->contain_check += contain_check;
 	global_ctx->object_checked += object_checked;
