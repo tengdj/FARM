@@ -136,6 +136,8 @@ public:
 	void process_intersection(map<int, vector<double>> edge_intersection, Direction direction);
 	int count_intersection_nodes(Point &p);
 	Grid_line *get_vertical() {return vertical;}
+
+	void layering();
 	Hraster* get_layers() { return layers; }
 	uint get_num_layers() { return num_layers; }
 	uint get_status_size() { return status_size; }

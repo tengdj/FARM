@@ -219,7 +219,7 @@ public:
 	double min_step_y = DBL_MAX;
 	box space = {10000.0, 10000.0, -10000.0, -10000.0};
 	int num_layers = 0;
-	int max_layers = 0;
+	int max_layers = 25;
 
 	uint h_level = 0;
 	uint *d_level = nullptr;

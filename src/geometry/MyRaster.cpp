@@ -1,4 +1,5 @@
-#include "../include/MyRaster.h"
+#include "MyRaster.h"
+#include "UniversalGrid.h"
 
 MyRaster::~MyRaster(){
 	if(status) delete []status;
@@ -431,41 +432,40 @@ size_t MyRaster::get_num_pixels(PartitionStatus status){
 	return num;	
 }
 
-void MyRaster::grid_align(query_context *gctx){
+void MyRaster::grid_align(){
+	UniversalGrid &space = UniversalGrid::getInstance();
 
 	bool flag1 = false, flag2 = false;
-	auto x = gctx->min_step_x;
-	auto y = gctx->min_step_y;
-	if(step_x <= x) step_x = x, flag1 = true;
-	if(step_y <= y) step_y = y, flag2 = true;
-	
-	for(int i = gctx->max_layers;i > 0; i --){
-		// log("%lf %lf", x, y);
-		// log("step_x = %lf, step_y = %lf", step_x, step_y);
-		
-		if(!flag1 && step_x > x && step_x < x * 2){
+	auto x = space.get_step_x();
+	auto y = space.get_step_y();
+	if (step_x <= x)
+		step_x = x, flag1 = true;
+	if (step_y <= y)
+		step_y = y, flag2 = true;
+
+	for (int i = space.get_max_layers(); i > 0; i--){
+		if (!flag1 && step_x > x && step_x < x * 2){
 			flag1 = true;
 			step_x = abs(step_x - x) < abs(step_x - x * 2) ? x : x * 2;
 		}
-		if(!flag2 && step_y > y && step_y < y * 2){
+		if (!flag2 && step_y > y && step_y < y * 2){
 			flag2 = true;
 			step_y = abs(step_y - y) < abs(step_y - y * 2) ? y : y * 2;
 		}
-		if(flag1 && flag2) break;
+		if (flag1 && flag2)
+			break;
 		x *= 2;
 		y *= 2;
 	}
 	assert(flag1 && flag2);
 
-	mbr->low[0] = step_x * floor((mbr->low[0] - gctx->space.low[0]) / step_x) + gctx->space.low[0];
-	mbr->low[1] = step_y * floor((mbr->low[1] - gctx->space.low[1]) / step_y) + gctx->space.low[1];
-	mbr->high[0] = step_x * ceil((mbr->high[0] - gctx->space.low[0]) / step_x) + gctx->space.low[0];
-	mbr->high[1] = step_y * ceil((mbr->high[1] - gctx->space.low[1]) / step_y) + gctx->space.low[1];
+	mbr->low[0] = floor(mbr->low[0] / step_x) * step_x;
+	mbr->low[1] = floor(mbr->low[1] / step_y) * step_y;
+	mbr->high[0] = ceil(mbr->high[0] / step_x) * step_x;
+	mbr->high[1] = ceil(mbr->high[1] / step_y) * step_y;
 
-
-
-	dimx = static_cast<int>(round((mbr->high[0]-mbr->low[0])/step_x));
-	dimy = static_cast<int>(round((mbr->high[1]-mbr->low[1])/step_y));
+	dimx = static_cast<int>(round((mbr->high[0] - mbr->low[0]) / step_x));
+	dimy = static_cast<int>(round((mbr->high[1] - mbr->low[1]) / step_y));
 
 
 	// printf("dimx = %d, dimy = %d\n", dimx, dimy);
