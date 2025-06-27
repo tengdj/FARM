@@ -8,7 +8,7 @@ OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 INCLUDES	= -I /usr/include -I ./include -I /usr/local/include -I /usr/local/cuda-12.2/targets/x86_64-linux/include  -I /home/qmh/optix/include
 #-lgeos_c  
 LIBS		= -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -lboost_program_options -lgeos -lpthread
-CPPFLAGS	= -std=c++17 -Wno-cpp
+CPPFLAGS	= -O3 -std=c++17 -Wno-cpp
 
 NVCCFLAGS   = -O2 -arch=sm_89 -std=c++17 -DCUB_IGNORE_DEPRECATED_CPP_DIALECT --expt-extended-lambda --expt-relaxed-constexpr --use_fast_math
 CUDALIBS    = -L/usr/local/cuda-12.2/lib64/stubs -lcuda -L/usr/local/cuda-12.2/lib64/ -lcudart
@@ -76,7 +76,7 @@ print_raster:	test/print_raster.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
 		
 print_layers:	test/print_layers.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 
 distance_test:	test/distance_test.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 

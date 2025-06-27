@@ -158,6 +158,7 @@ void Ideal::init_pixels(){
 	assert(mbr);
 
 	status = new uint8_t[status_size];
+	areas = new double[(dimx + 1) * (dimy + 1)]();
 	memset(status, 0, status_size * sizeof(uint8_t));
 	offset = new uint32_t[(dimx + 1) * (dimy + 1) + 1]; // +1 here is to ensure that pointer[num_pixels] equals len_edge_sequences, so we don't need to make a special case for the last pointer.
 	horizontal = new Grid_line(dimy);
@@ -214,9 +215,6 @@ void Ideal::evaluate_edges(){
 		assert(cur_starty<=dimy);
 		assert(cur_endy<=dimy);
 
-		set_status(get_id(cur_startx, cur_starty), BORDER);
-		set_status(get_id(cur_endx, cur_endy), BORDER);
-
 		//in the same pixel
 		if(cur_startx==cur_endx&&cur_starty==cur_endy){
 			continue;
@@ -229,16 +227,12 @@ void Ideal::evaluate_edges(){
 					vertical_intersect_info[x + 1].push_back(y1);
 					edges_info[get_id(x, cur_starty)].push_back(cross_info(LEAVE, i));
 					edges_info[get_id(x+1, cur_starty)].push_back(cross_info(ENTER, i));
-					set_status(get_id(x, cur_starty), BORDER);
-					set_status(get_id(x+1, cur_starty), BORDER);
 				}
 			}else { // right to left
 				for(int x=cur_startx;x>cur_endx;x--){
 					vertical_intersect_info[x].push_back(y1);
 					edges_info[get_id(x, cur_starty)].push_back(cross_info(LEAVE, i));
 					edges_info[get_id(x-1, cur_starty)].push_back(cross_info(ENTER, i));
-					set_status(get_id(x, cur_starty), BORDER);
-					set_status(get_id(x-1, cur_starty), BORDER);
 				}
 			}
 		}else if(x1==x2){
@@ -248,16 +242,12 @@ void Ideal::evaluate_edges(){
 					horizontal_intersect_info[y + 1].push_back(x1);
 					edges_info[get_id(cur_startx, y)].push_back(cross_info(LEAVE, i));
 					edges_info[get_id(cur_startx, y+1)].push_back(cross_info(ENTER, i));
-					set_status(get_id(cur_startx, y), BORDER);
-					set_status(get_id(cur_startx, y+1), BORDER);
 				}
 			}else { //border[bottom] down
 				for(int y=cur_starty;y>cur_endy;y--){
 					horizontal_intersect_info[y].push_back(x1);
 					edges_info[get_id(cur_startx, y)].push_back(cross_info(LEAVE, i));
 					edges_info[get_id(cur_startx, y-1)].push_back(cross_info(ENTER, i));
-					set_status(get_id(cur_startx, y), BORDER);
-					set_status(get_id(cur_startx, y-1), BORDER);
 				}
 			}
 		}else{
@@ -294,16 +284,12 @@ void Ideal::evaluate_edges(){
 						// left to right
 						if(cur_startx<cur_endx){
 							vertical_intersect_info[x + 1].push_back(yval);
-							set_status(get_id(x, y), BORDER);
 							edges_info[get_id(x ++, y)].push_back(cross_info(LEAVE, i));
 							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
-							set_status(get_id(x, y), BORDER);
 						}else{//right to left
 							vertical_intersect_info[x].push_back(yval);
-							set_status(get_id(x, y), BORDER);
 							edges_info[get_id(x --, y)].push_back(cross_info(LEAVE, i));
 							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
-							set_status(get_id(x, y), BORDER);
 						}
 					}
 				}
@@ -327,16 +313,12 @@ void Ideal::evaluate_edges(){
 						passed = true;
 						if(cur_starty<cur_endy){// bottom up
 							horizontal_intersect_info[y + 1].push_back(xval);
-							set_status(get_id(x, y), BORDER);
 							edges_info[get_id(x, y ++)].push_back(cross_info(LEAVE, i));
 							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
-							set_status(get_id(x, y), BORDER);
 						}else{// top down
 							horizontal_intersect_info[y].push_back(xval);
-							set_status(get_id(x, y), BORDER);
 							edges_info[get_id(x, y --)].push_back(cross_info(LEAVE, i));
 							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
-							set_status(get_id(x, y), BORDER);
 						}
 					}
 				}
@@ -366,16 +348,6 @@ void Ideal::evaluate_edges(){
 		process_crosses(edges_info);
 	}
 
-	// for(int i = 0; i <= dimx; i ++) {
-	// 	set_status(get_id(i, dimy), OUT);
-	// }
-
-	// for(int i = 0; i <= dimy; i ++) {
-	// 	set_status(get_id(dimx, i), OUT);
-	// }
-
-
-	// process_crosses(edges_info);
 	process_intersection(horizontal_intersect_info, HORIZONTAL);
 	process_intersection(vertical_intersect_info, VERTICAL);
 	process_pixels_null(dimx, dimy);
@@ -408,16 +380,346 @@ void Ideal::scanline_reandering(){
 	}
 }
 
-void Ideal::rasterization(){
+TempPolygon intersectionDualX(Ideal *pol, double &Xi, double &Xi1)
+{
+	double slope;
+	double yi, yi1;
+	TempPolygon clippedPolygon;
 
-	//1. create space for the pixels
+	// for each edge of the polygon
+	//  ITERATES THE VERTICES WHICH MUST BE IN A COUNTER-CLOCKWISE DIRECTION!!!
+	//  so that right of the line means inside, left means outside
+	for (auto itV = 0; itV < pol->get_num_vertices() - 1; itV++)
+	{
+		Point pointA = pol->get_boundary()->p[itV];
+		Point pointB = pol->get_boundary()->p[itV + 1];
+
+		// check cases
+		if (pointA.x == pointB.x)
+		{
+			// edge is vertical
+			// set the lowest point as the intersection point
+			yi = min(pointA.y, pointB.y);
+			yi1 = min(pointA.y, pointB.y);
+		}
+		else
+		{
+			// solve for y
+			slope = getSlope(pointA, pointB);
+			// check if AB is horizontal, if it is it only intersects if pointA.y == Yi or pointA.y == Yi1
+			// find intersection points for both Xi and Xi1
+			yi = slope * (Xi - pointB.x) + pointB.y;
+			yi1 = slope * (Xi1 - pointB.x) + pointB.y;
+		}
+
+		// intersection points
+		Point pi(Xi, yi);
+		Point pi1(Xi1, yi1);
+
+		// cout << "X CLIPPING " << endl;
+		// POINT A
+		if (isInsideVerticalDual(Xi, Xi1, pointA.x))
+		{
+			// printf("PointA ");
+			// pointA.print();
+			// printf("PointB ");
+			// pointB.print();
+			// printf("Intersection ");
+			// pi.print();
+			// pointA inside, clipping result
+			clippedPolygon.addPoint(pointA);
+			// cout << "point(" << pointA.x << " " << pointA.y << ") added" << endl;
+		}
+
+		// intersection points in PROPER ORDER
+		if (pointA.x < pointB.x)
+		{
+			// first pi, then pi1
+			if (isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi.y) && isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi.x))
+			{
+				// intersection point pi is a clipping result
+				clippedPolygon.addPoint(pi);
+				// cout << "point pi (" << pi.x << " " << pi.y << ") added2" << endl;
+			}
+
+			if (isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi1.y) && isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi1.x))
+			{
+				// intersection point pi1 is a clipping result
+				clippedPolygon.addPoint(pi1);
+				// cout << "point pi1 (" << pi1.x << " " << pi1.y << ") added2" << endl;
+			}
+		}
+		else
+		{
+			// first pi1 then pi
+			if (isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi1.y) && isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi1.x))
+			{
+				// intersection point pi1 is a clipping result
+				clippedPolygon.addPoint(pi1);
+				// cout << "point pi1 (" << pi1.x << " " << pi1.y << ") added2" << endl;
+			}
+			if (isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi.y) && isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi.x))
+			{
+				// intersection point pi is a clipping result
+				clippedPolygon.addPoint(pi);
+				// cout << "point pi (" << pi.x << " " << pi.y << ") added2" << endl;
+				// printf("point pi (%.12lf %.12lf) added\n", pi.x, pi.y);
+			}
+		}
+
+		// POINT B
+		if (isInsideVerticalDual(Xi, Xi1, pointB.x))
+		{
+			// pointB inside, clipping result
+			clippedPolygon.addPoint(pointB);
+			// cout << "point B (" << pointB.x << " " << pointB.y << ") added" << endl;
+		}
+	}
+	// add the first point to the end
+	//  so that the polygon "closes"
+	if (clippedPolygon.vertices.size() != 0)
+	{
+		clippedPolygon.vertices.push_back(*clippedPolygon.vertices.begin());
+	}
+
+	return clippedPolygon;
+}
+
+vector<Point> intersectionDualY(TempPolygon &pol, double Yi, double Yi1)
+{
+	double slope;
+	double xi, xi1;
+	TempPolygon clippedPolygon;
+
+	for (auto itV = pol.vertices.begin(); itV != pol.vertices.end() - 1; itV++)
+	{
+		Point pointA = *itV;
+		Point pointB = *(itV + 1);
+
+		// cout << "POINTA" << endl;
+		// pointA.print();
+		// pointB.print();
+		// cout << "POINTB" << endl;
+
+		bool parallels = false;
+		// calculate the slope (if any)
+		if (pointA.x == pointB.x)
+		{
+			// edge is vertical
+			// the only possible point of intersection is y (Yi or Yi1)
+			//  do nothing
+			xi = pointA.x;
+			xi1 = pointA.x;
+		}
+		else
+		{
+			slope = getSlope(pointA, pointB);
+			// check if AB is horizontal, if it is it only intersects if pointA.y == Yi or pointA.y == Yi1
+			// this flag will skip unnecessary checks in this event
+			if (pointA.y == pointB.y)
+			{
+				if (pointA.y == Yi)
+				{
+					xi = pointA.x;
+					xi1 = -numeric_limits<double>::max();
+				}
+				else if (pointA.y == Yi1)
+				{
+					xi = -numeric_limits<double>::max();
+					xi1 = pointA.x;
+				}
+				else
+				{
+					// THEY DO NOT INETERSECT, THEY ARE PARALLELS
+					parallels = true;
+				}
+			}
+			else
+			{
+				// solve for x
+				xi = ((Yi - pointB.y) / slope) + pointB.x;
+				xi1 = ((Yi1 - pointB.y) / slope) + pointB.x;
+				// cout << "   solved for x" << endl;
+			}
+		}
+
+		if (!parallels)
+		{
+			// intersection points
+			Point pi(xi, Yi);
+			Point pi1(xi1, Yi1);
+
+			// POINT A
+			if (isInsideHorizontalDual(Yi, Yi1, pointA.y))
+			{
+				// pointA inside, clipping result
+				clippedPolygon.addPoint(pointA);
+				// cout << "point A (" << pointA.x << " " << pointA.y << ") added" << endl;
+			}
+
+			// intersection points in PROPER ORDER
+			if (pointA.y < pointB.y)
+			{
+				// first pi, then pi1
+				if (isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi.x) && isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi.y))
+				{
+					// intersection point pi is a clipping result
+					clippedPolygon.addPoint(pi);
+					// cout << "point pi (" << pi.x << " " << pi.y << ") added" << endl;
+				}
+
+				if (isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi1.x) && isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi1.y))
+				{
+					// intersection point pi1 is a clipping result
+					clippedPolygon.addPoint(pi1);
+					// cout << "point pi1 (" << pi1.x << " " << pi1.y << ") added" << endl;
+				}
+			}
+			else
+			{
+				// first pi1 then pi
+				if (isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi1.x) && isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi1.y))
+				{
+					// intersection point pi1 is a clipping result
+					clippedPolygon.addPoint(pi1);
+					// cout << "point pi1 (" << pi1.x << " " << pi1.y << ") added" << endl;
+				}
+				if (isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi.x) && isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi.y))
+				{
+					// intersection point pi is a clipping result
+					clippedPolygon.addPoint(pi);
+					// cout << "point pi (" << pi.x << " " << pi.y << ") added" << endl;
+				}
+			}
+
+			// POINT B
+			if (isInsideHorizontalDual(Yi, Yi1, pointB.y))
+			{
+				// pointB inside, clipping result
+				clippedPolygon.addPoint(pointB);
+				// cout << "point B (" << pointB.x << " " << pointB.y << ") added" << endl;
+			}
+		}
+	}
+	// cout << "sort before" << endl;
+	// for (auto x : clippedPolygon.vertices)
+	//     x.print();
+	// sort points
+	// sort_by_polar_angle(clippedPolygon.vertices);
+
+	// cout << "sort after" << endl;
+	// for (auto x : clippedPolygon.vertices)
+	//     x.print();
+
+	//"close" the polygon (first and last points in order must be the same point)
+	if (clippedPolygon.vertices.size() != 0)
+	{
+		clippedPolygon.vertices.push_back(*clippedPolygon.vertices.begin());
+	}
+
+	return clippedPolygon.vertices;
+}
+
+void Ideal::calculate_fullness()
+{
+	double Xi, Xi1, Yi, Yi1;
+	double kx, ky;
+
+	vector<Point> clippedPoints;
+	vector<TempPolygon> subpolygonsAfterX;
+
+	Xi = getMBB()->low[0];
+	Xi1 = Xi + step_x;
+
+	kx = Xi + (dimx + 1) * step_x;
+
+	TempPolygon tempPol;
+	subpolygonsAfterX.reserve(dimx);
+
+	int x = 0;
+	while (Xi1 < kx + 1e-9)
+	{
+		tempPol = intersectionDualX(this, Xi, Xi1);
+
+		// printf("----------------------------------------------------\n");
+		// printf("tempPol%d: %lf %lf\n", x, tempPol.cellX, tempPol.cellY);
+		// for (auto x : tempPol.vertices)
+		//     x.print();
+		// printf("----------------------------------------------------\n");
+
+		if (tempPol.vertices.size() > 0)
+		{
+			tempPol.cellX = x;
+			subpolygonsAfterX.push_back(tempPol);
+		}
+
+		// move both vertical lines equally
+		Xi += step_x;
+		Xi1 = Xi + step_x;
+		x++;
+	}
+
+	ky = getMBB()->low[1] + dimy * step_y;
+
+	int type;
+
+	auto it = subpolygonsAfterX.begin();
+	while (it != subpolygonsAfterX.end())
+	{
+		// FOR NORMALIZED
+		Yi = getMBB()->low[1];
+		Yi1 = Yi + step_y;
+
+		int y = 0;
+		// sweep the y axis getting pairs of horizontal lines Yi & Yi+1
+		while (Yi1 < ky + 1e-9)
+		{
+			// returns the subpolygon furtherly clipped in the y axis by Yi and Yi+1
+			clippedPoints = intersectionDualY(*it, Yi, Yi1);
+
+			// this helps ignore a large portion of the empty cells for a polygon
+			// if (clippedPoints.size() > 2)
+			// {
+			// calculate its area and classify it
+
+			double clippedArea = computePolygonArea(clippedPoints);
+			type = classifySubpolygon(clippedArea, step_x * step_y, category_count);
+
+			// printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
+			// for (auto point : clippedPoints)
+			// 	point.print();
+
+			// printf("x = %d y = %d area = %.12lf pixelArea = %.12lf type = %d\n", it->cellX, y, clippedArea, step_x * step_y, type);
+
+			// printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
+
+			// if (type != 0)
+			// {
+			assert(y * (dimx + 1) + it->cellX < (dimx + 1) * (dimy + 1));
+			status[y * (dimx + 1) + it->cellX] = type;
+			areas[y * (dimx + 1) + it->cellX] = clippedArea;
+			// }
+
+			// move the horizontal lines equally to the next position
+			Yi += step_y;
+			Yi1 = Yi + step_y;
+			y++;
+		}
+		it++;
+	}
+}
+
+void Ideal::rasterization()
+{
+
+	// 1. create space for the pixels
 	init_pixels();
 
-	//2. edge crossing to identify BORDER pixels
+	// 2. edge crossing to identify BORDER pixels
 	evaluate_edges();
 
-	//3. determine the status of rest pixels with scanline rendering
-	scanline_reandering();
+	// 3. determine the fullness of pixels
+	calculate_fullness();
 }
 
 void Ideal::rasterization(int vpr){
@@ -428,8 +730,9 @@ void Ideal::rasterization(int vpr){
 
 	if(use_hierachy){
 		layers[num_layers].set_status(status);
+
 		for (int i = num_layers - 1; i >= 0; i--){
-			layers[i].merge(layers[i + 1]);
+			merge_status(layers[i]);
 			memcpy(status + layer_offset[i], layers[i].get_status(), (layers[i].get_dimx() + 1) * (layers[i].get_dimy() + 1) * sizeof(uint8_t));
 		}
 	}
@@ -476,6 +779,45 @@ int Ideal::count_intersection_nodes(Point &p){
 		i ++;
 	}
 	return count;
+}
+
+double Ideal::merge_area(box target){
+	int start_x = get_offset_x(target.low[0]);
+	int start_y = get_offset_y(target.low[1]);
+	int end_x = get_offset_x(target.high[0]) - 1;
+	int end_y = get_offset_y(target.high[1]) - 1;
+
+	assert(start_x >= 0 && start_y >= 0 && end_x < dimx && end_y < dimy);
+
+	if (end_y < start_y)
+		end_y = start_y;
+	if (end_x < start_x)
+		end_x = start_x;
+
+	double clippedArea = 0.0;
+
+	for (int i = start_x; i <= end_x; i++)
+	{
+		for (int j = start_y; j <= end_y; j++)
+		{
+			int id = get_id(i, j);
+			clippedArea += areas[id];
+		}
+	}
+
+	return clippedArea;
+}
+
+void Ideal::merge_status(Hraster &r){
+	for (int x = 0; x <= r.get_dimx(); x++)
+	{
+		for (int y = 0; y <= r.get_dimy(); y++)
+		{
+			double mergedArea = merge_area(r.get_pixel_box(x, y));
+			uint8_t fullness = classifySubpolygon(mergedArea, r.get_step_x() * r.get_step_y(), category_count);
+			r.set_status(r.get_id(x, y), fullness);
+		}
+	}
 }
 
 void Ideal::layering()

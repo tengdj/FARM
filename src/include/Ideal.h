@@ -101,16 +101,17 @@ private:
 	uint32_t *layer_offset = nullptr;
     RasterInfo *layer_info = nullptr;
 	Hraster *layers = nullptr;
+	double *areas = nullptr;
 
 	uint len_edge_sequences = 0;
 	uint num_layers = 0;
-	uint status_size = 0;
 
 
     pthread_mutex_t ideal_partition_lock;
 	void init_pixels();
 	void evaluate_edges();
 	void scanline_reandering();
+	void calculate_fullness();
 
 public:
     Ideal(){
@@ -143,7 +144,8 @@ public:
 	uint get_status_size() { return status_size; }
 	RasterInfo* get_layer_info() { return layer_info; }
 	uint32_t* get_layer_offset() { return layer_offset; }
-
+	double merge_area(box target);
+	void merge_status(Hraster &layer);
 
 	// statistic collection
 	int get_num_border_edge();

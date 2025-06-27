@@ -6,9 +6,6 @@
 class Hraster : public MyRaster{
 public:
     void init(double _step_x, double _step_y, int _dimx, int _dimy, box *mbr, bool last_layer);
-	inline void set_status(uint8_t *_status) { status = _status; }
-    PartitionStatus merge_status (box target);
-	void merge(Hraster &r);
 	void print();
 };
 

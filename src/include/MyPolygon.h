@@ -41,6 +41,30 @@ typedef struct PolygonMeta_
 	box mbr;		   // the bounding boxes
 } PolygonMeta;
 
+class TempPolygon{
+public:
+	uint recID;
+	vector<Point> vertices;
+	int cellX, cellY;
+	TempPolygon() {}
+
+	TempPolygon(uint &recID)
+	{
+		this->recID = recID;
+	}
+
+	void addPoint(Point &p)
+	{
+		
+		if (find(vertices.begin(), vertices.end(), p) == vertices.end())
+		{
+			vertices.push_back(p);
+		}
+
+		// vertices.push_back(p);
+	}
+};
+
 class VertexSequence
 {
 public:

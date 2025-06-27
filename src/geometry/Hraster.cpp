@@ -15,42 +15,6 @@ void Hraster::init(double _step_x, double _step_y, int _dimx, int _dimy, box *_m
     }
 }
 
-PartitionStatus Hraster::merge_status(box target){
-	int start_x = get_offset_x(target.low[0]);
-	int start_y = get_offset_y(target.low[1]);
-	int end_x = get_offset_x(target.high[0]) - 1;
-	int end_y = get_offset_y(target.high[1]) - 1;
-
-	assert(start_x >= 0 && start_y >=0 && end_x < dimx && end_y < dimy);
-
-	if(end_y < start_y) end_y = start_y;
-	if(end_x < start_x) end_x = start_x;
-
-	bool etn = true, itn = true;
-
-	for(int i=start_x;i<=end_x;i++){
-		for(int j=start_y;j<=end_y;j++){
-			int id = get_id(i ,j);
-			if(show_status(id) == OUT) itn = false;
-			if(show_status(id) == IN) etn = false;
-			if(show_status(id) == BORDER) itn = false, etn = false;
-		}
-	}
-
-	if(etn)	return OUT;
-	if(itn) return IN;
-	return BORDER;	
-}
-
-void Hraster::merge(Hraster &r){
-	for(int x = 0; x <= dimx; x ++){
-		for(int y = 0; y <= dimy; y ++){
-			PartitionStatus st = r.merge_status(get_pixel_box(x, y));
-			MyRaster::set_status(get_id(x, y), st); 
-		}
-	}
-}
-
 void Hraster::print(){
 	MyMultiPolygon *inpolys = new MyMultiPolygon();
 	MyMultiPolygon *borderpolys = new MyMultiPolygon();

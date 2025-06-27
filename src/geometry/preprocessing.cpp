@@ -17,6 +17,8 @@ void *rasterization_unit(void *args){
 			if(gctx->use_hierachy) {
 				ideals[i]->grid_align();
 				ideals[i]->layering();
+			}else{
+				ideals[i]->set_status_size();
 			}
 			ideals[i]->rasterization(ctx->vpr);
 			ctx->report_progress();

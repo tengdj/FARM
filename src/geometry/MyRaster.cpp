@@ -214,7 +214,7 @@ int MyRaster::get_offset_y(double yval){
 // 	}
 // }
 
-void MyRaster::set_status(int id, PartitionStatus state){   // The multiplication by 2 is because each status occupies 2 bits.
+void MyRaster::set_status(int id, uint8_t state){   // The multiplication by 2 is because each status occupies 2 bits.
 	status[id] = state;
 }
 
@@ -229,9 +229,17 @@ void MyRaster::set_status(int id, PartitionStatus state){   // The multiplicatio
 // }
 
 PartitionStatus MyRaster::show_status(int id){
-	if(status[id] == 0) return OUT;
-	else if(status[id] == 1) return BORDER;
-	else return IN;
+	if (status[id] == 0)
+		return OUT;
+	else if (status[id] == category_count - 1)
+		return IN;
+	else
+		return BORDER;
+}
+
+void MyRaster::set_status_size()
+{
+	status_size = (dimx + 1) * (dimy + 1);
 }
 
 vector<int> MyRaster::get_intersect_pixels(box *b){

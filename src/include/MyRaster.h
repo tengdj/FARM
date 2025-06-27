@@ -29,6 +29,8 @@ protected:
 	double step_y = 0.0;
 	int dimx = 0;
 	int dimy = 0;
+    uint status_size = 0;
+    int category_count = 8;
 public:
     MyRaster() {
         pthread_mutex_init(&raster_lock, NULL);
@@ -44,9 +46,11 @@ public:
 	int get_offset_x(double x);
 	int get_offset_y(double y);
 
-    void set_status(int id, PartitionStatus status);
+    void set_status(int id, uint8_t status);
+    void set_status(uint8_t *_status) { status = _status; }
     PartitionStatus show_status(int id);
     uint8_t* get_status() {return status;}
+    void set_status_size();
 
 	vector<int> get_intersect_pixels(box *pix);
     vector<int> get_closest_pixels(box &target);

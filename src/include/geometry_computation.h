@@ -27,6 +27,27 @@ inline bool collinear(Point &p1, Point &p2, Point &p3){
 	return double_zero(a);
 }
 
+inline double getSlope(Point &A, Point &B)
+{
+	return ((B.y - A.y) / (B.x - A.x));
+}
+
+inline bool isInsideHorizontalDual(double Yi, double Yi1, double &py)
+{
+	if (py < Yi || py > Yi1)
+	{
+		return false;
+	}
+	return true;
+}
+inline bool isInsideVerticalDual(double Xi, double Xi1, double &px)
+{
+	if (px < Xi || px > Xi1)
+	{
+		return false;
+	}
+	return true;
+}
 
 /*
  * distance related
@@ -211,5 +232,52 @@ inline void segment_intersect_batch(Point *p1, Point *p2, int s1, int s2, int e1
 	}
 	return;
 }
+
+/*
+ *
+ * area related
+ *
+ */
+
+inline double computePolygonArea(vector<Point> &polygon)
+{
+	int n = polygon.size();
+	if (n < 3)
+		return 0.0;
+
+	double area = 0.0;
+	for (int i = 0; i < n - 1; ++i)
+	{
+		const Point &p1 = polygon[i];
+		const Point &p2 = polygon[i + 1];
+		area += (p1.x * p2.y - p2.x * p1.y);
+	}
+	return std::abs(area) / 2.0;
+}
+
+inline uint8_t classifySubpolygon(double area, double pixelArea, int count)
+{
+	double ratio = area / pixelArea;
+	if (fabs(ratio - 1.0) < 1e-6)
+	{
+		// full
+		return count - 1;
+	}
+
+	if (fabs(ratio) < 1e-6)
+	{
+		// empty
+		return 0;
+	}
+
+	int idx = static_cast<int>((ratio * (count - 2)) + 1);
+	if (idx >= count)
+		idx = count - 1; // 防止越界
+
+	// int idx = static_cast<int>(ceil(ratio * (count - 2)));
+	assert(idx < 256);
+	return idx;
+}
+
 
 #endif /* SRC_GEOMETRY_GEOMETRY_COMPUTATION_H_ */
