@@ -71,20 +71,20 @@ __device__ __forceinline__ double atomicExchDouble(double* address, double val)
 
 __device__ __forceinline__ int gpu_get_id(int x, int y, int dimx)
 {
-	return y * (dimx + 1) + x;
+	return y * dimx + x;
 }
 
 // from id to pixel x
 __device__ __forceinline__ int gpu_get_x(int id, int dimx)
 {
-	return id % (dimx + 1);
+	return id % dimx;
 }
 
 // from id to pixel y
 __device__ __forceinline__ int gpu_get_y(int id, int dimx, int dimy)
 {
-	assert((id / (dimx + 1)) <= dimy);
-	return id / (dimx + 1);
+	assert((id / dimx) <= dimy);
+	return id / dimx;
 }
 
 __device__ __forceinline__ int gpu_double_to_int(double val)
@@ -335,15 +335,6 @@ __device__ __forceinline__ double gpu_box_to_segment_distance(box &bx, Point &p1
 	double dist4 = gpu_segment_to_segment_distance(p1, p2, bx.low[0], bx.high[1], bx.low[0], bx.low[1]);
 
 	return min(dist1, min(dist2, min(dist3, dist4)));
-}
-
-__device__ __forceinline__ double gpu_get_step(box &bx, int dimx, int dimy)
-{
-	Point a(bx.low[0], bx.low[1]);
-	Point b(bx.high[0], bx.low[1]);
-	Point c(bx.low[0], bx.high[1]);
-
-	return min(haversine(a.x, a.y, b.x, b.y) / dimx, haversine(a.x, a.y, c.x, c.y) / dimy);
 }
 
 __device__ __forceinline__ double gpu_point_to_segment_within_batch(Point &p, Point *vs, size_t seq_len, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)

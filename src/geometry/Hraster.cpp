@@ -10,8 +10,8 @@ void Hraster::init(double _step_x, double _step_y, int _dimx, int _dimy, box *_m
         mbr = _mbr;
     }else{
         mbr = new box(_mbr->low[0], _mbr->low[1], _mbr->low[0] + step_x * dimx, _mbr->low[1] + step_y * dimy);
-        status = new uint8_t[(dimx+1)*(dimy+1)];
-        memset(status, 0, (dimx+1) * (dimy+1) * sizeof(uint8_t));
+        status = new uint8_t[dimx * dimy];
+        memset(status, 0, dimx * dimy * sizeof(uint8_t));
     }
 }
 
@@ -20,8 +20,8 @@ void Hraster::print(){
 	MyMultiPolygon *borderpolys = new MyMultiPolygon();
 	MyMultiPolygon *outpolys = new MyMultiPolygon();
 
-	for(int i=0;i<=dimx;i++){
-		for(int j=0;j<=dimy;j++){
+	for(int i=0;i<dimx;i++){
+		for(int j=0;j<dimy;j++){
 			box bx = get_pixel_box(i, j);
 			MyPolygon *m = MyPolygon::gen_box(bx);
 			if(show_status(get_id(i, j)) == BORDER){

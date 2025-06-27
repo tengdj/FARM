@@ -144,7 +144,7 @@ void preprocess_for_gpu(query_context *gctx)
         idealoffset.status_start = sidx;
         sidx += status_size;
 
-        uint offset_size = (dimx + 1) * (dimy + 1) + 1;
+        uint offset_size = dimx * dimy + 1;
         memcpy(gctx->h_offset + oidx, source->get_offset(), offset_size * sizeof(uint32_t));
         idealoffset.offset_start = oidx;
         oidx += offset_size;
@@ -189,7 +189,7 @@ void preprocess_for_gpu(query_context *gctx)
         idealoffset.status_start = sidx;
         sidx += status_size;
 
-        uint offset_size = (dimx + 1) * (dimy + 1) + 1;
+        uint offset_size = dimx * dimy + 1;
         memcpy(gctx->h_offset + oidx, target->get_offset(), offset_size * sizeof(uint32_t));
         idealoffset.offset_start = oidx;
         oidx += offset_size;

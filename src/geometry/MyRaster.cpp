@@ -47,9 +47,6 @@ void MyRaster::init_raster(int dx, int dy){
 		step_y = 0.00001;
 		dimy = (mbr->high[1]-mbr->low[1])/step_y+1;
 	}
-
-	status = new uint8_t[(dimx+1)*(dimy+1) / 4 + 1];
-    memset(status, 0, ((dimx+1)*(dimy+1) / 4 + 1) * sizeof(uint8_t));
 }
 
 void MyRaster::print(){
@@ -57,8 +54,8 @@ void MyRaster::print(){
 	MyMultiPolygon *borderpolys = new MyMultiPolygon();
 	MyMultiPolygon *outpolys = new MyMultiPolygon();
 
-	for(int i=0;i<=dimx;i++){
-		for(int j=0;j<=dimy;j++){
+	for(int i=0;i<dimx;i++){
+		for(int j=0;j<dimy;j++){
 			box bx = get_pixel_box(i, j);
 			MyPolygon *m = MyPolygon::gen_box(bx);
 			if(show_status(get_id(i, j)) == BORDER){
@@ -171,20 +168,20 @@ box *MyRaster::extractMER(int starter){
 }
 
 int MyRaster::get_id(int x, int y){
-	assert(x>=0&&x<=dimx);
-	assert(y>=0&&y<=dimy);
-	return y * (dimx+1) + x;
+	assert(x>=0&&x<dimx);
+	assert(y>=0&&y<dimy);
+	return y * dimx + x;
 }
 
 // from id to pixel x
 int MyRaster::get_x(int id){
-	return id % (dimx+1);
+	return id % dimx;
 }
 
 // from id to pixel y
 int MyRaster::get_y(int id){
-	assert((id / (dimx+1)) <= dimy);
-	return id / (dimx+1);
+	assert((id / dimx) < dimy);
+	return id / dimx;
 }
 
 // the range must be [0, dimx]
@@ -239,7 +236,7 @@ PartitionStatus MyRaster::show_status(int id){
 
 void MyRaster::set_status_size()
 {
-	status_size = (dimx + 1) * (dimy + 1);
+	status_size = dimx * dimy;
 }
 
 vector<int> MyRaster::get_intersect_pixels(box *b){
@@ -323,8 +320,8 @@ box MyRaster::get_pixel_box(int x, int y){
 int MyRaster::get_pixel_id(Point &p){
 	int xoff = get_offset_x(p.x);
 	int yoff = get_offset_y(p.y);
-	assert(xoff <= dimx);
-	assert(yoff <= dimy);
+	assert(xoff < dimx);
+	assert(yoff < dimy);
 	return get_id(xoff, yoff);
 }
 
@@ -427,7 +424,7 @@ vector<int> MyRaster::expand_radius(int center, int step){
 }
 
 size_t MyRaster::get_num_pixels(){
-	return (dimx+1)*(dimy+1);
+	return dimx * dimy;
 }
 
 size_t MyRaster::get_num_pixels(PartitionStatus status){

@@ -23,8 +23,8 @@ void Ideal::init_edge_sequences(int num_edge_seqs){
 }
 
 void Ideal::process_pixels_null(int x, int y){
-	offset[(x+1)*(y+1)] = len_edge_sequences;
-	for(int i = (x+1)*(y+1)-1; i >= 0; i --){
+	offset[x * y] = len_edge_sequences;
+	for(int i = x * y - 1; i >= 0; i --){
 		if(show_status(i) != BORDER){
 			offset[i] = offset[i + 1]; 
 		}
@@ -158,9 +158,9 @@ void Ideal::init_pixels(){
 	assert(mbr);
 
 	status = new uint8_t[status_size];
-	areas = new double[(dimx + 1) * (dimy + 1)]();
+	areas = new double[dimx * dimy]();
 	memset(status, 0, status_size * sizeof(uint8_t));
-	offset = new uint32_t[(dimx + 1) * (dimy + 1) + 1]; // +1 here is to ensure that pointer[num_pixels] equals len_edge_sequences, so we don't need to make a special case for the last pointer.
+	offset = new uint32_t[dimx * dimy + 1]; // +1 here is to ensure that pointer[num_pixels] equals len_edge_sequences, so we don't need to make a special case for the last pointer.
 	horizontal = new Grid_line(dimy);
 	vertical = new Grid_line(dimx);
 }
@@ -186,34 +186,34 @@ void Ideal::evaluate_edges(){
 		int cur_starty = (y1-start_y)/step_y;
 		int cur_endy = (y2-start_y)/step_y;
 
-		if(cur_startx==dimx+1){
+		if(cur_startx==dimx){
 			cur_startx--;
 		}
-		if(cur_endx==dimx+1){
+		if(cur_endx==dimx){
 			cur_endx--;
 		}
 
 		int minx = min(cur_startx,cur_endx);
 		int maxx = max(cur_startx,cur_endx);
 
-		if(cur_starty==dimy+1){
+		if(cur_starty==dimy){
 			cur_starty--;
 		}
-		if(cur_endy==dimy+1){
+		if(cur_endy==dimy){
 			cur_endy--;
 		}
 		// todo should not happen for normal cases
-		if(cur_startx>dimx||cur_endx>dimx||cur_starty>dimy||cur_endy>dimy){
+		if(cur_startx>=dimx||cur_endx>=dimx||cur_starty>=dimy||cur_endy>=dimy){
 			cout<<"xrange\t"<<cur_startx<<" "<<cur_endx<<endl;
 			cout<<"yrange\t"<<cur_starty<<" "<<cur_endy<<endl;
 			printf("xrange_val\t%f %f\n",(x1-start_x)/step_x, (x2-start_x)/step_x);
 			printf("yrange_val\t%f %f\n",(y1-start_y)/step_y, (y2-start_y)/step_y);
 			assert(false);
 		}
-		assert(cur_startx<=dimx);
-		assert(cur_endx<=dimx);
-		assert(cur_starty<=dimy);
-		assert(cur_endy<=dimy);
+		assert(cur_startx<dimx);
+		assert(cur_endx<dimx);
+		assert(cur_starty<dimy);
+		assert(cur_endy<dimy);
 
 		//in the same pixel
 		if(cur_startx==cur_endx&&cur_starty==cur_endy){
@@ -631,7 +631,7 @@ void Ideal::calculate_fullness()
 	Xi = getMBB()->low[0];
 	Xi1 = Xi + step_x;
 
-	kx = Xi + (dimx + 1) * step_x;
+	kx = Xi + dimx * step_x;
 
 	TempPolygon tempPol;
 	subpolygonsAfterX.reserve(dimx);
@@ -695,9 +695,9 @@ void Ideal::calculate_fullness()
 
 			// if (type != 0)
 			// {
-			assert(y * (dimx + 1) + it->cellX < (dimx + 1) * (dimy + 1));
-			status[y * (dimx + 1) + it->cellX] = type;
-			areas[y * (dimx + 1) + it->cellX] = clippedArea;
+			assert(y * dimx + it->cellX < dimx * dimy);
+			status[y * dimx + it->cellX] = type;
+			areas[y * dimx + it->cellX] = clippedArea;
 			// }
 
 			// move the horizontal lines equally to the next position
@@ -809,9 +809,9 @@ double Ideal::merge_area(box target){
 }
 
 void Ideal::merge_status(Hraster &r){
-	for (int x = 0; x <= r.get_dimx(); x++)
+	for (int x = 0; x < r.get_dimx(); x++)
 	{
-		for (int y = 0; y <= r.get_dimy(); y++)
+		for (int y = 0; y < r.get_dimy(); y++)
 		{
 			double mergedArea = merge_area(r.get_pixel_box(x, y));
 			uint8_t fullness = classifySubpolygon(mergedArea, r.get_step_x() * r.get_step_y(), category_count);
@@ -822,7 +822,7 @@ void Ideal::merge_status(Hraster &r){
 
 void Ideal::layering()
 {
-	num_layers = static_cast<int>(ceil(max(log(dimx + 1) / log(2.0), log(dimy + 1) / log(2.0))));
+	num_layers = static_cast<int>(ceil(max(log(dimx) / log(2.0), log(dimy) / log(2.0))));
 	layers = new Hraster[num_layers + 1];
 	layer_offset = new uint32_t[num_layers + 1];
 	layer_info = new RasterInfo[num_layers + 1];
