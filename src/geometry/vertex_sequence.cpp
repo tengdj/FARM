@@ -90,8 +90,8 @@ void VertexSequence::print(bool complete_ring){
 		if(i!=0){
 			cout<<",";
 		}
-		printf("%f ",p[i].x);
-		printf("%f",p[i].y);
+		printf("%.12f ",p[i].x);
+		printf("%.12f",p[i].y);
 	}
 	// the last vertex should be the same as the first one for a complete ring
 	if(complete_ring){

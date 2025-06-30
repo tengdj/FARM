@@ -28,7 +28,7 @@ public:
         x = xx;
         y = yy;
     }
-    void print() { printf("POINT (%f %f)\n", x, y); }
+    void print() { printf("POINT (%.12f %.12f)\n", x, y); }
     void print_without_return() { printf("POINT (%f %f)", x, y); }
     string to_string() {
         char double_str[200];
@@ -77,8 +77,8 @@ public:
     //	    return r;
     //	  }
 
-    CUDA_HOSTDEV bool operator==(const Point &p) const { return fabs(x-p.x)<eps && fabs(y-p.y)<eps; }
-    CUDA_HOSTDEV bool operator!=(const Point &p) const { return fabs(x-p.x)>=eps && fabs(y-p.y)>=eps; }
+    CUDA_HOSTDEV bool operator==(const Point &p) const { return fabs(x-p.x) < 1e-9 && fabs(y-p.y) < 1e-9; }
+    CUDA_HOSTDEV bool operator!=(const Point &p) const { return fabs(x-p.x) >= 1e-9 && fabs(y-p.y) >= 1e-9; }
     CUDA_HOSTDEV bool operator<(const Point &p) const { 
         if(fabs(x-p.x) >= 1e-9){
             return p.x - x > 1e-9;

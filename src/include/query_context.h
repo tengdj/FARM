@@ -1,10 +1,3 @@
-/*
- * query_context.h
- *
- *  Created on: Jan 1, 2021
- *      Author: teng
- */
-
 #ifndef SRC_GEOMETRY_QUERY_CONTEXT_H_
 #define SRC_GEOMETRY_QUERY_CONTEXT_H_
 
@@ -114,6 +107,7 @@ public:
 	float sample_rate = 1.0;
 	double load_factor = 1.0;
 	size_t batch_size = 0;
+	int category_count = 8;
 	
 
 	int small_threshold = 500;
@@ -220,9 +214,6 @@ public:
 	box space = {10000.0, 10000.0, -10000.0, -10000.0};
 	int num_layers = 0;
 	int max_layers = 25;
-
-	uint h_level = 0;
-	uint *d_level = nullptr;
 
 	// for rt spatial index
 	pair<uint32_t, uint32_t>* h_candidate_pairs = nullptr;

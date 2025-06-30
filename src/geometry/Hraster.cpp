@@ -9,8 +9,17 @@ void Hraster::init(double _step_x, double _step_y, int _dimx, int _dimy, box *_m
     if(last_layer){
         mbr = _mbr;
     }else{
-        mbr = new box(_mbr->low[0], _mbr->low[1], _mbr->low[0] + step_x * dimx, _mbr->low[1] + step_y * dimy);
-        status = new uint8_t[dimx * dimy];
+		mbr = new box(_mbr);
+
+		mbr->low[0] = floor(mbr->low[0] / step_x) * step_x;
+		mbr->low[1] = floor(mbr->low[1] / step_y) * step_y;
+		mbr->high[0] = ceil(mbr->high[0] / step_x) * step_x;
+		mbr->high[1] = ceil(mbr->high[1] / step_y) * step_y;
+
+		dimx = static_cast<int>(round((mbr->high[0] - mbr->low[0]) / step_x));
+		dimy = static_cast<int>(round((mbr->high[1] - mbr->low[1]) / step_y));
+        
+		status = new uint8_t[dimx * dimy];
         memset(status, 0, dimx * dimy * sizeof(uint8_t));
     }
 }

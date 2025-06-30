@@ -244,12 +244,18 @@ inline double computePolygonArea(vector<Point> &polygon)
 	int n = polygon.size();
 	if (n < 3)
 		return 0.0;
+	
+	if(n == 5 && abs(polygon[0].x - polygon[1].x) < 1e-9 && abs(polygon[2].x - polygon[3].x) < 1e-9){
+		double dx = abs(polygon[1].x - polygon[2].x), dy = abs(polygon[1].y - polygon[0].y);
+		return dx * dy;
+	}
 
 	double area = 0.0;
 	for (int i = 0; i < n - 1; ++i)
 	{
 		const Point &p1 = polygon[i];
 		const Point &p2 = polygon[i + 1];
+
 		area += (p1.x * p2.y - p2.x * p1.y);
 	}
 	return std::abs(area) / 2.0;
@@ -258,6 +264,7 @@ inline double computePolygonArea(vector<Point> &polygon)
 inline uint8_t classifySubpolygon(double area, double pixelArea, int count)
 {
 	double ratio = area / pixelArea;
+	// area calculation has precision error
 	if (fabs(ratio - 1.0) < 1e-6)
 	{
 		// full

@@ -83,7 +83,7 @@ __device__ __forceinline__ int gpu_get_x(int id, int dimx)
 // from id to pixel y
 __device__ __forceinline__ int gpu_get_y(int id, int dimx, int dimy)
 {
-	assert((id / dimx) <= dimy);
+	assert((id / dimx) < dimy);
 	return id / dimx;
 }
 
@@ -120,11 +120,10 @@ __device__ __forceinline__ int gpu_get_offset_y(double s_yval, double t_yval, do
 // 	return BORDER;
 // }
 
-__device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint start, int id, uint32_t offset = 0)
+__device__ __forceinline__ PartitionStatus gpu_show_status(uint8_t *status, uint start, int id, uint8_t category_count, uint32_t offset = 0)
 {
 	uint8_t st = (status + start + offset)[id];
-    PartitionStatus result = static_cast<PartitionStatus>((st > 1) ? 2 : st);
-    return result;
+	return (PartitionStatus)((st > 0) + (st >= category_count - 1));
 }
 
 __device__ __forceinline__ box gpu_get_pixel_box(int x, int y, double bx_lowx, double bx_lowy, double step_x, double step_y)
@@ -173,8 +172,8 @@ __device__ __forceinline__ double haversine(double lon1, double lat1, double lon
 
 __device__ __forceinline__ float gpu_degree_per_kilometer_longitude(float latitude, float *degree_per_kilometer_longitude_arr){
 	float absla = abs(latitude);
-	assert(absla<=90.0);
-	if(absla==90.0){
+	// assert(absla<=90.0);
+	if(absla >= 90.0){
 		absla = 89.9;
 	}
 	return degree_per_kilometer_longitude_arr[(int)(absla*10.0)];
@@ -214,7 +213,7 @@ __device__ __forceinline__ float gpu_distance(box &bx, Point &p, float *degree_p
 __device__ __forceinline__ float gpu_max_distance(box &s_box, box &t_box, float *degree_per_kilometer_latitude, float  *degree_per_kilometer_longitude_arr)
 {
 	float dx = fmax(s_box.high[0], t_box.high[0]) - fmin(s_box.low[0], t_box.low[0]);
-	float dy = fmax(s_box.high[1], t_box.high[1]) - fmin(s_box.low[1], t_box.low[1]);;
+	float dy = fmax(s_box.high[1], t_box.high[1]) - fmin(s_box.low[1], t_box.low[1]);
 
 	dx = dx / gpu_degree_per_kilometer_longitude(s_box.low[1], degree_per_kilometer_longitude_arr);
 	dy = dy / *degree_per_kilometer_latitude;

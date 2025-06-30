@@ -640,12 +640,14 @@ void Ideal::calculate_fullness()
 	while (Xi1 < kx + 1e-9)
 	{
 		tempPol = intersectionDualX(this, Xi, Xi1);
-
-		// printf("----------------------------------------------------\n");
-		// printf("tempPol%d: %lf %lf\n", x, tempPol.cellX, tempPol.cellY);
-		// for (auto x : tempPol.vertices)
-		//     x.print();
-		// printf("----------------------------------------------------\n");
+		
+		// if(id == 47621 || id == 44404){
+		// 	printf("----------------------------------------------------\n");
+		// 	printf("tempPol%d: %lf %lf\n", x, tempPol.cellX, tempPol.cellY);
+		// 	for (auto x : tempPol.vertices)
+		// 		x.print();
+		// 	printf("----------------------------------------------------\n");
+		// }
 
 		if (tempPol.vertices.size() > 0)
 		{
@@ -684,15 +686,30 @@ void Ideal::calculate_fullness()
 
 			double clippedArea = computePolygonArea(clippedPoints);
 			type = classifySubpolygon(clippedArea, step_x * step_y, category_count);
+			
+			// if(id == 47621 || id == 44404){
+			// 	printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
+			// 	for (auto point : clippedPoints)
+			// 		point.print();
 
-			// printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
-			// for (auto point : clippedPoints)
-			// 	point.print();
+			// 	int n = clippedPoints.size();
 
-			// printf("x = %d y = %d area = %.12lf pixelArea = %.12lf type = %d\n", it->cellX, y, clippedArea, step_x * step_y, type);
+			// 	double area = 0.0;
+			// 	for (int i = 0; i < n - 1; ++i)
+			// 	{
+			// 		const Point &p1 = clippedPoints[i];
+			// 		const Point &p2 = clippedPoints[i + 1];
 
-			// printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
+			// 		printf("%.15lf %.15lf %.15lf\n", p1.x * p2.y, p2.x * p1.y, p1.x * p2.y - p2.x * p1.y);
+			// 		area += (p1.x * p2.y - p2.x * p1.y);
+			// 	}
+				
 
+			// 	printf("x = %d y = %d area = %.16lf pixelArea = %.16lf type = %d\n", it->cellX, y, clippedArea, step_x * step_y, type);
+
+			// 	printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
+			// }
+			
 			// if (type != 0)
 			// {
 			assert(y * dimx + it->cellX < dimx * dimy);
@@ -715,11 +732,12 @@ void Ideal::rasterization()
 	// 1. create space for the pixels
 	init_pixels();
 
-	// 2. edge crossing to identify BORDER pixels
+	// 2. determine the fullness of pixels
+	calculate_fullness();
+
+	// 3. edge crossing to identify BORDER pixels
 	evaluate_edges();
 
-	// 3. determine the fullness of pixels
-	calculate_fullness();
 }
 
 void Ideal::rasterization(int vpr){
