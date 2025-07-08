@@ -722,7 +722,7 @@ void MyPolygon::print(bool print_id, bool print_hole){
 	// if(print_id){
 	// 	cout<<"id:\t"<<this->id<<endl;
 	// }
-	cout<<"LINESTRING ";
+	cout<<"POLYGON ";
 	print_without_head(print_hole);
 	cout<<endl;
 }

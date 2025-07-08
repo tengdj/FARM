@@ -8,18 +8,21 @@ int main(int argc, char **argv)
 	global_ctx.geography = false;
 
 	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
-	preprocess(&global_ctx);
-
-	int i = 0;
-	for (auto p : global_ctx.source_ideals)
-	{
-
-		printf("id = %d\n", i++);
-		printf("dimx = %d dimy = %d step_x = %lf step_y = %lf\n", p->get_dimx(), p->get_dimy(), p->get_step_x(), p->get_step_y());
-		p->getMBB()->print();
+	for(auto p : global_ctx.source_ideals){
 		p->MyPolygon::print();
-		p->MyRaster::print();
 	}
+	// preprocess(&global_ctx);
+
+	// int i = 0;
+	// for (auto p : global_ctx.source_ideals)
+	// {
+
+	// 	printf("id = %d\n", i++);
+	// 	printf("dimx = %d dimy = %d step_x = %lf step_y = %lf\n", p->get_dimx(), p->get_dimy(), p->get_step_x(), p->get_step_y());
+	// 	p->getMBB()->print();
+	// 	p->MyPolygon::print();
+	// 	p->MyRaster::print();
+	// }
 
 	return 0;
 }

@@ -78,7 +78,7 @@ public:
     //	  }
 
     CUDA_HOSTDEV bool operator==(const Point &p) const { return fabs(x-p.x) < 1e-9 && fabs(y-p.y) < 1e-9; }
-    CUDA_HOSTDEV bool operator!=(const Point &p) const { return fabs(x-p.x) >= 1e-9 && fabs(y-p.y) >= 1e-9; }
+    CUDA_HOSTDEV bool operator!=(const Point &p) const { return fabs(x-p.x) >= 1e-9 || fabs(y-p.y) >= 1e-9; }
     CUDA_HOSTDEV bool operator<(const Point &p) const { 
         if(fabs(x-p.x) >= 1e-9){
             return p.x - x > 1e-9;

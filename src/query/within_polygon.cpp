@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
 	auto gpu_start = std::chrono::high_resolution_clock::now();
 	// printf("%lf %lf\n", UniversalGrid::getInstance().get_step_x(), UniversalGrid::getInstance().get_step_y());
 	// for(auto p : global_ctx.source_ideals){
-	// 	if(p->id == 47621 || p->id == 44404){
+	// 	if(p->id == 12787){
 	// 		printf("id = %d\n", p->id);
 	// 		printf("\ndimx = %d, dimy = %d\n", p->get_dimx(), p->get_dimy());
 	// 		p->MyPolygon::print();
@@ -96,6 +96,7 @@ int main(int argc, char** argv) {
 	// 	global_ctx.target_ideals[b]->get_layers()[i].mbr->print();
 	// 	global_ctx.target_ideals[b]->get_layers()[i].print();
 	// }
+	global_ctx.batch_size = 100000;
 	for(int i = 0; i < global_ctx.num_pairs; i += global_ctx.batch_size){
 		global_ctx.index = i;
 		global_ctx.index_end = min(i + global_ctx.batch_size, global_ctx.num_pairs);

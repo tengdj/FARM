@@ -440,6 +440,7 @@
 //     thrust::device_ptr<Intersection> end = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput + h_bufferinput_size);
 
 // 	// 排序并去重
+// a.p < b.p可能会有bug
 // 	thrust::sort(thrust::device, begin, end, 
 //     [] __device__(const Intersection &a, const Intersection &b) {
 // 		if (a.pair_id != b.pair_id) {

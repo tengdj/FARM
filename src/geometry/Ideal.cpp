@@ -1,338 +1,444 @@
 #include "../include/Ideal.h"
 
-Ideal::~Ideal(){
-	if(offset) delete []offset;
-	if(edge_sequences) delete []edge_sequences;
-	if(vertical) delete vertical;
-	if(horizontal) delete horizontal;
+Ideal::~Ideal()
+{
+	if (offset)
+		delete[] offset;
+	if (edge_sequences)
+		delete[] edge_sequences;
+	if (vertical)
+		delete vertical;
+	if (horizontal)
+		delete horizontal;
 }
 
-void Ideal::add_edge(int idx, int start, int end){
-	edge_sequences[idx] = make_pair(start, end - start  + 1);
+void Ideal::add_edge(int idx, int start, int end)
+{
+	assert(end - start + 1 > 0);
+	edge_sequences[idx] = make_pair(start, end - start + 1);
 }
 
-uint32_t Ideal::get_num_sequences(int id){
-	if(show_status(id) != BORDER) return 0;
+uint32_t Ideal::get_num_sequences(int id)
+{
+	if (show_status(id) != BORDER)
+		return 0;
 	return offset[id + 1] - offset[id];
 }
 
-void Ideal::init_edge_sequences(int num_edge_seqs){
+void Ideal::init_edge_sequences(int num_edge_seqs)
+{
 	len_edge_sequences = num_edge_seqs;
 	edge_sequences = new pair<uint32_t, uint32_t>[num_edge_seqs];
 	assert(len_edge_sequences < 65536);
 }
 
-void Ideal::process_pixels_null(int x, int y){
+void Ideal::process_pixels_null(int x, int y)
+{
 	offset[x * y] = len_edge_sequences;
-	for(int i = x * y - 1; i >= 0; i --){
-		if(show_status(i) != BORDER){
-			offset[i] = offset[i + 1]; 
+	for (int i = x * y - 1; i >= 0; i--)
+	{
+		if (show_status(i) != BORDER)
+		{
+			offset[i] = offset[i + 1];
 		}
 	}
 }
 
-void Ideal::process_crosses(map<int, vector<cross_info>> edges_info){
+void Ideal::process_crosses(map<int, vector<cross_info>> edges_info)
+{
 	int num_edge_seqs = 0;
 
-	for(auto info : edges_info){
+	for (auto info : edges_info)
+	{
 		auto pix = info.first;
-		auto crosses = info.second; 
-		if(crosses.size() == 0) return;
+		auto crosses = info.second;
 
-		if(crosses.size()%2==1){
-			crosses.push_back(cross_info((cross_type)!crosses[crosses.size()-1].type,crosses[crosses.size()-1].edge_id));
+		if (crosses.size() == 0)
+			return;
+
+		if (crosses.size() % 2 == 1)
+		{
+			crosses.push_back(cross_info((cross_type)!crosses[crosses.size() - 1].type, crosses[crosses.size() - 1].edge_id));
 		}
 
 		int start = 0;
 		int end = crosses.size() - 1;
-		if(crosses[0].type == LEAVE){
+		if (crosses[0].type == LEAVE)
+		{
 			assert(crosses[end].type == ENTER);
 			num_edge_seqs += 2;
-			start ++;
-			end --;
+			start++;
+			end--;
 		}
 
-		for(int i = start; i <= end; i++){
+		for (int i = start; i <= end; i++)
+		{
 			assert(crosses[i].type == ENTER);
-			//special case, an ENTER has no pair LEAVE,
-			//happens when one edge crosses the pair
-			if(i == end || crosses[i + 1].type == ENTER){
-				num_edge_seqs ++;
-			}else{
-				num_edge_seqs ++;
+			// special case, an ENTER has no pair LEAVE,
+			// happens when one edge crosses the pair
+			if (i == end || crosses[i + 1].type == ENTER)
+			{
+				num_edge_seqs++;
+			}
+			else
+			{
+				num_edge_seqs++;
 				i++;
 			}
 		}
-
 	}
+
 	init_edge_sequences(num_edge_seqs);
 
 	int idx = 0;
 	int edge_count = 0;
-	for(auto info : edges_info){
+	for (auto info : edges_info)
+	{
 		auto pix = info.first;
 		auto crosses = info.second;
-		if(crosses.size() == 0) return;
-		
-		if(crosses.size() % 2 == 1){
-			crosses.push_back(cross_info((cross_type)!crosses[crosses.size()-1].type, crosses[crosses.size()-1].edge_id));
+
+		if (crosses.size() == 0)
+			return;
+
+		if (crosses.size() % 2 == 1)
+		{
+			crosses.push_back(cross_info((cross_type)!crosses[crosses.size() - 1].type, crosses[crosses.size() - 1].edge_id));
 		}
-		
-		assert(crosses.size()%2==0);
+
+		assert(crosses.size() % 2 == 0);
 
 		// Initialize based on crosses.size().
 		int start = 0;
 		int end = crosses.size() - 1;
 		set_offset(pix, idx);
 
-		if(crosses[0].type == LEAVE){
+		if (crosses[0].type == LEAVE)
+		{
 			assert(crosses[end].type == ENTER);
-			add_edge(idx ++, 0, crosses[0].edge_id);
-			add_edge(idx ++, crosses[end].edge_id, boundary->num_vertices - 2);
-			start ++;
-			end --;
+			add_edge(idx++, 0, crosses[0].edge_id);
+			add_edge(idx++, crosses[end].edge_id, boundary->num_vertices - 2);
+			start++;
+			end--;
 		}
 
-		for(int i = start; i <= end; i++){
+		for (int i = start; i <= end; i++)
+		{
 			assert(crosses[i].type == ENTER);
-			//special case, an ENTER has no pair LEAVE,
-			//happens when one edge crosses the pair
-			if(i == end || crosses[i + 1].type == ENTER){
-				add_edge(idx ++, crosses[i].edge_id, crosses[i].edge_id);
-			}else{
-				add_edge(idx ++, crosses[i].edge_id, crosses[i+1].edge_id);
+			// special case, an ENTER has no pair LEAVE,
+			// happens when one edge crosses the pair
+			if (i == end || crosses[i + 1].type == ENTER)
+			{
+				add_edge(idx++, crosses[i].edge_id, crosses[i].edge_id);
+			}
+			else
+			{
+				add_edge(idx++, crosses[i].edge_id, crosses[i + 1].edge_id);
 				i++;
 			}
 		}
 	}
 }
 
-void Ideal::process_intersection(map<int, vector<double>> intersection_info, Direction direction){
+void Ideal::process_intersection(map<int, vector<double>> intersection_info, Direction direction)
+{
 	int num_nodes = 0;
-	for(auto i : intersection_info){
+	for (auto i : intersection_info)
+	{
 		num_nodes += i.second.size();
 	}
-	if(direction == HORIZONTAL){
+	if (direction == HORIZONTAL)
+	{
 		horizontal->init_intersection_node(num_nodes);
 		horizontal->set_num_crosses(num_nodes);
 		int idx = 0;
-		for(auto info : intersection_info){
+		for (auto info : intersection_info)
+		{
 			auto h = info.first;
 			auto nodes = info.second;
-			
+
 			sort(nodes.begin(), nodes.end());
 
 			horizontal->set_offset(h, idx);
 
-			for(auto node : nodes){
+			for (auto node : nodes)
+			{
 				horizontal->add_node(idx, node);
-				idx ++;
+				idx++;
 			}
 		}
 		horizontal->set_offset(dimy, idx);
-	}else{
+	}
+	else
+	{
 		vertical->init_intersection_node(num_nodes);
 		vertical->set_num_crosses(num_nodes);
 		vertical->set_offset(dimx + 1, num_nodes);
 
 		int idx = 0;
-		for(auto info : intersection_info){
+		for (auto info : intersection_info)
+		{
 			auto h = info.first;
 			auto nodes = info.second;
-			
+
 			sort(nodes.begin(), nodes.end());
 
 			vertical->set_offset(h, idx);
 
-			for(auto node : nodes){
+			for (auto node : nodes)
+			{
 				vertical->add_node(idx, node);
-				idx ++;
+				idx++;
 			}
 		}
-		vertical->set_offset(dimx, idx);		
+		vertical->set_offset(dimx, idx);
 	}
-
 }
 
-void Ideal::init_pixels(){
+void Ideal::init_pixels()
+{
 	assert(mbr);
 
 	status = new uint8_t[status_size];
 	areas = new double[dimx * dimy]();
+	temp_centroid = new Point[dimx * dimy];
 	memset(status, 0, status_size * sizeof(uint8_t));
 	offset = new uint32_t[dimx * dimy + 1]; // +1 here is to ensure that pointer[num_pixels] equals len_edge_sequences, so we don't need to make a special case for the last pointer.
 	horizontal = new Grid_line(dimy);
 	vertical = new Grid_line(dimx);
 }
 
-void Ideal::evaluate_edges(){
+void Ideal::evaluate_edges()
+{
 	map<int, vector<double>> horizontal_intersect_info;
 	map<int, vector<double>> vertical_intersect_info;
 	map<int, vector<cross_info>> edges_info;
-	
+
 	// normalize
 	assert(mbr);
 	const double start_x = mbr->low[0];
 	const double start_y = mbr->low[1];
 
-	for(int i=0;i<boundary->num_vertices-1;i++){
+	for (int i = 0; i < boundary->num_vertices - 1; i++)
+	{
 		double x1 = boundary->p[i].x;
 		double y1 = boundary->p[i].y;
-		double x2 = boundary->p[i+1].x;
-		double y2 = boundary->p[i+1].y;
+		double x2 = boundary->p[i + 1].x;
+		double y2 = boundary->p[i + 1].y;
 
-		int cur_startx = (x1-start_x)/step_x;
-		int cur_endx = (x2-start_x)/step_x;
-		int cur_starty = (y1-start_y)/step_y;
-		int cur_endy = (y2-start_y)/step_y;
+		int cur_startx = double_to_int((x1 - start_x) / step_x);
+		int cur_endx = double_to_int((x2 - start_x) / step_x);
+		int cur_starty = double_to_int((y1 - start_y) / step_y);
+		int cur_endy = double_to_int((y2 - start_y) / step_y);
 
-		if(cur_startx==dimx){
+		if (cur_startx == dimx)
+		{
 			cur_startx--;
 		}
-		if(cur_endx==dimx){
+		if (cur_endx == dimx)
+		{
 			cur_endx--;
 		}
 
-		int minx = min(cur_startx,cur_endx);
-		int maxx = max(cur_startx,cur_endx);
+		int minx = min(cur_startx, cur_endx);
+		int maxx = max(cur_startx, cur_endx);
 
-		if(cur_starty==dimy){
+		if (cur_starty == dimy)
+		{
 			cur_starty--;
 		}
-		if(cur_endy==dimy){
+		if (cur_endy == dimy)
+		{
 			cur_endy--;
 		}
 		// todo should not happen for normal cases
-		if(cur_startx>=dimx||cur_endx>=dimx||cur_starty>=dimy||cur_endy>=dimy){
-			cout<<"xrange\t"<<cur_startx<<" "<<cur_endx<<endl;
-			cout<<"yrange\t"<<cur_starty<<" "<<cur_endy<<endl;
-			printf("xrange_val\t%f %f\n",(x1-start_x)/step_x, (x2-start_x)/step_x);
-			printf("yrange_val\t%f %f\n",(y1-start_y)/step_y, (y2-start_y)/step_y);
+		if (cur_startx >= dimx || cur_endx >= dimx || cur_starty >= dimy || cur_endy >= dimy)
+		{
+			cout << "xrange\t" << cur_startx << " " << cur_endx << endl;
+			cout << "yrange\t" << cur_starty << " " << cur_endy << endl;
+			printf("xrange_val\t%f %f\n", (x1 - start_x) / step_x, (x2 - start_x) / step_x);
+			printf("yrange_val\t%f %f\n", (y1 - start_y) / step_y, (y2 - start_y) / step_y);
 			assert(false);
 		}
-		assert(cur_startx<dimx);
-		assert(cur_endx<dimx);
-		assert(cur_starty<dimy);
-		assert(cur_endy<dimy);
+		assert(cur_startx < dimx);
+		assert(cur_endx < dimx);
+		assert(cur_starty < dimy);
+		assert(cur_endy < dimy);
 
-		//in the same pixel
-		if(cur_startx==cur_endx&&cur_starty==cur_endy){
+		set_status(get_id(cur_startx, cur_starty), BORDER);
+		set_status(get_id(cur_endx, cur_endy), BORDER);
+
+		// in the same pixel
+		if (cur_startx == cur_endx && cur_starty == cur_endy)
+		{
 			continue;
 		}
 
-		if(y1==y2){
-			//left to right
-			if(cur_startx<cur_endx){
-				for(int x=cur_startx;x<cur_endx;x++){
+		if (y1 == y2)
+		{
+			// left to right
+			if (cur_startx < cur_endx)
+			{
+				for (int x = cur_startx; x < cur_endx; x++)
+				{
 					vertical_intersect_info[x + 1].push_back(y1);
 					edges_info[get_id(x, cur_starty)].push_back(cross_info(LEAVE, i));
-					edges_info[get_id(x+1, cur_starty)].push_back(cross_info(ENTER, i));
+					edges_info[get_id(x + 1, cur_starty)].push_back(cross_info(ENTER, i));
+					set_status(get_id(x, cur_starty), BORDER);
+					set_status(get_id(x + 1, cur_starty), BORDER);
 				}
-			}else { // right to left
-				for(int x=cur_startx;x>cur_endx;x--){
+			}
+			else
+			{ // right to left
+				for (int x = cur_startx; x > cur_endx; x--)
+				{
 					vertical_intersect_info[x].push_back(y1);
 					edges_info[get_id(x, cur_starty)].push_back(cross_info(LEAVE, i));
-					edges_info[get_id(x-1, cur_starty)].push_back(cross_info(ENTER, i));
+					edges_info[get_id(x - 1, cur_starty)].push_back(cross_info(ENTER, i));
+					set_status(get_id(x, cur_starty), BORDER);
+					set_status(get_id(x - 1, cur_starty), BORDER);
 				}
 			}
-		}else if(x1==x2){
-			//bottom up
-			if(cur_starty<cur_endy){
-				for(int y=cur_starty;y<cur_endy;y++){
+		}
+		else if (x1 == x2)
+		{
+			// bottom up
+			if (cur_starty < cur_endy)
+			{
+				for (int y = cur_starty; y < cur_endy; y++)
+				{
 					horizontal_intersect_info[y + 1].push_back(x1);
 					edges_info[get_id(cur_startx, y)].push_back(cross_info(LEAVE, i));
-					edges_info[get_id(cur_startx, y+1)].push_back(cross_info(ENTER, i));
-				}
-			}else { //border[bottom] down
-				for(int y=cur_starty;y>cur_endy;y--){
-					horizontal_intersect_info[y].push_back(x1);
-					edges_info[get_id(cur_startx, y)].push_back(cross_info(LEAVE, i));
-					edges_info[get_id(cur_startx, y-1)].push_back(cross_info(ENTER, i));
+					edges_info[get_id(cur_startx, y + 1)].push_back(cross_info(ENTER, i));
+					set_status(get_id(cur_startx, y), BORDER);
+					set_status(get_id(cur_startx, y + 1), BORDER);
 				}
 			}
-		}else{
+			else
+			{ // border[bottom] down
+				for (int y = cur_starty; y > cur_endy; y--)
+				{
+					horizontal_intersect_info[y].push_back(x1);
+					edges_info[get_id(cur_startx, y)].push_back(cross_info(LEAVE, i));
+					edges_info[get_id(cur_startx, y - 1)].push_back(cross_info(ENTER, i));
+					set_status(get_id(cur_startx, y), BORDER);
+					set_status(get_id(cur_startx, y - 1), BORDER);
+				}
+			}
+		}
+		else
+		{
 			// solve the line function
-			double a = (y1-y2)/(x1-x2);
-			double b = (x1*y2-x2*y1)/(x1-x2);
+			double a = (y1 - y2) / (x1 - x2);
+			double b = (x1 * y2 - x2 * y1) / (x1 - x2);
 
 			int x = cur_startx;
 			int y = cur_starty;
-			while(x!=cur_endx||y!=cur_endy){
+			while (x != cur_endx || y != cur_endy)
+			{
 				bool passed = false;
 				double yval = 0;
 				double xval = 0;
 				int cur_x = 0;
 				int cur_y = 0;
-				//check horizontally
-				if(x!=cur_endx){
-					if(cur_startx<cur_endx){
-						xval = ((double)x+1)*step_x+start_x;
-					}else{
-						xval = (double)x*step_x+start_x;
+				// check horizontally
+				if (x != cur_endx)
+				{
+					if (cur_startx < cur_endx)
+					{
+						xval = ((double)x + 1) * step_x + start_x;
 					}
-					yval = xval*a+b;
-					cur_y = (yval-start_y)/step_y;
-					//printf("y %f %d\n",(yval-start_y)/step_y,cur_y);
-					if(cur_y>max(cur_endy, cur_starty)){
-						cur_y=max(cur_endy, cur_starty);
+					else
+					{
+						xval = (double)x * step_x + start_x;
 					}
-					if(cur_y<min(cur_endy, cur_starty)){
-						cur_y=min(cur_endy, cur_starty);
+					yval = xval * a + b;
+					cur_y = (yval - start_y) / step_y;
+					// printf("y %f %d\n",(yval-start_y)/step_y,cur_y);
+					if (cur_y > max(cur_endy, cur_starty))
+					{
+						cur_y = max(cur_endy, cur_starty);
 					}
-					if(cur_y==y){
+					if (cur_y < min(cur_endy, cur_starty))
+					{
+						cur_y = min(cur_endy, cur_starty);
+					}
+					if (cur_y == y)
+					{
 						passed = true;
 						// left to right
-						if(cur_startx<cur_endx){
+						if (cur_startx < cur_endx)
+						{
 							vertical_intersect_info[x + 1].push_back(yval);
-							edges_info[get_id(x ++, y)].push_back(cross_info(LEAVE, i));
+							set_status(get_id(x, y), BORDER);
+							edges_info[get_id(x++, y)].push_back(cross_info(LEAVE, i));
 							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
-						}else{//right to left
+							set_status(get_id(x, y), BORDER);
+						}
+						else
+						{ // right to left
 							vertical_intersect_info[x].push_back(yval);
-							edges_info[get_id(x --, y)].push_back(cross_info(LEAVE, i));
+							set_status(get_id(x, y), BORDER);
+							edges_info[get_id(x--, y)].push_back(cross_info(LEAVE, i));
 							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
+							set_status(get_id(x, y), BORDER);
 						}
 					}
 				}
-				//check vertically
-				if(y!=cur_endy){
-					if(cur_starty<cur_endy){
-						yval = (y+1)*step_y+start_y;
-					}else{
-						yval = y*step_y+start_y;
+				// check vertically
+				if (y != cur_endy)
+				{
+					if (cur_starty < cur_endy)
+					{
+						yval = (y + 1) * step_y + start_y;
 					}
-					xval = (yval-b)/a;
-					int cur_x = (xval-start_x)/step_x;
-					//printf("x %f %d\n",(xval-start_x)/step_x,cur_x);
-					if(cur_x>max(cur_endx, cur_startx)){
-						cur_x=max(cur_endx, cur_startx);
+					else
+					{
+						yval = y * step_y + start_y;
 					}
-					if(cur_x<min(cur_endx, cur_startx)){
-						cur_x=min(cur_endx, cur_startx);
+					xval = (yval - b) / a;
+					int cur_x = (xval - start_x) / step_x;
+					// printf("x %f %d\n",(xval-start_x)/step_x,cur_x);
+					if (cur_x > max(cur_endx, cur_startx))
+					{
+						cur_x = max(cur_endx, cur_startx);
 					}
-					if(cur_x==x){
+					if (cur_x < min(cur_endx, cur_startx))
+					{
+						cur_x = min(cur_endx, cur_startx);
+					}
+					if (cur_x == x)
+					{
 						passed = true;
-						if(cur_starty<cur_endy){// bottom up
+						if (cur_starty < cur_endy)
+						{ // bottom up
 							horizontal_intersect_info[y + 1].push_back(xval);
-							edges_info[get_id(x, y ++)].push_back(cross_info(LEAVE, i));
+							set_status(get_id(x, y), BORDER);
+							edges_info[get_id(x, y++)].push_back(cross_info(LEAVE, i));
 							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
-						}else{// top down
+							set_status(get_id(x, y), BORDER);
+						}
+						else
+						{ // top down
 							horizontal_intersect_info[y].push_back(xval);
-							edges_info[get_id(x, y --)].push_back(cross_info(LEAVE, i));
+							set_status(get_id(x, y), BORDER);
+							edges_info[get_id(x, y--)].push_back(cross_info(LEAVE, i));
 							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
+							set_status(get_id(x, y), BORDER);
 						}
 					}
 				}
 				// for debugging, should never happen
-				if(!passed){
+				if (!passed)
+				{
 					boundary->print();
-					cout<<"dim\t"<<dimx<<" "<<dimy<<endl;
-					printf("val\t%f %f\n",(xval-start_x)/step_x, (yval-start_y)/step_y);
-					cout<<"curxy\t"<<x<<" "<<y<<endl;
-					cout<<"calxy\t"<<cur_x<<" "<<cur_y<<endl;
-					cout<<"xrange\t"<<cur_startx<<" "<<cur_endx<<endl;
-					cout<<"yrange\t"<<cur_starty<<" "<<cur_endy<<endl;
-					printf("xrange_val\t%f %f\n",(x1-start_x)/step_x, (x2-start_x)/step_x);
-					printf("yrange_val\t%f %f\n",(y1-start_y)/step_y, (y2-start_y)/step_y);
+					cout << "dim\t" << dimx << " " << dimy << endl;
+					printf("val\t%f %f\n", (xval - start_x) / step_x, (yval - start_y) / step_y);
+					cout << "curxy\t" << x << " " << y << endl;
+					cout << "calxy\t" << cur_x << " " << cur_y << endl;
+					cout << "xrange\t" << cur_startx << " " << cur_endx << endl;
+					cout << "yrange\t" << cur_starty << " " << cur_endy << endl;
+					printf("xrange_val\t%f %f\n", (x1 - start_x) / step_x, (x2 - start_x) / step_x);
+					printf("yrange_val\t%f %f\n", (y1 - start_y) / step_y, (y2 - start_y) / step_y);
 				}
 				assert(passed);
 			}
@@ -340,11 +446,14 @@ void Ideal::evaluate_edges(){
 	}
 
 	// special case
-	if(edges_info.size() == 0 && boundary->num_vertices > 0){
+	if (edges_info.size() == 0 && boundary->num_vertices > 0)
+	{
 		init_edge_sequences(1);
 		set_offset(0, 0);
 		add_edge(0, 0, boundary->num_vertices - 1);
-	}else{
+	}
+	else
+	{
 		process_crosses(edges_info);
 	}
 
@@ -353,29 +462,37 @@ void Ideal::evaluate_edges(){
 	process_pixels_null(dimx, dimy);
 }
 
-void Ideal::scanline_reandering(){
+void Ideal::scanline_reandering()
+{
 	const double start_x = mbr->low[0];
 	const double start_y = mbr->low[1];
 
-	for(int y = 1; y < dimy; y ++){
+	for (int y = 1; y < dimy; y++)
+	{
 		bool isin = false;
 		uint32_t i = horizontal->get_offset(y), j = horizontal->get_offset(y + 1);
-		for(int x = 0; x < dimx; x ++){
-			if(show_status(get_id(x, y)) != BORDER){
-				if(isin){
+		for (int x = 0; x < dimx; x++)
+		{
+			if (show_status(get_id(x, y)) != BORDER)
+			{
+				if (isin)
+				{
 					set_status(get_id(x, y), IN);
-				}else{
+				}
+				else
+				{
 					set_status(get_id(x, y), OUT);
 				}
 				continue;
 			}
 			int pass = 0;
-			while(i < j && horizontal->get_intersection_nodes(i) <= start_x + step_x * (x + 1)){
-				pass ++;
-				i ++;
+			while (i < j && horizontal->get_intersection_nodes(i) <= start_x + step_x * (x + 1))
+			{
+				pass++;
+				i++;
 			}
-			if(pass % 2 == 1) isin = !isin;
-
+			if (pass % 2 == 1)
+				isin = !isin;
 		}
 	}
 }
@@ -543,19 +660,20 @@ vector<Point> intersectionDualY(TempPolygon &pol, double Yi, double Yi1)
 			}
 		}
 
+		// POINT A
+		if (isInsideHorizontalDual(Yi, Yi1, pointA.y))
+		{
+			// pointA inside, clipping result
+			// clippedPolygon.addPoint(pointA);
+			clippedPolygon.vertices.push_back(pointA);
+			// cout << "point A (" << pointA.x << " " << pointA.y << ") added" << endl;
+		}
+
 		if (!parallels)
 		{
 			// intersection points
 			Point pi(xi, Yi);
 			Point pi1(xi1, Yi1);
-
-			// POINT A
-			if (isInsideHorizontalDual(Yi, Yi1, pointA.y))
-			{
-				// pointA inside, clipping result
-				clippedPolygon.addPoint(pointA);
-				// cout << "point A (" << pointA.x << " " << pointA.y << ") added" << endl;
-			}
 
 			// intersection points in PROPER ORDER
 			if (pointA.y < pointB.y)
@@ -564,14 +682,16 @@ vector<Point> intersectionDualY(TempPolygon &pol, double Yi, double Yi1)
 				if (isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi.x) && isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi.y))
 				{
 					// intersection point pi is a clipping result
-					clippedPolygon.addPoint(pi);
+					// clippedPolygon.addPoint(pi);
+					clippedPolygon.vertices.push_back(pi);
 					// cout << "point pi (" << pi.x << " " << pi.y << ") added" << endl;
 				}
 
 				if (isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi1.x) && isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi1.y))
 				{
 					// intersection point pi1 is a clipping result
-					clippedPolygon.addPoint(pi1);
+					// clippedPolygon.addPoint(pi1);
+					clippedPolygon.vertices.push_back(pi1);
 					// cout << "point pi1 (" << pi1.x << " " << pi1.y << ") added" << endl;
 				}
 			}
@@ -581,24 +701,26 @@ vector<Point> intersectionDualY(TempPolygon &pol, double Yi, double Yi1)
 				if (isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi1.x) && isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi1.y))
 				{
 					// intersection point pi1 is a clipping result
-					clippedPolygon.addPoint(pi1);
+					// clippedPolygon.addPoint(pi1);
+					clippedPolygon.vertices.push_back(pi1);
 					// cout << "point pi1 (" << pi1.x << " " << pi1.y << ") added" << endl;
 				}
 				if (isInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi.x) && isInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi.y))
 				{
 					// intersection point pi is a clipping result
-					clippedPolygon.addPoint(pi);
+					// clippedPolygon.addPoint(pi);
+					clippedPolygon.vertices.push_back(pi);
 					// cout << "point pi (" << pi.x << " " << pi.y << ") added" << endl;
 				}
 			}
 
 			// POINT B
-			if (isInsideHorizontalDual(Yi, Yi1, pointB.y))
-			{
-				// pointB inside, clipping result
-				clippedPolygon.addPoint(pointB);
-				// cout << "point B (" << pointB.x << " " << pointB.y << ") added" << endl;
-			}
+			// if (isInsideHorizontalDual(Yi, Yi1, pointB.y))
+			// {
+			// 	// pointB inside, clipping result
+			// 	clippedPolygon.addPoint(pointB);
+			// 	// cout << "point B (" << pointB.x << " " << pointB.y << ") added" << endl;
+			// }
 		}
 	}
 	// cout << "sort before" << endl;
@@ -612,7 +734,7 @@ vector<Point> intersectionDualY(TempPolygon &pol, double Yi, double Yi1)
 	//     x.print();
 
 	//"close" the polygon (first and last points in order must be the same point)
-	if (clippedPolygon.vertices.size() != 0)
+	if (clippedPolygon.vertices.size() != 0 && clippedPolygon.vertices.front() != clippedPolygon.vertices.back())
 	{
 		clippedPolygon.vertices.push_back(*clippedPolygon.vertices.begin());
 	}
@@ -640,8 +762,8 @@ void Ideal::calculate_fullness()
 	while (Xi1 < kx + 1e-9)
 	{
 		tempPol = intersectionDualX(this, Xi, Xi1);
-		
-		// if(id == 47621 || id == 44404){
+
+		// if(id == 15){
 		// 	printf("----------------------------------------------------\n");
 		// 	printf("tempPol%d: %lf %lf\n", x, tempPol.cellX, tempPol.cellY);
 		// 	for (auto x : tempPol.vertices)
@@ -679,6 +801,32 @@ void Ideal::calculate_fullness()
 			// returns the subpolygon furtherly clipped in the y axis by Yi and Yi+1
 			clippedPoints = intersectionDualY(*it, Yi, Yi1);
 
+			auto computeCentroid = [](const std::vector<Point> &polygon) -> Point
+			{
+				double cx = 0.0, cy = 0.0;
+				double area = 0.0;
+				int n = polygon.size();
+				if (n < 3)
+					return {0, 0};
+
+				for (int i = 0; i < n; ++i)
+				{
+					const Point &p0 = polygon[i];
+					const Point &p1 = polygon[(i + 1) % n];
+					double cross = p0.x * p1.y - p1.x * p0.y;
+					area += cross;
+					cx += (p0.x + p1.x) * cross;
+					cy += (p0.y + p1.y) * cross;
+				}
+
+				area *= 0.5;
+				if (std::abs(area) < 1e-10)
+					return {0, 0};
+				cx /= (6.0 * area);
+				cy /= (6.0 * area);
+				return {cx, cy};
+			};
+
 			// this helps ignore a large portion of the empty cells for a polygon
 			// if (clippedPoints.size() > 2)
 			// {
@@ -686,36 +834,30 @@ void Ideal::calculate_fullness()
 
 			double clippedArea = computePolygonArea(clippedPoints);
 			type = classifySubpolygon(clippedArea, step_x * step_y, category_count);
-			
-			// if(id == 47621 || id == 44404){
+			Point centroid = computeCentroid(clippedPoints);
+
+			// if(id == 15){
 			// 	printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
 			// 	for (auto point : clippedPoints)
 			// 		point.print();
-
-			// 	int n = clippedPoints.size();
-
-			// 	double area = 0.0;
-			// 	for (int i = 0; i < n - 1; ++i)
-			// 	{
-			// 		const Point &p1 = clippedPoints[i];
-			// 		const Point &p2 = clippedPoints[i + 1];
-
-			// 		printf("%.15lf %.15lf %.15lf\n", p1.x * p2.y, p2.x * p1.y, p1.x * p2.y - p2.x * p1.y);
-			// 		area += (p1.x * p2.y - p2.x * p1.y);
-			// 	}
-				
 
 			// 	printf("x = %d y = %d area = %.16lf pixelArea = %.16lf type = %d\n", it->cellX, y, clippedArea, step_x * step_y, type);
 
 			// 	printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
 			// }
-			
-			// if (type != 0)
-			// {
-			assert(y * dimx + it->cellX < dimx * dimy);
-			status[y * dimx + it->cellX] = type;
-			areas[y * dimx + it->cellX] = clippedArea;
-			// }
+			int pix_id = get_id(it->cellX, y);
+			assert(pix_id < dimx * dimy);
+			if (status[pix_id] == BORDER)
+			{
+				status[pix_id] = max(1, min(type, category_count - 2));
+				areas[pix_id] = clippedArea;
+				temp_centroid[pix_id] = centroid;
+			}
+			else if (status[pix_id] == IN)
+			{
+				status[pix_id] = category_count - 1;
+				areas[pix_id] = get_pixel_area();
+			}
 
 			// move the horizontal lines equally to the next position
 			Yi += step_y;
@@ -732,74 +874,90 @@ void Ideal::rasterization()
 	// 1. create space for the pixels
 	init_pixels();
 
-	// 2. determine the fullness of pixels
-	calculate_fullness();
-
 	// 3. edge crossing to identify BORDER pixels
 	evaluate_edges();
 
+	// 3. determine the status of rest pixels with scanline rendering
+	scanline_reandering();
+
+	// 2. determine the fullness of pixels
+	calculate_fullness();
 }
 
-void Ideal::rasterization(int vpr){
+void Ideal::rasterization(int vpr)
+{
 	assert(vpr > 0);
 	pthread_mutex_lock(&ideal_partition_lock);
 
-    rasterization();
+	rasterization();
 
-	if(use_hierachy){
+	if (use_hierachy)
+	{
 		layers[num_layers].set_status(status);
 
-		for (int i = num_layers - 1; i >= 0; i--){
+		for (int i = num_layers - 1; i >= 0; i--)
+		{
 			merge_status(layers[i]);
-			memcpy(status + layer_offset[i], layers[i].get_status(), (layers[i].get_dimx() + 1) * (layers[i].get_dimy() + 1) * sizeof(uint8_t));
+			memcpy(status + layer_offset[i], layers[i].get_status(), layers[i].get_dimx() * layers[i].get_dimy() * sizeof(uint8_t));
 		}
 	}
 
 	pthread_mutex_unlock(&ideal_partition_lock);
 }
 
-int Ideal::num_edges_covered(int id){
+int Ideal::num_edges_covered(int id)
+{
 	int c = 0;
-	for(int i = 0; i < get_num_sequences(id); i ++){
+	for (int i = 0; i < get_num_sequences(id); i++)
+	{
 		auto r = edge_sequences[offset[id] + i];
 		c += r.second;
 	}
 	return c;
 }
 
-int Ideal::get_num_border_edge(){
+int Ideal::get_num_border_edge()
+{
 	int num = 0;
-	for(int i = 0; i < get_num_pixels(); i ++){
-		if(show_status(i) == BORDER){
+	for (int i = 0; i < get_num_pixels(); i++)
+	{
+		if (show_status(i) == BORDER)
+		{
 			num += num_edges_covered(i);
 		}
 	}
 	return num;
 }
 
-size_t Ideal::get_num_crosses(){
+size_t Ideal::get_num_crosses()
+{
 	size_t num = 0;
 	num = horizontal->get_num_crosses() + vertical->get_num_crosses();
 	return num;
 }
 
-int Ideal::count_intersection_nodes(Point &p){
+int Ideal::count_intersection_nodes(Point &p)
+{
 	// here we assume the point inside one of the pixel
 	int pix_id = get_pixel_id(p);
 	assert(show_status(pix_id) == BORDER);
 	int count = 0;
 	int x = get_x(pix_id) + 1;
-	uint32_t i = vertical->get_offset(x), j;
-	if(x < dimx) j = vertical->get_offset(x + 1);
-	else j = vertical->get_num_crosses();
-	while(i < j && vertical->get_intersection_nodes(i) <= p.y){
-		count ++;
-		i ++;
+	uint32_t i = vertical->get_offset(x), j = vertical->get_offset(x + 1);
+	// if (x < dimx)
+	// 	j = vertical->get_offset(x + 1);
+	// else
+	//	j = vertical->get_num_crosses();
+	while (i < j && vertical->get_intersection_nodes(i) < p.y)
+	{
+		count++;
+		i++;
 	}
 	return count;
 }
 
-double Ideal::merge_area(box target){
+double Ideal::merge_area(box target)
+{
 	int start_x = get_offset_x(target.low[0]);
 	int start_y = get_offset_y(target.low[1]);
 	int end_x = get_offset_x(target.high[0]) - 1;
@@ -826,7 +984,8 @@ double Ideal::merge_area(box target){
 	return clippedArea;
 }
 
-void Ideal::merge_status(Hraster &r){
+void Ideal::merge_status(Hraster &r)
+{
 	for (int x = 0; x < r.get_dimx(); x++)
 	{
 		for (int y = 0; y < r.get_dimy(); y++)
@@ -860,95 +1019,128 @@ void Ideal::layering()
 		layers[i].init(_step_x, _step_y, _dimx, _dimy, getMBB(), false);
 		layer_info[i] = {*layers[i].mbr, layers[i].get_dimx(), layers[i].get_dimy(), _step_x, _step_y};
 		layer_offset[i] = status_size;
-		status_size += (layers[i].get_dimx() + 1) * (layers[i].get_dimy() + 1);
+		status_size += layers[i].get_dimx() * layers[i].get_dimy();
 	}
 }
 
-
-bool Ideal::contain(Point &p, query_context *ctx, bool profile){
+bool Ideal::contain(Point &p, query_context *ctx, bool profile)
+{
 
 	// the MBB may not be checked for within query
-	if(!mbr->contain(p)){
+	if (!mbr->contain(p))
+	{
 		return false;
 	}
 
-
 	struct timeval start = get_cur_time();
 	// todo adjust the lower bound of pixel number when the raster model is usable
-    start = get_cur_time();
-    int target = get_pixel_id(p);
-    box bx = get_pixel_box(get_x(target), get_y(target));
-    double bx_high = bx.high[0];
-    if(show_status(target) == IN) {
-        return true;
-    }
-    if(show_status(target) == OUT){
-        return false;
-    }
+	start = get_cur_time();
+	int target = get_pixel_id(p);
+	box bx = get_pixel_box(get_x(target), get_y(target));
+	double bx_high = bx.high[0];
+	if (show_status(target) == IN)
+	{
+		return true;
+	}
+	if (show_status(target) == OUT)
+	{
+		return false;
+	}
 
-    start = get_cur_time();
-    bool ret = false;
+	start = get_cur_time();
+	bool ret = false;
 
-    // checking the intersection edges in the target pixel
-    for(uint32_t e = 0; e < get_num_sequences(target); e ++){    
-        auto edges = get_edge_sequence(get_offset(target) + e);
-        auto pos = edges.first;
-        for(int k = 0; k < edges.second; k ++){
-            int i = pos + k;
-            int j = i + 1;  //ATTENTION
-            if(((boundary->p[i].y >= p.y) != (boundary->p[j].y >= p.y))){
-                double int_x = (boundary->p[j].x - boundary->p[i].x) * (p.y - boundary->p[i].y) / (boundary->p[j].y - boundary->p[i].y) + boundary->p[i].x;
-                if(p.x <= int_x && int_x <= bx_high){
-                    ret = !ret;
-                }
-            }
-        }
-    }
-    // check the crossing nodes on the right bar
-    // swap the state of ret if odd number of intersection
-    // nodes encountered at the right side of the border
-    struct timeval tstart = get_cur_time();
-    int nc = count_intersection_nodes(p);
-    if(nc%2==1){
-        ret = !ret;
-    }
-    return ret;
+	// checking the intersection edges in the target pixel
+	for (uint32_t e = 0; e < get_num_sequences(target); e++)
+	{
+		auto edges = get_edge_sequence(get_offset(target) + e);
+		auto pos = edges.first;
+		for (int k = 0; k < edges.second; k++)
+		{
+			int i = pos + k;
+			int j = i + 1; // ATTENTION
+			if (((boundary->p[i].y >= p.y) != (boundary->p[j].y >= p.y)))
+			{
+				double int_x = (boundary->p[j].x - boundary->p[i].x) * (p.y - boundary->p[i].y) / (boundary->p[j].y - boundary->p[i].y) + boundary->p[i].x;
+				if (p.x <= int_x && int_x <= bx_high)
+				{
+					ret = !ret;
+				}
+			}
+		}
+	}
+	// check the crossing nodes on the right bar
+	// swap the state of ret if odd number of intersection
+	// nodes encountered at the right side of the border
+	struct timeval tstart = get_cur_time();
+	int nc = count_intersection_nodes(p);
+	if (nc % 2 == 1)
+	{
+		ret = !ret;
+	}
+	return ret;
 }
 
-PartitionStatus Ideal::segment_contain(Point &p){
-    int target = get_pixel_id(p);
-    box bx = get_pixel_box(get_x(target), get_y(target));
-    double bx_high = bx.high[0];
-    if(show_status(target) == IN) {
-        return IN;
-    }
-    if(show_status(target) == OUT){
-        return OUT;
-    }
+PartitionStatus Ideal::segment_contain(Point &p)
+{
+	int target = get_pixel_id(p);
 
-    bool ret = false;
+	box bx = get_pixel_box(get_x(target), get_y(target));
+	double bx_high = bx.high[0];
+	if (show_status(target) == IN)
+	{
+		return IN;
+	}
+	if (show_status(target) == OUT)
+	{
+		return OUT;
+	}
 
-    // checking the intersection edges in the target pixel
-    for(uint32_t e = 0; e < get_num_sequences(target); e ++){    
-        auto edges = get_edge_sequence(get_offset(target) + e);
-        auto pos = edges.first;
-        for(int k = 0; k < edges.second; k ++){
+	bool ret = false;
+
+	// checking the intersection edges in the target pixel
+	for (uint32_t e = 0; e < get_num_sequences(target); e++)
+	{
+		auto edges = get_edge_sequence(get_offset(target) + e);
+		auto pos = edges.first;
+		for (int k = 0; k < edges.second; k++)
+		{
 			Point v1 = boundary->p[pos + k];
 			Point v2 = boundary->p[pos + k + 1];
-			if(p == v1 || p == v2){
+			// if (abs(p.x - 133.967605) < 1e-9 && abs(p.y - 34.558846) < 1e-9)
+			// {
+			// 	printf("----------------------CHECK-----------------------------\n");
+			// 	p.print();
+			// 	v1.print();
+			// 	v2.print();
+			// 	printf("----------------------CHECK-----------------------------\n");
+			// }
+
+			if (p == v1 || p == v2)
+			{
+				// printf("OUTPUT1\n");
+				// p.print();
+				// v1.print();
+				// v2.print();
 				return BORDER;
 			}
-            if ((v1.y >= p.y) != (v2.y >= p.y))
+
+			if ((v1.y >= p.y) != (v2.y >= p.y))
 			{
 
 				const double dx = v2.x - v1.x;
 				const double dy = v2.y - v1.y;
 				const double py_diff = p.y - v1.y;
 
-				if (dy != 0.0)
+				if (abs(dy) > 1e-9)
 				{
 					const double int_x = dx * py_diff / dy + v1.x;
-					if(fabs(p.x - int_x) < eps) {
+					if (fabs(p.x - int_x) < 1e-9)
+					{
+						// printf("OUTPUT2\n");
+						// p.print();
+						// v1.print();
+						// v2.print();
 						return BORDER;
 					}
 					if (p.x < int_x && int_x <= bx.high[0])
@@ -957,77 +1149,115 @@ PartitionStatus Ideal::segment_contain(Point &p){
 					}
 				}
 			}
-        }
-    }
-    // check the crossing nodes on the right bar
-    // swap the state of ret if odd number of intersection
-    // nodes encountered at the right side of the border
-    int nc = count_intersection_nodes(p);
-    if(nc%2==1){
-        ret = !ret;
-    }
-	if(ret) return IN;
-	else return OUT;
+			else if (v1.y == p.y && v2.y == p.y && (v1.x >= p.x) != (v2.x >= p.x))
+			{
+				// printf("OUTPUT3\n");
+				// p.print();
+				// v1.print();
+				// v2.print();
+				return BORDER;
+			}
+		}
+	}
+	// check the crossing nodes on the right bar
+	// swap the state of ret if odd number of intersection
+	// nodes encountered at the right side of the border
+	int nc = count_intersection_nodes(p);
+	if (nc % 2 == 1)
+	{
+		ret = !ret;
+	}
+	if (ret)
+	{
+		return IN;
+	}
+	else
+	{
+		return OUT;
+	}
 }
 
-
-bool Ideal::contain(Ideal *target, query_context *ctx, bool profile){
-	if(!getMBB()->contain(*target->getMBB())){
-		//log("mbb do not contain");
+bool Ideal::contain(Ideal *target, query_context *ctx, bool profile)
+{
+	if (!getMBB()->contain(*target->getMBB()))
+	{
+		// log("mbb do not contain");
 		return false;
 	}
 	vector<int> pxs = retrieve_pixels(target->getMBB());
 	int etn = 0;
 	int itn = 0;
-	for(auto p : pxs){
-		if(show_status(p) == OUT){
+	for (auto p : pxs)
+	{
+		if (show_status(p) == OUT)
+		{
 			etn++;
-		}else if(show_status(p) == IN){
+		}
+		else if (show_status(p) == IN)
+		{
 			itn++;
 		}
 	}
-	if(etn == pxs.size()){
+	if (etn == pxs.size())
+	{
 		return false;
 	}
-	if(itn == pxs.size()){
+	if (itn == pxs.size())
+	{
 		return true;
 	}
 
 	vector<int> tpxs;
 
-	for(auto p : pxs){
-		box bx =  get_pixel_box(get_x(p), get_y(p));
+	for (auto p : pxs)
+	{
+		box bx = get_pixel_box(get_x(p), get_y(p));
 		tpxs = target->retrieve_pixels(&bx);
-		for(auto p2 : tpxs){
+		for (auto p2 : tpxs)
+		{
 			// an external pixel of the container intersects an internal
 			// pixel of the containee, which means the containment must be false
-			if(show_status(p) == IN) continue;
-			if(show_status(p) == OUT && target->show_status(p2) == IN){
+			if (show_status(p) == IN)
+				continue;
+			if (show_status(p) == OUT && target->show_status(p2) == IN)
+			{
 				return false;
 			}
-			if (show_status(p) == OUT && target->show_status(p2) == BORDER){
+			if (show_status(p) == OUT && target->show_status(p2) == BORDER)
+			{
 				Point pix_border[5];
-				pix_border[0].x = bx.low[0]; pix_border[0].y = bx.low[1];
-				pix_border[1].x = bx.low[0]; pix_border[1].y = bx.high[1];
-				pix_border[2].x = bx.high[0]; pix_border[2].y = bx.high[1];
-				pix_border[3].x = bx.high[0]; pix_border[3].y = bx.low[1];
-				pix_border[4].x = bx.low[0]; pix_border[4].y = bx.low[1];
-				for (int e = 0; e < target->get_num_sequences(p2); e++){
+				pix_border[0].x = bx.low[0];
+				pix_border[0].y = bx.low[1];
+				pix_border[1].x = bx.low[0];
+				pix_border[1].y = bx.high[1];
+				pix_border[2].x = bx.high[0];
+				pix_border[2].y = bx.high[1];
+				pix_border[3].x = bx.high[0];
+				pix_border[3].y = bx.low[1];
+				pix_border[4].x = bx.low[0];
+				pix_border[4].y = bx.low[1];
+				for (int e = 0; e < target->get_num_sequences(p2); e++)
+				{
 					auto edges = target->get_edge_sequence(target->get_offset(p2) + e);
 					auto pos = edges.first;
 					auto size = edges.second;
-					if (segment_intersect_batch(target->boundary->p + pos, pix_border, size, 4)){
+					if (segment_intersect_batch(target->boundary->p + pos, pix_border, size, 4))
+					{
 						return false;
 					}
 				}
 			}
 			// evaluate the state
-			if(show_status(p) == BORDER && target->show_status(p2) == BORDER){
-				for(int i = 0; i < get_num_sequences(p); i ++){
+			if (show_status(p) == BORDER && target->show_status(p2) == BORDER)
+			{
+				for (int i = 0; i < get_num_sequences(p); i++)
+				{
 					auto r = get_edge_sequence(get_offset(p) + i);
-					for(int j = 0; j < target->get_num_sequences(p2); j ++){
+					for (int j = 0; j < target->get_num_sequences(p2); j++)
+					{
 						auto r2 = target->get_edge_sequence(target->get_offset(p2) + j);
-						if(segment_intersect_batch(boundary->p+r.first, target->boundary->p+r2.first, r.second, r2.second)){
+						if (segment_intersect_batch(boundary->p + r.first, target->boundary->p + r2.first, r.second, r2.second))
+						{
 							return false;
 						}
 					}
@@ -1040,46 +1270,63 @@ bool Ideal::contain(Ideal *target, query_context *ctx, bool profile){
 
 	// this is the last step for all the cases, when no intersection segment is identified
 	// pick one point from the target and it must be contained by this polygon
-	Point p(target->getx(0),target->gety(0));
-	return contain(p, ctx,false);
+	Point p(target->getx(0), target->gety(0));
+	return contain(p, ctx, false);
 }
 
-inline int binary_search(vector<Segment> &sorted_array, int left, int right, Point target) {
-    while (left < right) {
-        int mid = (left + right) >> 1;
-        if(target <= sorted_array[mid].start) right = mid;
-        else left = mid + 1;
-    }
-	if(sorted_array[left].start == target) return left;
-    else return -1; // Not Found
+inline int binary_search(vector<Segment> &sorted_array, int left, int right, Point target)
+{
+	while (left < right)
+	{
+		int mid = (left + right) >> 1;
+		if (target <= sorted_array[mid].start)
+			right = mid;
+		else
+			left = mid + 1;
+	}
+	if (sorted_array[left].start == target)
+		return left;
+	else
+		return -1; // Not Found
 }
 
-void Ideal::intersection(Ideal *target, query_context *ctx){
+void Ideal::intersection(Ideal *target, query_context *ctx)
+{
 	vector<int> pxs = retrieve_pixels(target->getMBB());
 	int etn = 0;
 	int itn = 0;
-	for(auto p : pxs){
-		if(show_status(p) == OUT){
+	for (auto p : pxs)
+	{
+		if (show_status(p) == OUT)
+		{
 			etn++;
-		}else if(show_status(p) == IN){
+		}
+		else if (show_status(p) == IN)
+		{
 			itn++;
 		}
 	}
-	if(etn == pxs.size() || itn == pxs.size()){
+	if (etn == pxs.size() || itn == pxs.size())
+	{
 		return;
 	}
 
 	vector<int> tpxs;
 	vector<Intersection> inters;
 
-	for(auto p : pxs){
-		box bx =  get_pixel_box(get_x(p), get_y(p));
+	for (auto p : pxs)
+	{
+		box bx = get_pixel_box(get_x(p), get_y(p));
 		tpxs = target->retrieve_pixels(&bx);
-		for(auto p2 : tpxs){
-			if(show_status(p) == BORDER && target->show_status(p2) == BORDER){
-				for(int i = 0; i < get_num_sequences(p); i ++){
+		for (auto p2 : tpxs)
+		{
+			if (show_status(p) == BORDER && target->show_status(p2) == BORDER)
+			{
+				for (int i = 0; i < get_num_sequences(p); i++)
+				{
 					auto r = get_edge_sequence(get_offset(p) + i);
-					for(int j = 0; j < target->get_num_sequences(p2); j ++){
+					for (int j = 0; j < target->get_num_sequences(p2); j++)
+					{
 						auto r2 = target->get_edge_sequence(target->get_offset(p2) + j);
 						assert(r.second != 0 && r2.second != 0);
 						segment_intersect_batch(boundary->p, target->boundary->p, r.first, r2.first, r.first + r.second, r2.first + r2.second, inters);
@@ -1092,204 +1339,300 @@ void Ideal::intersection(Ideal *target, query_context *ctx){
 	pxs.clear();
 
 	std::sort(inters.begin(), inters.end(),
-		[](const Intersection &a, const Intersection &b){
-			return a.p < b.p;
-		});
+			  [](const Intersection &a, const Intersection &b)
+			  {
+				  if (a.p.x != b.p.x)
+				  {
+					  return a.p.x < b.p.x;
+				  }
+				  return a.p.y < b.p.y;
+			  });
 
 	auto new_end = std::unique(inters.begin(), inters.end(),
-        [](const Intersection& a, const Intersection& b) {
-            return a.p == b.p;
-        });
+							   [](const Intersection &a, const Intersection &b)
+							   {
+								   return a.p == b.p;
+							   });
 
 	inters.erase(new_end, inters.end());
 
 	int num_inters = inters.size();
 
-	// for(auto inter : inters){
+	// printf("num_inters = %d\n", num_inters);
+
+	// for (auto inter : inters)
+	// {
 	// 	inter.print();
 	// }
 
+	// return;
+
 	std::sort(inters.begin(), inters.end(),
-		[](const Intersection &a, const Intersection &b){
-        	if (a.edge_source_id != b.edge_source_id){
-				return a.edge_source_id < b.edge_source_id;
-			}
-        	return a.t < b.t;
-		});
+			  [](const Intersection &a, const Intersection &b)
+			  {
+				  if (a.edge_source_id != b.edge_source_id)
+				  {
+					  return a.edge_source_id < b.edge_source_id;
+				  }
+				  return a.t < b.t;
+			  });
 
 	vector<Segment> segments;
 
-	for(int i = 0; i < num_inters; i ++){
+	for (int i = 0; i < num_inters; i++)
+	{
 		Intersection a = inters[i];
-		Intersection b = inters[(i + 1) % num_inters]; 
+		Intersection b = inters[(i + 1) % num_inters];
+
+		if (a.p == b.p)
+			continue;
 
 		int a_edge_id = a.edge_source_id;
 		int b_edge_id = b.edge_source_id;
 		double a_param = a.t;
 		double b_param = b.t;
 
-		if(fabs(a_param - 1.0) < eps) a_edge_id++;
-		if(fabs(b_param) < eps) b_edge_id--;
-
-		if(a_edge_id == b_edge_id) {
-			segments.push_back({true, a.p, b.p, -1, -1, 0});
-		} else {
-			segments.push_back({true, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
+		if (fabs(a_param - 1.0) < eps)
+		{
+			a_edge_id = (a_edge_id + 1) % (get_num_vertices() - 1);
+			a_param = 0.0;
+		}
+		if (fabs(b_param) < eps)
+		{
+			b_edge_id--;
+			b_param = 1.0;
 		}
 
+		segments.push_back({true, a.p, b.p,
+							(a_edge_id == b_edge_id && a_param < b_param) ? -1 : a_edge_id + 1,
+							(a_edge_id == b_edge_id && a_param < b_param) ? -1 : b_edge_id,
+							0});
 	}
 
 	std::sort(inters.begin(), inters.end(),
-		[](const Intersection &a, const Intersection &b){
-			if (a.edge_target_id != b.edge_target_id){
-				return a.edge_target_id < b.edge_target_id;
-			}
-			return a.u < b.u;
-		});
+			  [](const Intersection &a, const Intersection &b)
+			  {
+				  if (a.edge_target_id != b.edge_target_id)
+				  {
+					  return a.edge_target_id < b.edge_target_id;
+				  }
+				  return a.u < b.u;
+			  });
 
-	for(int i = 0; i < num_inters; i ++){
+	for (int i = 0; i < num_inters; i++)
+	{
 		Intersection a = inters[i];
-		Intersection b = inters[(i + 1) % num_inters]; 
+		Intersection b = inters[(i + 1) % num_inters];
+
+		if (a.p == b.p)
+			continue;
 
 		int a_edge_id = a.edge_target_id;
 		int b_edge_id = b.edge_target_id;
 		double a_param = a.u;
 		double b_param = b.u;
 
-		if(fabs(a_param - 1.0) < eps) a_edge_id++;
-		if(fabs(b_param) < eps) b_edge_id--;
-
-		if(a_edge_id == b_edge_id) {
-			segments.push_back({false, a.p, b.p, -1, -1, 0});
-		} else {
-			segments.push_back({false, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
+		if (fabs(a_param - 1.0) < eps)
+		{
+			a_edge_id = (a_edge_id + 1) % (target->get_num_vertices() - 1);
+			a_param = 0.0;
+		}
+		if (fabs(b_param) < eps)
+		{
+			b_edge_id--;
+			b_param = 1.0;
 		}
 
+		segments.push_back({false, a.p, b.p,
+							(a_edge_id == b_edge_id && a_param < b_param) ? -1 : a_edge_id + 1,
+							(a_edge_id == b_edge_id && a_param < b_param) ? -1 : b_edge_id,
+							0});
+
+		// if (a_edge_id == b_edge_id)
+		// {
+		// 	if (a_param < b_param)
+		// 		segments.push_back({false, a.p, b.p, -1, -1, 0});
+		// 	else
+		// 		segments.push_back({false, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
+		// }
+		// else
+		// {
+		// 	segments.push_back({false, a.p, b.p, a_edge_id + 1, b_edge_id, 0});
+		// }
 	}
 
 	auto num_segments = segments.size();
-	printf("num_segments = %d\n", num_segments);
+	// printf("num_segments = %d\n", num_segments);
 
-	sort(segments.begin(), segments.end(), 
-		[](const Segment &a, const Segment &b){
-			if(fabs(a.start.x - b.start.x) >= 1e-9){
-				return a.start.x < b.start.x;
-			}else if(fabs(a.start.y - b.start.y) >= 1e-9){
-				return a.start.y < b.start.y;
-			}else if(fabs(a.end.x - b.end.x) >= 1e-9){
-				return a.end.x < b.end.x;
-			}else if(fabs(a.end.y - b.end.y) >= 1e-9){
-				return a.end.y < b.end.y;
-			}else{
-				return a.is_source < b.is_source;
-			}
-		});
+	sort(segments.begin(), segments.end(),
+		 [](const Segment &a, const Segment &b)
+		 {
+			 if (fabs(a.start.x - b.start.x) >= 1e-9)
+			 {
+				 return a.start.x < b.start.x;
+			 }
+			 else if (fabs(a.start.y - b.start.y) >= 1e-9)
+			 {
+				 return a.start.y < b.start.y;
+			 }
+			 else if (fabs(a.end.x - b.end.x) >= 1e-9)
+			 {
+				 return a.end.x < b.end.x;
+			 }
+			 else if (fabs(a.end.y - b.end.y) >= 1e-9)
+			 {
+				 return a.end.y < b.end.y;
+			 }
+			 else
+			 {
+				 return a.is_source < b.is_source;
+			 }
+		 });
 
 	vector<PartitionStatus> status;
-	for(auto seg : segments){
+	for (auto seg : segments)
+	{
 		Point p;
-		if(seg.edge_start == -1){
+		if (seg.edge_start == -1)
+		{
 			p = (seg.start + seg.end) * 0.5;
-		}else{
+		}
+		else
+		{
 			p = seg.is_source ? boundary->p[seg.edge_start] : target->boundary->p[seg.edge_start];
 		}
-		if(seg.is_source) status.push_back(target->segment_contain(p));
-		else status.push_back(segment_contain(p));
+		if (seg.is_source)
+			status.push_back(target->segment_contain(p));
+		else
+			status.push_back(segment_contain(p));
 	}
 
-	// for(int i = 0; i < num_segments; i ++){
+	// for (int i = 0; i < num_segments; i++)
+	// {
 	// 	segments[i].print();
 	// 	printf("%d\n", status[i]);
 	// }
 
 	// return;
 
- 	for (size_t startIdx = 0; startIdx < segments.size(); startIdx ++) {
-        if (status[startIdx] == OUT || status[startIdx] == BORDER) continue;
-        
-        size_t currentSegIdx = startIdx;
-        Point currentPoint = segments[startIdx].start;
-        Point startPoint = currentPoint;
-		printf("START POINT(%lf %lf)\n", startPoint.x, startPoint.y);
+	for (size_t startIdx = 0; startIdx < segments.size(); startIdx++)
+	{
+		if (startIdx < segments.size() - 1 && (status[startIdx] == OUT || status[startIdx] == BORDER))
+			continue;
+			
+		if (startIdx == segments.size() - 1 && status[startIdx] == OUT)
+			continue;
+
+		if (startIdx == segments.size() - 1 && status[startIdx] == BORDER && ctx->intersection_polygons.size() > 0){
+			continue;
+		}
+
+		size_t currentSegIdx = startIdx;
+		Point currentPoint = segments[startIdx].start;
+		Point startPoint = currentPoint;
+		// printf("START POINT(%lf %lf)\n", startPoint.x, startPoint.y);
 		vector<Point> currentVertices;
 
-        bool foundCycle = false;
-  
-        while (status[currentSegIdx]) {
-            status[currentSegIdx] = OUT;
-			printf("POINT(%lf %lf)\n", currentPoint.x, currentPoint.y);
-            currentVertices.push_back(currentPoint);
-			const Segment& seg = segments[currentSegIdx];
+		bool foundCycle = false;
+
+		while (status[currentSegIdx])
+		{
+			status[currentSegIdx] = OUT;
+			// printf("SWITCH POINT(%lf %lf)\n", currentPoint.x, currentPoint.y);
+			currentVertices.push_back(currentPoint);
+			const Segment &seg = segments[currentSegIdx];
 			Point *vertices = seg.is_source ? boundary->p : target->boundary->p;
 			size_t num_vertices = seg.is_source ? get_num_vertices() : target->get_num_vertices();
 
-			if(seg.edge_start != -1){
-                if(seg.edge_start <= seg.edge_end){
-                    for(int verId = seg.edge_start; verId <= seg.edge_end; verId ++){
-						printf("POINT (%lf %lf)\n", vertices[verId].x, vertices[verId].y);
+			if (seg.edge_start != -1)
+			{
+				if (seg.edge_start <= seg.edge_end)
+				{
+					for (int verId = seg.edge_start; verId <= seg.edge_end; verId++)
+					{
+						// printf("POINT (%lf %lf)\n", vertices[verId].x, vertices[verId].y);
 						currentVertices.push_back(vertices[verId]);
-                    }
-                }else{
-                    for(int verId = seg.edge_start; verId < num_vertices - 1; verId ++){
-						printf("POINT (%lf %lf)\n", vertices[verId].x, vertices[verId].y);
+					}
+				}
+				else
+				{
+					for (int verId = seg.edge_start; verId < num_vertices - 1; verId++)
+					{
+						// printf("POINT (%lf %lf)\n", vertices[verId].x, vertices[verId].y);
 						currentVertices.push_back(vertices[verId]);
-                    }
-                    for(int verId = 0; verId <= seg.edge_end; verId ++){
-						printf("POINT (%lf %lf)\n", vertices[verId].x, vertices[verId].y);
+					}
+					for (int verId = 0; verId <= seg.edge_end; verId++)
+					{
+						// printf("POINT (%lf %lf)\n", vertices[verId].x, vertices[verId].y);
 						currentVertices.push_back(vertices[verId]);
-                    }
-                }
+					}
+				}
 			}
-           
-            Point nextPoint = currentPoint == seg.start ? seg.end : seg.start;
 
-            // 如果回到起点，我们找到了一个闭合的多边形
-            if (nextPoint == startPoint) {
-                currentVertices.push_back(nextPoint); // 添加最后一个点闭合多边形
-                foundCycle = true;
-                break;
-            }
-            
-            
-            bool foundNext = false;
-            
-			int idx = binary_search(segments, 0, num_segments - 1, nextPoint);
-			if(idx != -1){
-				PartitionStatus st0 = status[idx], st1 = status[idx + 1];
-				if(st0 == 1 || st1 == 1){
-					currentSegIdx = (st0 == 1) ? idx : idx + 1;
-				}else if(st0 == 2 || st1 == 2){
-					currentSegIdx = (st0 == 2) ? idx : idx + 1;
-				}		
-				currentPoint = nextPoint;
-				foundNext = true;		
+			Point nextPoint = currentPoint == seg.start ? seg.end : seg.start;
+
+			// 如果回到起点，我们找到了一个闭合的多边形
+			if (nextPoint == startPoint)
+			{
+				currentVertices.push_back(nextPoint); // 添加最后一个点闭合多边形
+				foundCycle = true;
+				break;
 			}
-            
-            // // 如果回到起点，我们找到了一个闭合的多边形
-            // if (!foundNext && nextPoint == startPoint) {
-            //     currentVertices.push_back(nextPoint); // 添加最后一个点闭合多边形
-            //     foundCycle = true;
-            //     break;
-            // }
-            
-            // 如果没有找到下一个segment，则路径不能闭合
-            if (!foundNext) break;
-        }
-        
-        // 如果找到了闭合的多边形并且至少有3个点，添加到结果中
-        if (foundCycle && currentVertices.size() >= 3) {
-			VertexSequence* vs = new VertexSequence(currentVertices.size(), currentVertices.data());
+
+			bool foundNext = false;
+
+			int idx = binary_search(segments, 0, num_segments - 1, nextPoint);
+			if (idx != -1)
+			{
+				PartitionStatus st0 = status[idx], st1 = status[idx + 1];
+
+				if (st0 == 2 || st1 == 2)
+				{
+					currentSegIdx = (st0 == 2) ? idx : idx + 1;
+				}
+				else if (st0 == 1 || st1 == 1)
+				{
+					currentSegIdx = (st0 == 1) ? idx : idx + 1;
+				}
+
+				// if (st0 == 1 || st1 == 1)
+				// {
+				// 	currentSegIdx = (st0 == 1) ? idx : idx + 1;
+				// }
+				// else if (st0 == 2 || st1 == 2)
+				// {
+				// 	currentSegIdx = (st0 == 2) ? idx : idx + 1;
+				// }
+				currentPoint = nextPoint;
+				foundNext = true;
+			}
+
+			// // 如果回到起点，我们找到了一个闭合的多边形
+			// if (!foundNext && nextPoint == startPoint) {
+			//     currentVertices.push_back(nextPoint); // 添加最后一个点闭合多边形
+			//     foundCycle = true;
+			//     break;
+			// }
+
+			// 如果没有找到下一个segment，则路径不能闭合
+			if (!foundNext)
+				break;
+		}
+
+		// 如果找到了闭合的多边形并且至少有3个点，添加到结果中
+		if (foundCycle && currentVertices.size() >= 3)
+		{
+			VertexSequence *vs = new VertexSequence(currentVertices.size(), currentVertices.data());
 			MyPolygon *currentPolygon = new MyPolygon();
 			currentPolygon->set_boundary(vs);
-            ctx->intersection_polygons.push_back(currentPolygon);
-			ctx->area += currentPolygon->area();
-			printf("check area: %lf\n", currentPolygon->area());
-        } 
-    }
+			ctx->intersection_polygons.push_back(currentPolygon);
+		}
+	}
 	return;
 }
 
-double Ideal::get_possible_min(Point &p, int center, int step, bool geography){
+double Ideal::get_possible_min(Point &p, int center, int step, bool geography)
+{
 	int core_x_low = get_x(center);
 	int core_x_high = get_x(center);
 	int core_y_low = get_y(center);
@@ -1297,26 +1640,28 @@ double Ideal::get_possible_min(Point &p, int center, int step, bool geography){
 
 	vector<int> needprocess;
 
-	int ymin = max(0,core_y_low-step);
-	int ymax = min(dimy,core_y_high+step);
+	int ymin = max(0, core_y_low - step);
+	int ymax = min(dimy, core_y_high + step);
 
 	double mindist = DBL_MAX;
-	//left scan
-	if(core_x_low-step>=0){
-		double x = get_pixel_box(core_x_low-step,ymin).high[0];
-		double y1 = get_pixel_box(core_x_low-step,ymin).low[1];
-		double y2 = get_pixel_box(core_x_low-step,ymax).high[1];
+	// left scan
+	if (core_x_low - step >= 0)
+	{
+		double x = get_pixel_box(core_x_low - step, ymin).high[0];
+		double y1 = get_pixel_box(core_x_low - step, ymin).low[1];
+		double y2 = get_pixel_box(core_x_low - step, ymax).high[1];
 
 		Point p1 = Point(x, y1);
 		Point p2 = Point(x, y2);
 		double dist = point_to_segment_distance(p, p1, p2, geography);
 		mindist = min(dist, mindist);
 	}
-	//right scan
-	if(core_x_high+step<=get_dimx()){
-		double x = get_pixel_box(core_x_high+step,ymin).low[0];
-		double y1 = get_pixel_box(core_x_high+step,ymin).low[1];
-		double y2 = get_pixel_box(core_x_high+step,ymax).high[1];
+	// right scan
+	if (core_x_high + step <= get_dimx())
+	{
+		double x = get_pixel_box(core_x_high + step, ymin).low[0];
+		double y1 = get_pixel_box(core_x_high + step, ymin).low[1];
+		double y2 = get_pixel_box(core_x_high + step, ymax).high[1];
 		Point p1 = Point(x, y1);
 		Point p2 = Point(x, y2);
 		double dist = point_to_segment_distance(p, p1, p2, geography);
@@ -1324,24 +1669,26 @@ double Ideal::get_possible_min(Point &p, int center, int step, bool geography){
 	}
 
 	// skip the first if there is left scan
-	int xmin = max(0,core_x_low-step+(core_x_low-step>=0));
+	int xmin = max(0, core_x_low - step + (core_x_low - step >= 0));
 	// skip the last if there is right scan
-	int xmax = min(dimx,core_x_high+step-(core_x_high+step<=dimx));
-	//bottom scan
-	if(core_y_low-step>=0){
-		double y = get_pixel_box(xmin,core_y_low-step).high[1];
-		double x1 = get_pixel_box(xmin,core_y_low-step).low[0];
-		double x2 = get_pixel_box(xmax,core_y_low-step).high[0];
+	int xmax = min(dimx, core_x_high + step - (core_x_high + step <= dimx));
+	// bottom scan
+	if (core_y_low - step >= 0)
+	{
+		double y = get_pixel_box(xmin, core_y_low - step).high[1];
+		double x1 = get_pixel_box(xmin, core_y_low - step).low[0];
+		double x2 = get_pixel_box(xmax, core_y_low - step).high[0];
 		Point p1 = Point(x1, y);
 		Point p2 = Point(x2, y);
 		double dist = point_to_segment_distance(p, p1, p2, geography);
 		mindist = min(dist, mindist);
 	}
-	//top scan
-	if(core_y_high+step<=get_dimy()){
-		double y = get_pixel_box(xmin,core_y_low+step).low[1];
-		double x1 = get_pixel_box(xmin,core_y_low+step).low[0];
-		double x2 = get_pixel_box(xmax,core_y_low+step).high[0];
+	// top scan
+	if (core_y_high + step <= get_dimy())
+	{
+		double y = get_pixel_box(xmin, core_y_low + step).low[1];
+		double x1 = get_pixel_box(xmin, core_y_low + step).low[0];
+		double x2 = get_pixel_box(xmax, core_y_low + step).high[0];
 		Point p1 = Point(x1, y);
 		Point p2 = Point(x2, y);
 		double dist = point_to_segment_distance(p, p1, p2, geography);
@@ -1412,56 +1759,69 @@ double Ideal::get_possible_min(box *t_mbr, int core_x_low, int core_y_low, int c
 	return mindist;
 }
 
-double Ideal::distance(Point &p, query_context *ctx, bool profile){
+double Ideal::distance(Point &p, query_context *ctx, bool profile)
+{
 	// distance is 0 if contained by the polygon
 	double mindist = getMBB()->max_distance(p, ctx->geography);
 
 	bool contained = contain(p, ctx, profile);
-	if(contained){
+	if (contained)
+	{
 		return 0;
 	}
-	
-	double mbrdist = mbr->distance(p,ctx->geography);
 
-	//initialize the starting pixel
+	double mbrdist = mbr->distance(p, ctx->geography);
+
+	// initialize the starting pixel
 	int closest = get_closest_pixel(p);
-	
+
 	int step = 0;
 	double step_size = get_step(ctx->geography);
 	vector<int> needprocess;
 
-	while(true){
-		if(step==0){
+	while (true)
+	{
+		if (step == 0)
+		{
 			needprocess.push_back(closest);
-		}else{
+		}
+		else
+		{
 			needprocess = expand_radius(closest, step);
 		}
 		// should never happen
 		// all the boxes are scanned
-		if(needprocess.size()==0){
-			assert(false&&"should not evaluated all boxes");
+		if (needprocess.size() == 0)
+		{
+			assert(false && "should not evaluated all boxes");
 			return boundary->distance(p, ctx->geography);
 		}
-		for(auto cur : needprocess){
-			//printf("checking pixel %d %d %d\n",cur->id[0],cur->id[1],cur->status);
-			if(show_status(cur) == BORDER){
+		for (auto cur : needprocess)
+		{
+			// printf("checking pixel %d %d %d\n",cur->id[0],cur->id[1],cur->status);
+			if (show_status(cur) == BORDER)
+			{
 				box cur_box = get_pixel_box(get_x(cur), get_y(cur));
 				// printf("BOX: lowx=%lf, lowy=%lf, highx=%lf, highy=%lf\n", cur_box.low[0], cur_box.low[1], cur_box.high[0], cur_box.high[1]);
 				double mbr_dist = cur_box.distance(p, ctx->geography);
 				// skip the pixels that is further than the current minimum
-				if(mbr_dist >= mindist){
+				if (mbr_dist >= mindist)
+				{
 					continue;
 				}
 
 				// the vector model need be checked.
 
-				for(int i = 0; i < get_num_sequences(cur); i ++){
+				for (int i = 0; i < get_num_sequences(cur); i++)
+				{
 					auto rg = get_edge_sequence(get_offset(cur) + i);
-					for(int j = 0; j < rg.second; j ++){
+					for (int j = 0; j < rg.second; j++)
+					{
 						auto r = rg.first + j;
-						double dist = point_to_segment_distance(p, *get_point(r), *get_point(r+1), ctx->geography);
+						double dist = point_to_segment_distance(p, *get_point(r), *get_point(r + 1), ctx->geography);
 						mindist = min(mindist, dist);
-						if(ctx->within(mindist)){
+						if (ctx->within(mindist))
+						{
 							return mindist;
 						}
 					}
@@ -1471,13 +1831,15 @@ double Ideal::distance(Point &p, query_context *ctx, bool profile){
 		needprocess.clear();
 
 		// for within query, return if the current minimum is close enough
-		if(ctx->within(mindist)){
+		if (ctx->within(mindist))
+		{
 			return mindist;
 		}
 		step++;
 		double minrasterdist = get_possible_min(p, closest, step, ctx->geography);
 		// close enough
-		if(mindist < minrasterdist){
+		if (mindist < minrasterdist)
+		{
 			break;
 		}
 	}

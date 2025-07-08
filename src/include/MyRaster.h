@@ -88,6 +88,7 @@ public:
 			return min(step_x, step_y);
 		}
 	}
+    inline double get_pixel_area() { return step_x * step_y; }
 };
 
 

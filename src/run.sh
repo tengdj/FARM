@@ -27,7 +27,7 @@ DATA8="areawater.idl"
 
 make clean
 make within_polygon USE_GPU=1 USE_RT=1 -j
-$BUILD_PATH/within_polygon -s $IDL_PATH/$DATA2 -t $IDL_PATH/$DATA2 -r -h -g -b 2000000 -l 0.1 > output.txt
+$BUILD_PATH/within_polygon -s $IDL_PATH/$DATA1 -t $IDL_PATH/$DATA1 -r -h -g -b 2000000 -l 0.1 > output.txt
 
 # make clean
 # make intersection USE_GPU=1 USE_RT=1 -j

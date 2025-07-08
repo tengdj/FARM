@@ -438,6 +438,7 @@ __global__ void kernel_unroll_within_polygon(BoxDistRange *pixpairs, pair<uint32
             {
                 EdgeSeq r2 = (edge_sequences + target.edge_sequences_start)[(es_offset + target.offset_start)[p2] + j];
                 // printf("r.length = %d, r2.length = %d\n", r.length, r2.length);
+                // atomicAdd(task_size, r.length * r2.length);
                 int max_size = 16;
                 for (uint s = 0; s < r.length; s += max_size)
                 {
@@ -678,6 +679,9 @@ void cuda_within_polygon(query_context *gctx)
 
         CUDA_SWAP_BUFFER();
 
+        unsigned long long *d_test = nullptr;
+        CUDA_SAFE_CALL(cudaMalloc((void **)&d_test, sizeof(unsigned long long)));
+
         grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
         auto unroll_start = std::chrono::high_resolution_clock::now();
         kernel_unroll_within_polygon<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
@@ -688,22 +692,25 @@ void cuda_within_polygon(query_context *gctx)
 
         std::cout << "unroll运行时间: " << unroll_duration.count() << " 毫秒" << std::endl;
 
+        unsigned long long h_test;
+        CUDA_SAFE_CALL(cudaMemcpy(&h_test, d_test, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+
+        printf("test: %llu\n", h_test);
+   
         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
         printf("h_bufferoutput_size = %d\n", h_bufferoutput_size);
 
-        // CUDA_SWAP_BUFFER();
+        CUDA_SWAP_BUFFER();
 
-        // grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        // auto refine_start = std::chrono::high_resolution_clock::now();
-        // kernel_refine_within_polygon<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_vertices, gctx->d_bufferinput_size, d_max_box_dist, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
-        // cudaDeviceSynchronize();
-        // check_execution("kernel_refine_within_polygon");
-        // auto refine_end = std::chrono::high_resolution_clock::now();
-        // auto refine_duration = std::chrono::duration_cast<std::chrono::milliseconds>(refine_end - refine_start);
+        grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        auto refine_start = std::chrono::high_resolution_clock::now();
+        kernel_refine_within_polygon<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_vertices, gctx->d_bufferinput_size, d_max_box_dist, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
+        cudaDeviceSynchronize();
+        check_execution("kernel_refine_within_polygon");
+        auto refine_end = std::chrono::high_resolution_clock::now();
+        auto refine_duration = std::chrono::duration_cast<std::chrono::milliseconds>(refine_end - refine_start);
 
-        // std::cout << "refine运行时间: " << refine_duration.count() << " 毫秒" << std::endl;
-
-        return;
+        std::cout << "refine运行时间: " << refine_duration.count() << " 毫秒" << std::endl;
 
     }
 

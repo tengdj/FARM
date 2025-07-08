@@ -90,8 +90,8 @@ void VertexSequence::print(bool complete_ring){
 		if(i!=0){
 			cout<<",";
 		}
-		printf("%.12f ",p[i].x);
-		printf("%.12f",p[i].y);
+		printf("%f ",p[i].x);
+		printf("%f",p[i].y);
 	}
 	// the last vertex should be the same as the first one for a complete ring
 	if(complete_ring){
@@ -108,14 +108,11 @@ double VertexSequence::area(){
 	double a = 0.0f;
 	double b = 0.0f;
 
-	puts("------------------------------------------------------------------------");
 	for(int i = 0; i < num_vertices - 1; i ++){
 		int j = i + 1;
         a += p[i].x * p[j].y;
         b += p[i].y * p[j].x;
-		printf("%lf %lf\n", a, b);
 	}
-	puts("------------------------------------------------------------------------");
 	return abs(a - b) / 2.0;
 }
 
@@ -160,7 +157,7 @@ vector<Vertex *> VertexSequence::pack_to_polyline(){
 
 box *VertexSequence::getMBR(){
 	box *mbr = new box();
-	float bias = 0.00001;
+	float bias = 1e-9;
 	for(int i=0;i<num_vertices;i++){
 		mbr->low[0] = min(mbr->low[0], p[i].x);
 		mbr->high[0] = max(mbr->high[0], p[i].x);

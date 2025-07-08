@@ -7,21 +7,25 @@
 
 #define BUFFER_SIZE 1024 * 1024 * 1024
 
-enum Direction{
+enum Direction
+{
 	HORIZONTAL = 0,
 	VERTICAL = 1
 };
 
-enum cross_type{
+enum cross_type
+{
 	ENTER = 0,
 	LEAVE = 1
 };
 
-class cross_info{
+class cross_info
+{
 public:
 	cross_type type;
 	int edge_id;
-	cross_info(cross_type t, int e){
+	cross_info(cross_type t, int e)
+	{
 		type = t;
 		edge_id = e;
 	}
@@ -34,7 +38,8 @@ struct IdealPair
 	int pair_id;
 };
 
-struct IdealOffset{
+struct IdealOffset
+{
 	uint status_start;
 	uint offset_start;
 	uint edge_sequences_start;
@@ -44,12 +49,14 @@ struct IdealOffset{
 	uint layer_start;
 };
 
-struct EdgeSeq{
+struct EdgeSeq
+{
 	uint start;
 	uint length;
 };
 
-struct Segment{
+struct Segment
+{
 	bool is_source;
 	Point start;
 	Point end;
@@ -57,38 +64,41 @@ struct Segment{
 	int edge_end;
 	int pair_id;
 
-	void print(){
-		printf("POINT(%lf %lf) POINT(%lf %lf) %d %d %d\n", start.x, start.y, end.x, end.y, edge_start, edge_end, pair_id);
+	void print()
+	{
+		printf("POINT(%lf %lf) POINT(%lf %lf) %d %d %d %d\n", start.x, start.y, end.x, end.y, edge_start, edge_end, pair_id, is_source);
 		// printf("POINT(%lf %lf) %d\n", start.x, start.y, pair_id);
 	}
 };
 
-class Grid_line{
+class Grid_line
+{
 	uint32_t *offset = nullptr;
 	double *intersection_nodes = nullptr;
 
 	size_t num_grid_lines = 0;
 	size_t num_crosses = 0;
+
 public:
 	Grid_line() = default;
 	Grid_line(int size);
 	~Grid_line();
 	void init_intersection_node(int num_nodes);
-	int get_num_nodes(int y) {return offset[y + 1] - offset[y];}
-	void add_node(int idx, double x) {intersection_nodes[idx] = x;}
+	int get_num_nodes(int y) { return offset[y + 1] - offset[y]; }
+	void add_node(int idx, double x) { intersection_nodes[idx] = x; }
 
-	size_t get_num_grid_lines() {return num_grid_lines; }
-	void set_num_crosses(size_t x) {num_crosses = x;}
-	size_t get_num_crosses() {return num_crosses;}
-	void set_offset(int id, int idx) {offset[id] = idx;}
-	uint32_t get_offset(int id) {return offset[id];}
-	double get_intersection_nodes(int id) {return intersection_nodes[id];}
-	uint32_t *get_offset() {return offset;}
-	double *get_intersection_nodes() {return intersection_nodes;}
+	size_t get_num_grid_lines() { return num_grid_lines; }
+	void set_num_crosses(size_t x) { num_crosses = x; }
+	size_t get_num_crosses() { return num_crosses; }
+	void set_offset(int id, int idx) { offset[id] = idx; }
+	uint32_t get_offset(int id) { return offset[id]; }
+	double get_intersection_nodes(int id) { return intersection_nodes[id]; }
+	uint32_t *get_offset() { return offset; }
+	double *get_intersection_nodes() { return intersection_nodes; }
 };
 
-
-class Ideal : public MyPolygon, public MyRaster{
+class Ideal : public MyPolygon, public MyRaster
+{
 public:
 	bool use_hierachy = false;
 	size_t id = 0;
@@ -99,51 +109,55 @@ private:
 	Grid_line *horizontal = nullptr;
 	Grid_line *vertical = nullptr;
 	uint32_t *layer_offset = nullptr;
-    RasterInfo *layer_info = nullptr;
+	RasterInfo *layer_info = nullptr;
 	Hraster *layers = nullptr;
 	double *areas = nullptr;
+	Point *temp_centroid = nullptr;
 
 	uint len_edge_sequences = 0;
 	uint num_layers = 0;
 
-
-    pthread_mutex_t ideal_partition_lock;
+	pthread_mutex_t ideal_partition_lock;
 	void init_pixels();
 	void evaluate_edges();
 	void scanline_reandering();
 	void calculate_fullness();
 
 public:
-    Ideal(){
-        pthread_mutex_init(&ideal_partition_lock, NULL);
-    }
+	Ideal()
+	{
+		pthread_mutex_init(&ideal_partition_lock, NULL);
+	}
 	~Ideal();
-    void rasterization(int vertex_per_raster);
+	void rasterization(int vertex_per_raster);
 	void rasterization();
 
-	void set_offset(int id, int idx){offset[id] = idx;}
-	uint32_t get_offset(int id) {return offset[id];}
-	uint32_t *get_offset() {return offset; }
+	void set_offset(int id, int idx) { offset[id] = idx; }
+	uint32_t get_offset(int id) { return offset[id]; }
+	uint32_t *get_offset() { return offset; }
 	void process_pixels_null(int x, int y);
 	void init_edge_sequences(int num_edge_seqs);
 	void add_edge(int idx, int start, int end);
-	pair<uint32_t, uint32_t> get_edge_sequence(int idx){return edge_sequences[idx];}
-	pair<uint32_t, uint32_t> *get_edge_sequence(){return edge_sequences;}
-	uint get_len_edge_sequences() {return len_edge_sequences;}
+	pair<uint32_t, uint32_t> get_edge_sequence(int idx) { return edge_sequences[idx]; }
+	pair<uint32_t, uint32_t> *get_edge_sequence() { return edge_sequences; }
+	uint get_len_edge_sequences() { return len_edge_sequences; }
 	uint32_t get_num_sequences(int id);
 	double get_possible_min(box *t_mbr, int core_x_low, int core_y_low, int core_x_high, int code_y_high, int step, bool geography = true);
 	double get_possible_min(Point &p, int center, int step, bool geography = true);
 	void process_crosses(map<int, vector<cross_info>> edge_info);
 	void process_intersection(map<int, vector<double>> edge_intersection, Direction direction);
 	int count_intersection_nodes(Point &p);
-	Grid_line *get_vertical() {return vertical;}
+	Grid_line *get_vertical() { return vertical; }
+	uint8_t get_fullness(int id) { return status[id]; };
+	double get_areas(int id) { return areas[id]; }
+	Point get_centroids(int id) { return temp_centroid[id]; }
 
 	void layering();
-	Hraster* get_layers() { return layers; }
+	Hraster *get_layers() { return layers; }
 	uint get_num_layers() { return num_layers; }
 	uint get_status_size() { return status_size; }
-	RasterInfo* get_layer_info() { return layer_info; }
-	uint32_t* get_layer_offset() { return layer_offset; }
+	RasterInfo *get_layer_info() { return layer_info; }
+	uint32_t *get_layer_offset() { return layer_offset; }
 	double merge_area(box target);
 	void merge_status(Hraster &layer);
 
@@ -153,7 +167,6 @@ public:
 	// size_t get_num_gridlines();
 	size_t get_num_crosses();
 	// double get_num_intersection();
-	
 
 	// query functions
 	bool contain(Point &p, query_context *ctx, bool profile = false);
@@ -166,7 +179,7 @@ public:
 	double distance(Ideal *target, int pix, query_context *ctx, bool profile = true);
 };
 
-//utility functions
+// utility functions
 void process_rasterization(query_context *ctx);
 void preprocess(query_context *gctx);
 
