@@ -83,7 +83,7 @@ namespace
 	inline double degree_per_kilometer_longitude(double latitude)
 	{
 		double absla = abs(latitude);
-		assert(absla <= 90);
+		// assert(absla <= 90);
 		if (absla == 90)
 		{
 			absla = 89.9;
@@ -121,6 +121,24 @@ namespace
 		tmp[index] = '\0';
 		return atof(tmp);
 	}
+
+	inline float read_float(const char *input, size_t &offset)
+	{
+		char tmp[100];
+		while (!is_number(input[offset]))
+		{
+			offset++;
+		}
+		int index = 0;
+		while (is_number(input[offset]))
+		{
+			tmp[index++] = input[offset++];
+		}
+		tmp[index] = '\0';
+		string s_tmp(tmp);
+		return std::stof(s_tmp);
+	}
+
 	inline void skip_space(const char *input, size_t &offset)
 	{
 		while (input[offset] == ' ' || input[offset] == '\t' || input[offset] == '\n')

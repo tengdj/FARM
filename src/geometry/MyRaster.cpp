@@ -464,6 +464,9 @@ void MyRaster::grid_align(){
 	}
 	assert(flag1 && flag2);
 
+	step_x = min(step_x, step_y);
+	step_y = step_x;
+
 	mbr->low[0] = floor(mbr->low[0] / step_x) * step_x;
 	mbr->low[1] = floor(mbr->low[1] / step_y) * step_y;
 	mbr->high[0] = ceil(mbr->high[0] / step_x) * step_x;

@@ -174,7 +174,7 @@ void dump_polygons_to_file(vector<Ideal *> ideals, const char *path){
 	PolygonMeta *pmeta = new PolygonMeta[ideals.size()];
 	for(int i=0;i<ideals.size();i++){
 		Ideal *p = ideals[i];
-		if(p->get_data_size()+data_size>buffer_size){
+		if(p->get_data_size()+data_size > buffer_size){
 			os.write(data_buffer, data_size);
 			data_size = 0;
 		}
@@ -664,8 +664,8 @@ VertexSequence *read_vertices(const char *wkt, size_t &offset, bool clockwise)
 	// read x/y
 	for (int i = 0; i < num_vertices; i++)
 	{
-		vs->p[i].x = read_double(wkt, offset);
-		vs->p[i].y = read_double(wkt, offset);
+		vs->p[i].x = read_float(wkt, offset);
+		vs->p[i].y = read_float(wkt, offset);
 	}
 	if (clockwise)
 	{

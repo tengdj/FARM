@@ -16,13 +16,13 @@ int main(int argc, char **argv)
 
 	for (auto ideal : global_ctx.source_ideals)
 	{
-		if((int)ideal->get_boundary()->p[0].x != -76 && (int)ideal->get_boundary()->p[0].y != -10) continue;
 		printf("dimx = %d, dimy = %d\n", ideal->get_dimx(), ideal->get_dimy());
 		printf("step_x = %lf, step_y = %lf\n", ideal->get_step_x(), ideal->get_step_y());
 
 		ideal->getMBB()->print();
 		ideal->MyPolygon::print();
 		ideal->MyRaster::print();
+
 		puts("-------------------------HIERARCHY---------------------------------");
 		for (int i = 0; i <= ideal->get_num_layers(); i++)
 		{

@@ -56,12 +56,12 @@ public:
 	void addPoint(Point &p)
 	{
 		
-		// if (find(vertices.begin(), vertices.end(), p) == vertices.end())
-		// {
-		// 	vertices.push_back(p);
-		// }
+		if (find(vertices.begin(), vertices.end(), p) == vertices.end())
+		{
+			vertices.push_back(p);
+		}
 
-		vertices.push_back(p);
+		// vertices.push_back(p);
 	}
 };
 

@@ -2,8 +2,8 @@
 DATA_PATH="/home/qmh/data"
 IDL_PATH="/home/qmh/data/idl"
 BUILD_PATH="/home/qmh/IDEAL/build"
-DATA1="has_child.idl"
-DATA2="child.idl"
+DATA1="has_child_float.idl"
+DATA2="child_float.idl"
 DATA3="complex.idl"
 DATA4="points.dat"
 DATA5="sampled.points.dat"
@@ -11,8 +11,8 @@ DATA6="zipcode.idl"
 DATA7="water.idl"
 DATA8="areawater.idl"
 
-> output.txt
-# > output1.txt
+# > output.txt
+> output1.txt
 # make clean
 # make contain USE_GPU=1 -j
 # $BUILD_PATH/contain -s $IDL_PATH/$DATA3 -t $IDL_PATH/$DATA4 -r -g -b 1000000 -l 0.00005 >> output.txt
@@ -25,9 +25,9 @@ DATA8="areawater.idl"
 # make within USE_GPU=1  -j
 # $BUILD_PATH/within -s $IDL_PATH/$DATA2 -t $IDL_PATH/$DATA4 -r -h -g -b 1000000 -l 0.0002 >> output.txt
 
-make clean
-make within_polygon USE_GPU=1 USE_RT=1 -j
-$BUILD_PATH/within_polygon -s $IDL_PATH/$DATA1 -t $IDL_PATH/$DATA1 -r -h -g -b 2000000 -l 0.1 > output.txt
+# make clean
+# make within_polygon USE_GPU=1 USE_RT=1 -j
+# $BUILD_PATH/within_polygon -s $IDL_PATH/$DATA1 -t $IDL_PATH/$DATA1 -r -h -g -b 2000000 -l 0.1 > output.txt
 
 # make clean
 # make intersection USE_GPU=1 USE_RT=1 -j
@@ -44,5 +44,9 @@ $BUILD_PATH/within_polygon -s $IDL_PATH/$DATA1 -t $IDL_PATH/$DATA1 -r -h -g -b 2
 # make clean
 # make intersection_cpu USE_RT=1  -j
 # $BUILD_PATH/intersection_cpu -s $IDL_PATH/$DATA1 -t $IDL_PATH/$DATA2 -r >> output.txt
-# $BUILD_PATH/intersection_cpu -s $DATA_PATH/$DATA6 -t $DATA_PATH/$DATA8 -r -b 1000000 -l 0.00005 >> output.txt
+# $BUILD_PATH/intersection_cpu -s $DATA_PATH/$DATA6 -t $DATA_PATH/$DATA8 -r -b 1000000 -l 0.00005 >> output1.txt
 # $BUILD_PATH/intersection_cpu -s inputA.idl -t inputB.idl -r -n 1 >> output.txt
+
+make clean
+make within_polygon_cpu USE_RT=1 -j
+$BUILD_PATH/within_polygon_cpu -s $IDL_PATH/$DATA1 -t $IDL_PATH/$DATA1 -r -h -b 2000000 -l 0.1 > output1.txt

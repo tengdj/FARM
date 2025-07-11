@@ -112,7 +112,6 @@ private:
 	RasterInfo *layer_info = nullptr;
 	Hraster *layers = nullptr;
 	double *areas = nullptr;
-	Point *temp_centroid = nullptr;
 
 	uint len_edge_sequences = 0;
 	uint num_layers = 0;
@@ -150,7 +149,6 @@ public:
 	Grid_line *get_vertical() { return vertical; }
 	uint8_t get_fullness(int id) { return status[id]; };
 	double get_areas(int id) { return areas[id]; }
-	Point get_centroids(int id) { return temp_centroid[id]; }
 
 	void layering();
 	Hraster *get_layers() { return layers; }
@@ -158,7 +156,7 @@ public:
 	uint get_status_size() { return status_size; }
 	RasterInfo *get_layer_info() { return layer_info; }
 	uint32_t *get_layer_offset() { return layer_offset; }
-	double merge_area(box target);
+	double merge_area(box target, PartitionStatus &status);
 	void merge_status(Hraster &layer);
 
 	// statistic collection
@@ -177,6 +175,8 @@ public:
 	double distance(Point &p, query_context *ctx, bool profile = false);
 	double distance(Ideal *target, query_context *ctx);
 	double distance(Ideal *target, int pix, query_context *ctx, bool profile = true);
+	bool within(Ideal *target, query_context *ctx);
+
 };
 
 // utility functions

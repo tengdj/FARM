@@ -29,10 +29,10 @@ inline bool collinear(Point &p1, Point &p2, Point &p3)
 
 inline double getSlope(Point &A, Point &B)
 {
-	return ((B.y - A.y) / (B.x - A.x));
+	return (((double)B.y - A.y) / (B.x - A.x));
 }
 
-inline bool isInsideHorizontalDual(double Yi, double Yi1, double &py)
+inline bool isInsideHorizontalDual(double Yi, double Yi1, double py)
 {
 	if (py < Yi || py > Yi1)
 	{
@@ -40,7 +40,7 @@ inline bool isInsideHorizontalDual(double Yi, double Yi1, double &py)
 	}
 	return true;
 }
-inline bool isInsideVerticalDual(double Xi, double Xi1, double &px)
+inline bool isInsideVerticalDual(double Xi, double Xi1, double px)
 {
 	if (px < Xi || px > Xi1)
 	{
@@ -310,9 +310,9 @@ inline double computePolygonArea(vector<Point> &polygon)
 	{
 		const Point &p1 = polygon[i];
 		const Point &p2 = polygon[i + 1];
-
-		area += (p1.x * p2.y - p2.x * p1.y);
+		area += ((double)p1.x * p2.y - (double)p2.x * p1.y);
 	}
+	
 	return std::abs(area) / 2.0;
 }
 

@@ -200,7 +200,6 @@ void Ideal::init_pixels()
 
 	status = new uint8_t[status_size];
 	areas = new double[dimx * dimy]();
-	temp_centroid = new Point[dimx * dimy];
 	memset(status, 0, status_size * sizeof(uint8_t));
 	offset = new uint32_t[dimx * dimy + 1]; // +1 here is to ensure that pointer[num_pixels] equals len_edge_sequences, so we don't need to make a special case for the last pointer.
 	horizontal = new Grid_line(dimy);
@@ -763,7 +762,7 @@ void Ideal::calculate_fullness()
 	{
 		tempPol = intersectionDualX(this, Xi, Xi1);
 
-		// if(id == 15){
+		// if(id == 0){
 		// 	printf("----------------------------------------------------\n");
 		// 	printf("tempPol%d: %lf %lf\n", x, tempPol.cellX, tempPol.cellY);
 		// 	for (auto x : tempPol.vertices)
@@ -801,32 +800,6 @@ void Ideal::calculate_fullness()
 			// returns the subpolygon furtherly clipped in the y axis by Yi and Yi+1
 			clippedPoints = intersectionDualY(*it, Yi, Yi1);
 
-			auto computeCentroid = [](const std::vector<Point> &polygon) -> Point
-			{
-				double cx = 0.0, cy = 0.0;
-				double area = 0.0;
-				int n = polygon.size();
-				if (n < 3)
-					return {0, 0};
-
-				for (int i = 0; i < n; ++i)
-				{
-					const Point &p0 = polygon[i];
-					const Point &p1 = polygon[(i + 1) % n];
-					double cross = p0.x * p1.y - p1.x * p0.y;
-					area += cross;
-					cx += (p0.x + p1.x) * cross;
-					cy += (p0.y + p1.y) * cross;
-				}
-
-				area *= 0.5;
-				if (std::abs(area) < 1e-10)
-					return {0, 0};
-				cx /= (6.0 * area);
-				cy /= (6.0 * area);
-				return {cx, cy};
-			};
-
 			// this helps ignore a large portion of the empty cells for a polygon
 			// if (clippedPoints.size() > 2)
 			// {
@@ -834,13 +807,11 @@ void Ideal::calculate_fullness()
 
 			double clippedArea = computePolygonArea(clippedPoints);
 			type = classifySubpolygon(clippedArea, step_x * step_y, category_count);
-			Point centroid = computeCentroid(clippedPoints);
 
-			// if(id == 15){
+			// if(id == 0){
 			// 	printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
 			// 	for (auto point : clippedPoints)
 			// 		point.print();
-
 			// 	printf("x = %d y = %d area = %.16lf pixelArea = %.16lf type = %d\n", it->cellX, y, clippedArea, step_x * step_y, type);
 
 			// 	printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
@@ -851,12 +822,14 @@ void Ideal::calculate_fullness()
 			{
 				status[pix_id] = max(1, min(type, category_count - 2));
 				areas[pix_id] = clippedArea;
-				temp_centroid[pix_id] = centroid;
 			}
 			else if (status[pix_id] == IN)
 			{
 				status[pix_id] = category_count - 1;
 				areas[pix_id] = get_pixel_area();
+			}else{
+				status[pix_id] = 0;
+				areas[pix_id] = 0.0;
 			}
 
 			// move the horizontal lines equally to the next position
@@ -956,7 +929,7 @@ int Ideal::count_intersection_nodes(Point &p)
 	return count;
 }
 
-double Ideal::merge_area(box target)
+double Ideal::merge_area(box target, PartitionStatus &st)
 {
 	int start_x = get_offset_x(target.low[0]);
 	int start_y = get_offset_y(target.low[1]);
@@ -976,10 +949,14 @@ double Ideal::merge_area(box target)
 	{
 		for (int j = start_y; j <= end_y; j++)
 		{
+			
 			int id = get_id(i, j);
+			if(show_status(id) == BORDER) st = BORDER;
 			clippedArea += areas[id];
 		}
 	}
+	if(st != BORDER) st = show_status(get_id(start_x, start_y));
+	// printf("clippedArea = %.12lf\n", clippedArea);
 
 	return clippedArea;
 }
@@ -990,8 +967,16 @@ void Ideal::merge_status(Hraster &r)
 	{
 		for (int y = 0; y < r.get_dimy(); y++)
 		{
-			double mergedArea = merge_area(r.get_pixel_box(x, y));
-			uint8_t fullness = classifySubpolygon(mergedArea, r.get_step_x() * r.get_step_y(), category_count);
+			PartitionStatus st;
+			double mergedArea = merge_area(r.get_pixel_box(x, y), st);
+			uint8_t fullness;
+			if(st == BORDER){
+				fullness = classifySubpolygon(mergedArea, r.get_step_x() * r.get_step_y(), category_count);
+			}else if(st == IN){
+				fullness = category_count - 1;
+			}else{
+				fullness = 0;
+			}
 			r.set_status(r.get_id(x, y), fullness);
 		}
 	}
@@ -1946,84 +1931,120 @@ double Ideal::distance(Ideal *target, int pix, query_context *ctx, bool profile)
 	return mindist;
 }
 
-double Ideal::distance(Ideal *target, query_context *ctx)
+bool Ideal::within(Ideal *target, query_context *ctx)
 {
-	timeval start = get_cur_time();
-	// both polygons are rasterized and the pixel of the target is larger
-	// then swap the role of source and target, and use the target as the host
-	// one currently we put this optimization in the caller
-	if (target->get_step(false) > get_step(false))
-	{
-		return target->distance(this, ctx);
+	uint s_level = num_layers;
+	uint t_level = target->get_num_layers();
+	box source_pixel_box, target_pixel_box;
+
+	queue<pair<int, int>> candidate_pairs;
+	for(int i = 0; i < layers[0].get_num_pixels(); i ++){
+		for(int j = 0; j < target->layers[0].get_num_pixels(); j ++){
+			candidate_pairs.push(make_pair(i, j));
+		}
 	}
 
-	double mindist = getMBB()->max_distance(*target->getMBB(), ctx->geography);
-	const double mbrdist = getMBB()->distance(*target->getMBB(), ctx->geography);
-	int step = 0;
+	int i = 0, j = 0;
+	while(true){
+		vector<int> s_pxs, t_pxs;
+		bool s_next_layer = false, t_next_layer = false;
+		double s_step = layers[i].get_step_x(), t_step = target->get_layers()[j].get_step_x();
 
-	vector<int> needprocess = get_closest_pixels(*target->getMBB());
-	assert(needprocess.size() > 0);
-	unsigned short lowx = get_x(needprocess[0]);
-	unsigned short highx = get_x(needprocess[0]);
-	unsigned short lowy = get_y(needprocess[0]);
-	unsigned short highy = get_y(needprocess[0]);
-	for (auto p : needprocess)
-	{
-		lowx = min(lowx, (unsigned short)get_x(p));
-		highx = max(highx, (unsigned short)get_x(p));
-		lowy = min(lowy, (unsigned short)get_y(p));
-		highy = max(highy, (unsigned short)get_y(p));
-	}
-
-	while (true)
-	{
-		struct timeval start = get_cur_time();
-
-		// first of all, expand the circle to involve more pixels
-		if (step > 0)
-		{
-			needprocess = expand_radius(lowx, highx, lowy, highy, step);
+		printf("i = %d j = %d %d %d\n", i, j, s_level, t_level);
+		if(i < s_level && (s_step >= t_step || j >= t_level)) {
+			i ++;
+			s_next_layer = true;
+		}
+		if(j < t_level && (s_step <= t_step || i >= s_level)) {
+			j ++;
+			t_next_layer = true;
 		}
 
-		// all the boxes are scanned (should never happen)
-		if (needprocess.size() == 0)
-		{
-			return mindist;
-		}
+		int size = candidate_pairs.size();
+		if(size == 0) break;
+		cout << size << endl;
+		for(int k = 0; k < size; k ++){
+			auto pair = candidate_pairs.front();
+			candidate_pairs.pop();
+			int s_pix_id = pair.first, t_pix_id = pair.second;
+			
+			if(s_next_layer){
+				source_pixel_box = layers[i - 1].get_pixel_box(layers[i - 1].get_x(s_pix_id), layers[i - 1].get_y(s_pix_id));
 
-		for (auto cur : needprocess)
-		{
-			// printf("checking pixel %d %d
-			// %d\n",cur->id[0],cur->id[1],cur->status);
-			//  note that there is no need to check the edges of
-			//  this pixel if it is too far from the target
-			auto cur_x = get_x(cur);
-			auto cur_y = get_y(cur);
-			if (show_status(cur) == BORDER && get_pixel_box(cur_x, cur_y).distance(*target->getMBB(), ctx->geography) < mindist)
-			{
-				// the vector model need be checked.
-				// do a polygon--pixel distance calculation
-				double dist = distance(target, cur, ctx, true);
-				mindist = min(dist, mindist);
-				if (ctx->within(mindist))
-				{
-					return mindist;
+				source_pixel_box.low[0] += 1e-6;
+				source_pixel_box.low[1] += 1e-6;
+				source_pixel_box.high[0] -= 1e-6;
+				source_pixel_box.high[1] -= 1e-6;
+				
+				auto temp = layers[i].retrieve_pixels(&source_pixel_box);
+				printf("temp size %d\n", temp.size());
+				for(auto p : temp){
+					if(layers[i].show_status(p) == BORDER){
+						s_pxs.push_back(p);
+					}
+				}
+			}else{
+				if(layers[i].show_status(s_pix_id) == BORDER){
+					s_pxs.push_back(s_pix_id);
+				}
+			}
+
+			if(t_next_layer){
+				target_pixel_box = target->get_layers()[j - 1].get_pixel_box(target->get_layers()[j - 1].get_x(t_pix_id), target->get_layers()[j - 1].get_y(t_pix_id));
+
+				target_pixel_box.low[0] += 1e-6;
+				target_pixel_box.low[1] += 1e-6;
+				target_pixel_box.high[0] -= 1e-6;
+				target_pixel_box.high[1] -= 1e-6;
+
+				auto temp = target->get_layers()[j].retrieve_pixels(&target_pixel_box);
+				printf("temp size %d\n", temp.size());
+				for(auto p : temp){
+					if(target->get_layers()[j].show_status(p) == BORDER){
+						t_pxs.push_back(p);
+					} 
+				}
+			}else{
+				if(target->get_layers()[j].show_status(t_pix_id) == BORDER){
+					t_pxs.push_back(t_pix_id);
 				}
 			}
 		}
-		needprocess.clear();
-		if (ctx->within(mindist))
-		{
-			return mindist;
-		}
-		step++;
-		double minrasterdist = get_possible_min(target->getMBB(), lowx, lowy, highx, highy, step, ctx->geography);
-		if (mindist < minrasterdist)
-			break;
-	}
 
-	// iterate until the closest pair of edges are found
-	// assert(false && "happens when there is no boundary pixel, check out the input");
-	// return DBL_MAX;
-	return mindist;
+		cout << candidate_pairs.size() << endl;
+
+		// printf("%d %d\n", s_pxs.size(), t_pxs.size());
+
+		float max_box_dist = 100000.0;
+		printf("pxs size %d %d\n", s_pxs.size(), t_pxs.size());
+		cout << s_pxs.size() << " !" << t_pxs.size() << endl;
+		for(auto id1 : s_pxs){
+			auto box1 = layers[i].get_pixel_box(layers[i].get_x(id1), layers[i].get_y(id1));
+			for(auto id2 : t_pxs){
+				auto box2 = target->get_layers()[j].get_pixel_box(target->get_layers()[j].get_x(id2), target->get_layers()[j].get_y(id2));
+				// box1.print();
+				// box2.print();
+				float max_distacne = box1.max_distance(box2, true);
+				if(max_distacne <= ctx->within_distance) return true;
+				max_box_dist = min(max_box_dist, max_distacne);
+			}
+		}
+
+		for(auto id1 : s_pxs){
+			auto box1 = layers[i].get_pixel_box(layers[i].get_x(id1), layers[i].get_y(id1));
+			for(auto id2 : t_pxs){
+				auto box2 = target->get_layers()[j].get_pixel_box(target->get_layers()[j].get_x(id2), target->get_layers()[j].get_y(id2));
+				
+				float min_distance = box1.distance(box2, true);
+				if(min_distance > ctx->within_distance) continue;
+				if(min_distance < max_box_dist) {
+					candidate_pairs.push(make_pair(id1, id2));
+				}
+			}
+		}
+		if(!s_next_layer && !t_next_layer) break;
+	}
+	printf("result %d\n", candidate_pairs.size());
+	ctx->found += candidate_pairs.size();
+	return 0;
 }

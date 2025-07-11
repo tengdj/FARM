@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
 	// 	global_ctx.target_ideals[b]->get_layers()[i].mbr->print();
 	// 	global_ctx.target_ideals[b]->get_layers()[i].print();
 	// }
-	global_ctx.batch_size = 100000;
+	// global_ctx.batch_size = 1;
 	for(int i = 0; i < global_ctx.num_pairs; i += global_ctx.batch_size){
 		global_ctx.index = i;
 		global_ctx.index_end = min(i + global_ctx.batch_size, global_ctx.num_pairs);
@@ -108,6 +108,7 @@ int main(int argc, char** argv) {
 		auto batch_end = std::chrono::high_resolution_clock::now();
 		auto batch_duration = std::chrono::duration_cast<std::chrono::milliseconds>(batch_end - batch_start);
 		std::cout << "batch time: " << batch_duration.count() << " ms" << std::endl;
+		// return 0;
 	}
 	auto gpu_end = std::chrono::high_resolution_clock::now();
 	auto gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(gpu_end - gpu_start);

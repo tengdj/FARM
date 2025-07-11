@@ -9,10 +9,10 @@ bool box::valid(){
 }
 
 void box::update(Point &p){
-	low[0] = min(low[0], p.x);
-	low[1] = min(low[1], p.y);
-	high[0] = max(high[0], p.x);
-	high[1] = max(high[1], p.y);
+	low[0] = min(low[0], (double)p.x);
+	low[1] = min(low[1], (double)p.y);
+	high[0] = max(high[0], (double)p.x);
+	high[1] = max(high[1], (double)p.y);
 }
 
 void box::update(box &b){

@@ -26,7 +26,7 @@ struct BoxDistRange
     uint8_t t_cur_level;
 
     void print() const {
-        printf("%d %f %f\n", pairId, minDist, maxDist);
+        printf("%d %d %f %f\n", sourcePixelId, targetPixelId, minDist, maxDist);
     }
 };
 
@@ -215,10 +215,10 @@ __global__ void iterative_filtering_step1(BoxDistRange *candidate, pair<uint32_t
                 gpu_get_y(source_pixel_id, (layer_info + source.layer_start)[s_cur_level - 1].dimx, (layer_info + source.layer_start)[s_cur_level - 1].dimy),
                 (layer_info + source.layer_start)[s_cur_level - 1].mbr.low[0], (layer_info + source.layer_start)[s_cur_level - 1].mbr.low[1],
                 (layer_info + source.layer_start)[s_cur_level - 1].step_x, (layer_info + source.layer_start)[s_cur_level - 1].step_y);
-            source_pixel_box.low[0] += 0.000001;
-            source_pixel_box.low[1] += 0.000001;
-            source_pixel_box.high[0] -= 0.000001;
-            source_pixel_box.high[1] -= 0.000001;
+            source_pixel_box.low[0] += 1e-6;
+            source_pixel_box.low[1] += 1e-6;
+            source_pixel_box.high[0] -= 1e-6;
+            source_pixel_box.high[1] -= 1e-6;
 
             // printf("LINESTRING((%f %f, %f %f, %f %f, %f %f, %f %f))\n", source_pixel_box.low[0],source_pixel_box.low[1],
 			// 	source_pixel_box.high[0],source_pixel_box.low[1],
@@ -264,10 +264,10 @@ __global__ void iterative_filtering_step1(BoxDistRange *candidate, pair<uint32_t
                 gpu_get_y(target_pixel_id, (layer_info + target.layer_start)[t_cur_level - 1].dimx, (layer_info + target.layer_start)[t_cur_level - 1].dimy),
                 (layer_info + target.layer_start)[t_cur_level - 1].mbr.low[0], (layer_info + target.layer_start)[t_cur_level - 1].mbr.low[1],
                 (layer_info + target.layer_start)[t_cur_level - 1].step_x, (layer_info + target.layer_start)[t_cur_level - 1].step_y);
-            target_pixel_box.low[0] += 0.000001;
-            target_pixel_box.low[1] += 0.000001;
-            target_pixel_box.high[0] -= 0.000001;
-            target_pixel_box.high[1] -= 0.000001;
+            target_pixel_box.low[0] += 1e-6;
+            target_pixel_box.low[1] += 1e-6;
+            target_pixel_box.high[0] -= 1e-6;
+            target_pixel_box.high[1] -= 1e-6;
 
             target_start_x = gpu_get_offset_x(t_mbr.low[0], target_pixel_box.low[0], t_step_x, t_dimx);
             target_start_y = gpu_get_offset_y(t_mbr.low[1], target_pixel_box.low[1], t_step_y, t_dimy);
@@ -294,14 +294,14 @@ __global__ void iterative_filtering_step1(BoxDistRange *candidate, pair<uint32_t
             for (int y1 = source_start_y; y1 <= source_end_y; y1++)
             {
                 int id1 = gpu_get_id(x1, y1, s_dimx);
+                auto box1 = gpu_get_pixel_box(x1, y1, s_mbr.low[0], s_mbr.low[1], s_step_x, s_step_y);
                 for (int x2 = target_start_x; x2 <= target_end_x; x2++)
                 {
                     for (int y2 = target_start_y; y2 <= target_end_y; y2++)
                     {
                         int id2 = gpu_get_id(x2, y2, t_dimx);
                         if (gpu_show_status(status, source.status_start, id1, category_count, source_offset) == BORDER && gpu_show_status(status, target.status_start, id2, category_count, target_offset) == BORDER)
-                        {
-                            auto box1 = gpu_get_pixel_box(x1, y1, s_mbr.low[0], s_mbr.low[1], s_step_x, s_step_y);
+                        {  
                             auto box2 = gpu_get_pixel_box(x2, y2, t_mbr.low[0], t_mbr.low[1], t_step_x, t_step_y);
                             float min_distance = gpu_distance(box1, box2, degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
                             float max_distance = gpu_max_distance(box1, box2, degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
@@ -405,53 +405,164 @@ __global__ void kernel_merge(BoxDistRange *pixpairs, int *pixelpairidx, int pair
     }
 }
 
-__global__ void kernel_unroll_within_polygon(BoxDistRange *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, uint32_t *es_offset, EdgeSeq *edge_sequences, uint* size, Task *tasks, uint *task_size)
+// __global__ void kernel_unroll_within_polygon(BoxDistRange *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, uint32_t *es_offset, EdgeSeq *edge_sequences, uint* size, Task *tasks, uint *task_size)
+// {
+//     const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
+//     if (bufferId < *size)
+//     {
+//         int p = pixpairs[bufferId].sourcePixelId;
+//         int p2 = pixpairs[bufferId].targetPixelId;
+//         int pairId = pixpairs[bufferId].pairId;
+
+//         pair<uint32_t, uint32_t> &pair = pairs[pairId];
+//         IdealOffset &source = idealoffset[pair.first];
+//         IdealOffset &target = idealoffset[pair.second];
+
+//         // printf("%d %d %d\n", pair.first, (es_offset + source.offset_start)[p], (es_offset + source.offset_start)[p + 1]);
+
+//         // if((es_offset + source.offset_start)[p] >= (es_offset + source.offset_start)[p + 1]){
+//         //     printf("ERROR %d %d %d\n", pair.first, (es_offset + source.offset_start)[p], (es_offset + source.offset_start)[p + 1]);
+//         // }
+
+//         int s_num_sequence = (es_offset + source.offset_start)[p + 1] - (es_offset + source.offset_start)[p];
+//         int t_num_sequence = (es_offset + target.offset_start)[p2 + 1] - (es_offset + target.offset_start)[p2];
+
+//         // printf("t_num_sequence = %d\n", t_num_sequence);
+//         // printf("s_num_sequence = %d\n", s_num_sequence);
+//         // printf("s_num_sequence = %d t_num_sequence = %d\n", s_num_sequence, t_num_sequence);
+
+//         for (int i = 0; i < s_num_sequence; ++ i)
+//         {
+//             EdgeSeq r = (edge_sequences + source.edge_sequences_start)[(es_offset + source.offset_start)[p] + i];
+//             for (int j = 0; j < t_num_sequence; ++j)
+//             {
+//                 EdgeSeq r2 = (edge_sequences + target.edge_sequences_start)[(es_offset + target.offset_start)[p2] + j];
+//                 // printf("r.length = %d, r2.length = %d\n", r.length, r2.length);
+//                 // atomicAdd(task_size, r.length * r2.length);
+//                 int max_size = 32;
+//                 for (uint s = 0; s < r.length; s += max_size)
+//                 {
+//                     uint end_s = min(s + max_size, r.length);
+//                     for (uint t = 0; t < r2.length; t += max_size)
+//                     {
+//                         uint end_t = min(t + max_size, r2.length);
+//                         int idx = atomicAdd(task_size, 1U);
+//                         tasks[idx] = {source.vertices_start + r.start + s, target.vertices_start + r2.start + t, end_s - s, end_t - t, pairId};
+//                     }
+//                 }
+//            }
+//         }
+//     }
+// }
+
+__global__ void kernel_unroll_within_polygon(
+    BoxDistRange *pixpairs, 
+    pair<uint32_t, uint32_t> *pairs, 
+    IdealOffset *idealoffset, 
+    uint32_t *es_offset, 
+    EdgeSeq *edge_sequences, 
+    uint32_t *size, 
+    Task *tasks, 
+    uint32_t *task_size)
 {
+    // Shared memory for frequently accessed data
+    extern __shared__ char shared_mem[];
+    BoxDistRange *shared_pixpair = (BoxDistRange*)shared_mem;
+    IdealOffset *shared_source = (IdealOffset*)(shared_pixpair + 1);
+    IdealOffset *shared_target = (IdealOffset*)(shared_source + 1);
+
+    // Thread and block indices
     const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
-    if (bufferId < *size)
-    {
-        int p = pixpairs[bufferId].sourcePixelId;
-        int p2 = pixpairs[bufferId].targetPixelId;
-        int pairId = pixpairs[bufferId].pairId;
+    const int tid = threadIdx.x;
 
-        pair<uint32_t, uint32_t> &pair = pairs[pairId];
-        IdealOffset &source = idealoffset[pair.first];
-        IdealOffset &target = idealoffset[pair.second];
+    // Load pixel pair into shared memory (first thread in block)
+    if (bufferId < *size && tid == 0) {
+        shared_pixpair[0] = pixpairs[bufferId];
+    }
+    __syncthreads();
 
-        // printf("%d %d %d\n", pair.first, (es_offset + source.offset_start)[p], (es_offset + source.offset_start)[p + 1]);
+    if (bufferId >= *size) return;
 
-        // if((es_offset + source.offset_start)[p] >= (es_offset + source.offset_start)[p + 1]){
-        //     printf("ERROR %d %d %d\n", pair.first, (es_offset + source.offset_start)[p], (es_offset + source.offset_start)[p + 1]);
-        // }
+    // Extract pixel pair information
+    int p = shared_pixpair[0].sourcePixelId;
+    int p2 = shared_pixpair[0].targetPixelId;
+    int pairId = shared_pixpair[0].pairId;
 
-        int s_num_sequence = (es_offset + source.offset_start)[p + 1] - (es_offset + source.offset_start)[p];
-        int t_num_sequence = (es_offset + target.offset_start)[p2 + 1] - (es_offset + target.offset_start)[p2];
+    // Load pair and offset data
+    pair<uint32_t, uint32_t> pair = pairs[pairId];
+    if (tid == 0) {
+        shared_source[0] = idealoffset[pair.first];
+        shared_target[0] = idealoffset[pair.second];
+    }
+    __syncthreads();
 
-        // printf("t_num_sequence = %d\n", t_num_sequence);
-        // printf("s_num_sequence = %d\n", s_num_sequence);
-        // printf("s_num_sequence = %d t_num_sequence = %d\n", s_num_sequence, t_num_sequence);
+    // Calculate edge sequence counts
+    int s_num_sequence = (es_offset + shared_source[0].offset_start)[p + 1] - 
+                         (es_offset + shared_source[0].offset_start)[p];
+    int t_num_sequence = (es_offset + shared_target[0].offset_start)[p2 + 1] - 
+                         (es_offset + shared_target[0].offset_start)[p2];
 
-        for (int i = 0; i < s_num_sequence; ++ i)
-        {
-            EdgeSeq r = (edge_sequences + source.edge_sequences_start)[(es_offset + source.offset_start)[p] + i];
-            for (int j = 0; j < t_num_sequence; ++j)
-            {
-                EdgeSeq r2 = (edge_sequences + target.edge_sequences_start)[(es_offset + target.offset_start)[p2] + j];
-                // printf("r.length = %d, r2.length = %d\n", r.length, r2.length);
-                // atomicAdd(task_size, r.length * r2.length);
-                int max_size = 16;
-                for (uint s = 0; s < r.length; s += max_size)
-                {
-                    uint end_s = min(s + max_size, r.length);
-                    for (uint t = 0; t < r2.length; t += max_size)
-                    {
-                        uint end_t = min(t + max_size, r2.length);
-                        int idx = atomicAdd(task_size, 1U);
-                        tasks[idx] = {source.vertices_start + r.start + s, target.vertices_start + r2.start + t, end_s - s, end_t - t, pairId};
+    // Dynamic task size based on sequence length
+    const uint32_t max_size = (s_num_sequence * t_num_sequence > 1024) ? 16 : 32;
+
+    // Pre-calculate total tasks for this pixel pair
+    uint32_t total_tasks = 0;
+    for (int i = 0; i < s_num_sequence; ++i) {
+        EdgeSeq r = (edge_sequences + shared_source[0].edge_sequences_start)[
+            (es_offset + shared_source[0].offset_start)[p] + i];
+        for (int j = 0; j < t_num_sequence; ++j) {
+            EdgeSeq r2 = (edge_sequences + shared_target[0].edge_sequences_start)[
+                (es_offset + shared_target[0].offset_start)[p2] + j];
+            total_tasks += ((r.length + max_size - 1) / max_size) * 
+                          ((r2.length + max_size - 1) / max_size);
+        }
+    }
+
+    // Allocate task indices using atomic operation (first thread only)
+    uint32_t base_task_idx = 0;
+    if (tid == 0) {
+        base_task_idx = atomicAdd(task_size, total_tasks);
+    }
+    __syncthreads();
+
+    // Broadcast base_task_idx to all threads in block
+    uint32_t *shared_base_idx = (uint32_t*)(shared_target + 1);
+    if (tid == 0) {
+        shared_base_idx[0] = base_task_idx;
+    }
+    __syncthreads();
+
+    // Generate tasks
+    uint32_t current_task_idx = shared_base_idx[0];
+    for (int i = 0; i < s_num_sequence; ++i) {
+        EdgeSeq r = (edge_sequences + shared_source[0].edge_sequences_start)[
+            (es_offset + shared_source[0].offset_start)[p] + i];
+        for (int j = 0; j < t_num_sequence; ++j) {
+            EdgeSeq r2 = (edge_sequences + shared_target[0].edge_sequences_start)[
+                (es_offset + shared_target[0].offset_start)[p2] + j];
+
+            for (uint32_t s = 0; s < r.length; s += max_size) {
+                uint32_t end_s = min(s + max_size, r.length);
+                for (uint32_t t = 0; t < r2.length; t += max_size) {
+                    uint32_t end_t = min(t + max_size, r2.length);
+                    if (tid == 0) {
+                        tasks[current_task_idx] = {
+                            shared_source[0].vertices_start + r.start + s,
+                            shared_target[0].vertices_start + r2.start + t,
+                            end_s - s,
+                            end_t - t,
+                            pairId
+                        };
+                        current_task_idx++;
                     }
                 }
-           }
+            }
         }
+    }
+
+    // Update task_size if necessary (first thread only)
+    if (tid == 0 && current_task_idx > shared_base_idx[0]) {
+        atomicMax(task_size, current_task_idx);
     }
 }
 
@@ -466,7 +577,7 @@ __global__ void kernel_refine_within_polygon(Task *tasks, Point *vertices, uint 
         uint len2 = tasks[taskId].t_length;
         int pair_id = tasks[taskId].pair_id;
 
-        double dist = gpu_segment_to_segment_within_batch(vertices + s1, vertices + s2, len1, len2, degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
+        float dist = gpu_segment_to_segment_within_batch(vertices + s1, vertices + s2, len1, len2, degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
         if(dist <= WITHIN_DISTANCE){
             atomicMinFloat(max_box_dist + pair_id, -1.0f); 
             return;
@@ -545,7 +656,7 @@ void cuda_within_polygon(query_context *gctx)
         // PrintBuffer((BoxDistRange*)gctx->d_BufferInput, h_bufferinput_size);
         // printf("----------------------------------------------------------------------------\n");
 
-        if(h_bufferinput_size == 0) break;
+        if(h_bufferinput_size == 0) return;
     }
 
     // CUDA_SWAP_BUFFER();
@@ -719,6 +830,8 @@ void cuda_within_polygon(query_context *gctx)
     statistic_result_polygon<<<grid_size, block_size>>>(d_max_box_dist, batch_size, gctx->d_result);
     cudaDeviceSynchronize();
     check_execution("statistic_result");
+
+    PrintBuffer((float*)d_max_box_dist, batch_size);
 
     uint h_result;
     CUDA_SAFE_CALL(cudaMemcpy(&h_result, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));

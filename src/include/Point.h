@@ -18,23 +18,101 @@ class Edge;
 
 class Point {
 public:
-    double x;
-    double y;
-    CUDA_HOSTDEV Point() {
-        // x = 0;
-        // y = 0;
+    float x;
+    float y;
+
+    CUDA_HOSTDEV Point() : x(0), y(0) {}
+    CUDA_HOSTDEV Point(float xx, float yy) : x(xx), y(yy) {}
+
+    /// Set this point to all zeros.
+    void set_zero() {
+        x = 0.0;
+        y = 0.0;
     }
-    CUDA_HOSTDEV Point(double xx, double yy) {
-        x = xx;
-        y = yy;
+
+    /// Set this point to some specified coordinates.
+    CUDA_HOSTDEV void set(float x_, float y_) {
+        x = x_;
+        y = y_;
     }
+
+    CUDA_HOSTDEV bool operator==(const Point &p) const { return fabs(x-p.x) < 1e-9 && fabs(y-p.y) < 1e-9; }
+    CUDA_HOSTDEV bool operator!=(const Point &p) const { return fabs(x-p.x) >= 1e-9 || fabs(y-p.y) >= 1e-9; }
+    CUDA_HOSTDEV bool operator<(const Point &p) const { 
+        if(fabs(x-p.x) >= 1e-9){
+            return p.x > x;
+        }else if(fabs(y-p.y) >= 1e-9){
+            return p.y < y;
+        }else{
+            return false;
+        }
+    }
+    CUDA_HOSTDEV bool operator<=(const Point &p) const { 
+        if(fabs(x-p.x) >= 1e-9){
+            return p.x > x;
+        }else if(fabs(y-p.y) >= 1e-9){
+            return p.y < y;
+        }else{
+            return true;
+        }
+    }
+
+    /// Negate this point.
+    CUDA_HOSTDEV Point operator-() const {
+        Point v;
+        v.set(-x, -y);
+        return v;
+    }
+
+    CUDA_HOSTDEV Point operator+(const Point &p) const { return Point(x + p.x, y + p.y); }
+    CUDA_HOSTDEV Point operator-(const Point &p) const { return Point(x - p.x, y - p.y); }
+    CUDA_HOSTDEV Point operator*(const float &t) const { return Point(t * x, t * y); }
+
+    /// Add a point to this point.
+    CUDA_HOSTDEV void operator+=(const Point &v) {
+        x += v.x;
+        y += v.y;
+    }
+
+    /// Subtract a point from this point.
+    CUDA_HOSTDEV void operator-=(const Point &v) {
+        x -= v.x;
+        y -= v.y;
+    }
+
+    /// Multiply this point by a scalar.
+    CUDA_HOSTDEV void operator*=(float a) {
+        x *= a;
+        y *= a;
+    }
+
+    /// Get the length of this point (the norm).
+    float Length() const { return sqrt(x * x + y * y); }
+
+    /// Convert this point into a unit point. Returns the Length.
+    float Normalize() {
+        float len = Length();
+        x /= len;
+        y /= len;
+        return len;
+    }
+
+    CUDA_HOSTDEV float cross(const Point &p) const { return x * p.y - y * p.x; }
+
+    CUDA_HOSTDEV float cross(const Point &a, const Point &b) const {
+        return (a - *this).cross(b - *this);
+    }
+
     void print() { printf("POINT (%.12f %.12f)\n", x, y); }
+    
     void print_without_return() { printf("POINT (%f %f)", x, y); }
+    
     string to_string() {
         char double_str[200];
         sprintf(double_str, "POINT(%f %f)", x, y);
         return string(double_str);
     }
+    
     static Point *read_one_point(string &input_line) {
 
         if (input_line.size() == 0) {
@@ -55,93 +133,6 @@ public:
         p->y = read_double(wkt, offset);
 
         return p;
-    }
-    /// Set this point to all zeros.
-    void set_zero() {
-        x = 0.0;
-        y = 0.0;
-    }
-
-    /// Set this point to some specified coordinates.
-    CUDA_HOSTDEV void set(double x_, double y_) {
-        x = x_;
-        y = y_;
-    }
-
-    //	  /// Negate this point.
-    //	  Point operator =(const Point &v) const
-    //	  {
-    //	    Point r;
-    //	    r.x = v.x;
-    //	    r.y = v.y;
-    //	    return r;
-    //	  }
-
-    CUDA_HOSTDEV bool operator==(const Point &p) const { return fabs(x-p.x) < 1e-9 && fabs(y-p.y) < 1e-9; }
-    CUDA_HOSTDEV bool operator!=(const Point &p) const { return fabs(x-p.x) >= 1e-9 || fabs(y-p.y) >= 1e-9; }
-    CUDA_HOSTDEV bool operator<(const Point &p) const { 
-        if(fabs(x-p.x) >= 1e-9){
-            return p.x - x > 1e-9;
-        }else if(fabs(y-p.y) >= 1e-9){
-            return p.y - y > 1e-9;
-        }else{
-            return true;
-        }
-    }
-    CUDA_HOSTDEV bool operator<=(const Point &p) const { 
-        if(fabs(x-p.x) >= 1e-9){
-            return p.x - x > -1e-9;
-        }else{
-            return p.y - y > -1e-9;
-        }
-    }
-
-    /// Negate this point.
-    CUDA_HOSTDEV Point operator-() const {
-        Point v;
-        v.set(-x, -y);
-        return v;
-    }
-
-    CUDA_HOSTDEV Point operator+(const Point &p) const { return Point(x + p.x, y + p.y); }
-    CUDA_HOSTDEV Point operator-(const Point &p) const { return Point(x - p.x, y - p.y); }
-    CUDA_HOSTDEV Point operator*(const double &t) const { return Point(t * x, t * y); }
-
-    /// Add a point to this point.
-    CUDA_HOSTDEV void operator+=(const Point &v) {
-        x += v.x;
-        y += v.y;
-    }
-
-    /// Subtract a point from this point.
-    CUDA_HOSTDEV void operator-=(const Point &v) {
-        x -= v.x;
-        y -= v.y;
-    }
-
-    /// Multiply this point by a scalar.
-    CUDA_HOSTDEV void operator*=(double a) {
-        x *= a;
-        y *= a;
-    }
-
-
-
-    /// Get the length of this point (the norm).
-    double Length() const { return sqrt(x * x + y * y); }
-
-    /// Convert this point into a unit point. Returns the Length.
-    double Normalize() {
-        double len = Length();
-        x /= len;
-        y /= len;
-        return len;
-    }
-
-    CUDA_HOSTDEV double cross(const Point &p) const { return x * p.y - y * p.x; }
-
-    CUDA_HOSTDEV double cross(const Point &a, const Point &b) const {
-        return (a - *this).cross(b - *this);
     }
 };
 
@@ -167,7 +158,7 @@ class Vertex : public Point {
     /// The edges this point constitutes an upper ending point
     std::vector<Edge *> edge_list;
 
-    Vertex(double xx, double yy) {
+    Vertex(float xx, float yy) {
         x = xx;
         y = yy;
     }

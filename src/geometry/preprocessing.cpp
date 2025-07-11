@@ -29,7 +29,6 @@ void *rasterization_unit(void *args){
 }
 
 void process_rasterization(query_context *gctx){
-
 	log("start rasterizing the referred polygons");
 	vector<Ideal *> &ideals = *(vector<Ideal *> *)gctx->target;
 	assert(ideals.size()>0);

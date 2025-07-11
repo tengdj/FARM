@@ -159,10 +159,10 @@ box *VertexSequence::getMBR(){
 	box *mbr = new box();
 	float bias = 1e-9;
 	for(int i=0;i<num_vertices;i++){
-		mbr->low[0] = min(mbr->low[0], p[i].x);
-		mbr->high[0] = max(mbr->high[0], p[i].x);
-		mbr->low[1] = min(mbr->low[1], p[i].y);
-		mbr->high[1] = max(mbr->high[1], p[i].y);
+		mbr->low[0] = min(mbr->low[0], (double)p[i].x);
+		mbr->high[0] = max(mbr->high[0], (double)p[i].x);
+		mbr->low[1] = min(mbr->low[1], (double)p[i].y);
+		mbr->high[1] = max(mbr->high[1], (double)p[i].y);
 	}
 	mbr->low[0] -= bias;
 	mbr->high[0] += bias;
