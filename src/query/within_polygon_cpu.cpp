@@ -15,7 +15,6 @@ void *query(void *args){
             Ideal *source = gctx->source_ideals[sourceIdx];
             Ideal *target = gctx->target_ideals[targetIdx];
             source->within(target, ctx);
-            printf("FINISH\n");
 			ctx->report_progress();
 		}
 	}

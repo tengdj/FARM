@@ -1933,6 +1933,28 @@ double Ideal::distance(Ideal *target, int pix, query_context *ctx, bool profile)
 
 bool Ideal::within(Ideal *target, query_context *ctx)
 {
+	// MyPolygon::print();
+	// MyRaster::print();
+
+	// for (int i = 0; i <= num_layers; i++)
+	// {
+	// 	printf("level %d:\n", i);
+	// 	printf("dimx=%d, dimy=%d, step_x = %lf, step_y = %lf\n", layers[i].get_dimx(), layers[i].get_dimy(), layers[i].get_step_x(), layers[i].get_step_y());
+	// 	layers[i].mbr->print();
+	// 	layers[i].print();
+	// }
+	
+	// target->MyPolygon::print();
+	// target->MyRaster::print();
+
+	// for (int i = 0; i <= target->get_num_layers(); i++)
+	// {
+	// 	printf("level %d:\n", i);
+	// 	printf("dimx=%d, dimy=%d, step_x = %lf, step_y = %lf\n", target->get_layers()[i].get_dimx(), target->get_layers()[i].get_dimy(), target->get_layers()[i].get_step_x(), target->get_layers()[i].get_step_y());
+	// 	target->get_layers()[i].mbr->print();
+	// 	target->get_layers()[i].print();
+	// }
+
 	uint s_level = num_layers;
 	uint t_level = target->get_num_layers();
 	box source_pixel_box, target_pixel_box;
@@ -1946,11 +1968,10 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 
 	int i = 0, j = 0;
 	while(true){
-		vector<int> s_pxs, t_pxs;
+		unordered_set<int> s_pxs, t_pxs;
 		bool s_next_layer = false, t_next_layer = false;
 		double s_step = layers[i].get_step_x(), t_step = target->get_layers()[j].get_step_x();
 
-		printf("i = %d j = %d %d %d\n", i, j, s_level, t_level);
 		if(i < s_level && (s_step >= t_step || j >= t_level)) {
 			i ++;
 			s_next_layer = true;
@@ -1962,9 +1983,9 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 
 		int size = candidate_pairs.size();
 		if(size == 0) break;
-		cout << size << endl;
 		for(int k = 0; k < size; k ++){
 			auto pair = candidate_pairs.front();
+			// printf("id = (%d %d)\n", pair.first, pair.second);
 			candidate_pairs.pop();
 			int s_pix_id = pair.first, t_pix_id = pair.second;
 			
@@ -1977,15 +1998,14 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 				source_pixel_box.high[1] -= 1e-6;
 				
 				auto temp = layers[i].retrieve_pixels(&source_pixel_box);
-				printf("temp size %d\n", temp.size());
 				for(auto p : temp){
 					if(layers[i].show_status(p) == BORDER){
-						s_pxs.push_back(p);
+						s_pxs.insert(p);
 					}
 				}
 			}else{
 				if(layers[i].show_status(s_pix_id) == BORDER){
-					s_pxs.push_back(s_pix_id);
+					s_pxs.insert(s_pix_id);
 				}
 			}
 
@@ -1998,26 +2018,23 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 				target_pixel_box.high[1] -= 1e-6;
 
 				auto temp = target->get_layers()[j].retrieve_pixels(&target_pixel_box);
-				printf("temp size %d\n", temp.size());
 				for(auto p : temp){
 					if(target->get_layers()[j].show_status(p) == BORDER){
-						t_pxs.push_back(p);
+						t_pxs.insert(p);
 					} 
 				}
 			}else{
 				if(target->get_layers()[j].show_status(t_pix_id) == BORDER){
-					t_pxs.push_back(t_pix_id);
+					t_pxs.insert(t_pix_id);
 				}
 			}
 		}
 
-		cout << candidate_pairs.size() << endl;
-
 		// printf("%d %d\n", s_pxs.size(), t_pxs.size());
 
 		float max_box_dist = 100000.0;
-		printf("pxs size %d %d\n", s_pxs.size(), t_pxs.size());
-		cout << s_pxs.size() << " !" << t_pxs.size() << endl;
+		// printf("pxs size %d %d\n", s_pxs.size(), t_pxs.size());
+		// cout << s_pxs.size() << " !" << t_pxs.size() << endl;
 		for(auto id1 : s_pxs){
 			auto box1 = layers[i].get_pixel_box(layers[i].get_x(id1), layers[i].get_y(id1));
 			for(auto id2 : t_pxs){
@@ -2044,7 +2061,17 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 		}
 		if(!s_next_layer && !t_next_layer) break;
 	}
-	printf("result %d\n", candidate_pairs.size());
+
+	vector<tuple<float, int, int>> sorted_pairs(candidate_pairs.size());
+	while(!candidate_pairs.empty()){
+		auto pair = candidate_pairs.front();
+		candidate_pairs.pop();
+		int id1 = pair.first, id2 = pair.second;
+		auto box1 = get_pixel_box(get_x(id1), get_y(id1));
+		auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));
+		
+	}
+	// printf("result %d\n", candidate_pairs.size());
 	ctx->found += candidate_pairs.size();
 	return 0;
 }
