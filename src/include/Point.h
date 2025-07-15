@@ -42,7 +42,7 @@ public:
         if(fabs(x-p.x) >= 1e-9){
             return p.x > x;
         }else if(fabs(y-p.y) >= 1e-9){
-            return p.y < y;
+            return p.y > y;
         }else{
             return false;
         }
@@ -51,7 +51,7 @@ public:
         if(fabs(x-p.x) >= 1e-9){
             return p.x > x;
         }else if(fabs(y-p.y) >= 1e-9){
-            return p.y < y;
+            return p.y > y;
         }else{
             return true;
         }

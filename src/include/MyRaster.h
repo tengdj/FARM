@@ -50,6 +50,7 @@ public:
     void set_status(uint8_t *_status) { status = _status; }
     PartitionStatus show_status(int id);
     uint8_t* get_status() {return status;}
+    uint8_t get_fullness(int id) { return status[id]; };
     void set_status_size();
 
 	vector<int> get_intersect_pixels(box *pix);

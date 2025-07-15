@@ -147,8 +147,9 @@ public:
 	void process_intersection(map<int, vector<double>> edge_intersection, Direction direction);
 	int count_intersection_nodes(Point &p);
 	Grid_line *get_vertical() { return vertical; }
-	uint8_t get_fullness(int id) { return status[id]; };
 	double get_areas(int id) { return areas[id]; }
+	double decodePixelArea(int id, bool isLow);
+	uint8_t encodePixelArea(double area);
 
 	void layering();
 	Hraster *get_layers() { return layers; }
@@ -169,7 +170,7 @@ public:
 	// query functions
 	bool contain(Point &p, query_context *ctx, bool profile = false);
 	PartitionStatus segment_contain(Point &p);
-	bool contain(Ideal *target, query_context *ctx, bool profile = false);
+	bool intersect(Ideal *target, query_context *ctx);
 	// bool intersect(MyPolygon *target, query_context *ctx);
 	void intersection(Ideal *target, query_context *ctx);
 	double distance(Point &p, query_context *ctx, bool profile = false);
@@ -203,8 +204,8 @@ void indexDestroy(query_context *gctx);
 void ResetDevice(query_context *gctx);
 void cuda_create_buffer(query_context *gctx);
 void preprocess_for_gpu(query_context *gctx);
-void cuda_contain(query_context *gctx, bool polygon);
-void cuda_contain_polygon(query_context *gctx);
+void cuda_intersect(query_context *gctx);
+void cuda_intersection(query_context *gctx);
 void cuda_within(query_context *gctx);
 void cuda_within_polygon(query_context *gctx);
 #endif

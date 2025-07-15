@@ -1,13 +1,12 @@
 #include "../include/Ideal.h"
 #include <fstream>
-#include "../index/RTree.h"
 #include <queue>
 #include <chrono>
 
 int main(int argc, char** argv) {
 	query_context global_ctx;
 	global_ctx = get_parameters(argc, argv);
-	global_ctx.query_type = QueryType::contain_polygon;
+	global_ctx.query_type = QueryType::intersect;
 
 	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
 	global_ctx.target_ideals = load_binary_file(global_ctx.target_path.c_str(),global_ctx);
@@ -47,8 +46,7 @@ int main(int argc, char** argv) {
 		ResetDevice(&global_ctx);
 
 		auto batch_start = std::chrono::high_resolution_clock::now();
-		cuda_contain(&global_ctx, true);
-		cuda_contain_polygon(&global_ctx);
+		cuda_intersect(&global_ctx);
 		auto batch_end = std::chrono::high_resolution_clock::now();
 		auto batch_duration = std::chrono::duration_cast<std::chrono::milliseconds>(batch_end - batch_start);
 		std::cout << "batch time: " << batch_duration.count() << " ms" << std::endl;

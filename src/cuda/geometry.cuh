@@ -366,14 +366,55 @@ __device__ inline void gpu_segment_intersect_batch(Point *p, int s1, int s2, int
     return;
 }
 
-__global__ void kernel_filter_segment_contain(Segment *segments, pair<uint32_t,uint32_t> *pairs,
-											  IdealOffset *idealoffset, RasterInfo *info, 
-											  uint8_t *status, Point *vertices,  uint size, uint8_t *flags, 
-											  PixMapping *ptpixpairs, uint *pp_size);
+__device__ inline double gpu_decode_fullness(uint8_t fullness, double pixelArea, int category_count, bool isLow)
+{
+	if (fullness == 0)
+    {
+        return 0.0f;
+    }
+    else if (fullness == category_count - 1)
+    {
+        return pixelArea;
+    }
+    else
+    {
+        return (1.0 * fullness - isLow) / (category_count - 2) * pixelArea;
+    }
+}
 
-__global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segment *segments, 
-												pair<uint32_t, uint32_t> *pairs,
-												IdealOffset *idealoffset, RasterInfo *info,
-												uint32_t *es_offset, EdgeSeq *edge_sequences,
-												Point *vertices, uint32_t *gridline_offset,
-												double *gridline_nodes, uint *size, uint8_t *flags);
+__device__ inline uint8_t gpu_encode_fullness(double area, double pixelArea, int count){
+	double ratio = area / pixelArea;
+	// area calculation has precision error
+	if (fabs(ratio - 1.0) < 1e-9)
+	{
+		// full
+		return count - 1;
+	}
+
+	if (fabs(ratio) < 1e-9)
+	{
+		// empty
+		return 0;
+	}
+
+	int idx = static_cast<int>((ratio * (count - 2)) + 1);
+	if (idx >= count)
+		idx = count - 1; // 防止越界
+
+	// int idx = static_cast<int>(ceil(ratio * (count - 2)));
+	assert(idx < 256);
+	return idx;
+}
+
+
+// __global__ void kernel_filter_segment_contain(Segment *segments, pair<uint32_t,uint32_t> *pairs,
+// 											  IdealOffset *idealoffset, RasterInfo *info, 
+// 											  uint8_t *status, Point *vertices,  uint size, uint8_t *flags, 
+// 											  PixMapping *ptpixpairs, uint *pp_size);
+
+// __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segment *segments, 
+// 												pair<uint32_t, uint32_t> *pairs,
+// 												IdealOffset *idealoffset, RasterInfo *info,
+// 												uint32_t *es_offset, EdgeSeq *edge_sequences,
+// 												Point *vertices, uint32_t *gridline_offset,
+// 												double *gridline_nodes, uint *size, uint8_t *flags);

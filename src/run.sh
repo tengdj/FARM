@@ -10,6 +10,7 @@ DATA5="sampled.points.dat"
 DATA6="zipcode.idl"
 DATA7="water.idl"
 DATA8="areawater.idl"
+DATA9="child_normal_float.idl"
 
 # > output.txt
 > output1.txt
@@ -49,4 +50,4 @@ DATA8="areawater.idl"
 
 make clean
 make within_polygon_cpu USE_RT=1 -j
-$BUILD_PATH/within_polygon_cpu -s $IDL_PATH/$DATA1 -t $IDL_PATH/$DATA1 -r -h -b 2000000 -l 0.1 > output1.txt
+$BUILD_PATH/within_polygon_cpu -s $IDL_PATH/$DATA9 -t $IDL_PATH/$DATA9 -r -h -b 2000000 -l 0.1 > output1.txt

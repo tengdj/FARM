@@ -44,6 +44,49 @@ void Ideal::process_pixels_null(int x, int y)
 	}
 }
 
+double Ideal::decodePixelArea(int id, bool isLow){
+    uint8_t fullness = status[id];
+	double pixelArea = get_pixel_area();
+	if (fullness == 0)
+    {
+        return 0.0f;
+    }
+    else if (fullness == category_count - 1)
+    {
+        return pixelArea;
+    }
+    else
+    {
+        return (1.0 * fullness - isLow) / (category_count - 2) * pixelArea;
+    }
+}
+
+uint8_t Ideal::encodePixelArea(double area){
+	double pixelArea = get_pixel_area();
+	double ratio = area / pixelArea;
+
+	if (fabs(ratio - 1.0) < 1e-9)
+	{
+		// full
+		return category_count - 1;
+	}
+
+	if (fabs(ratio) < 1e-9)
+	{
+		// empty
+		return 0;
+	}
+
+	// int idx = static_cast<int>((ratio * (category_count - 2)) + 1);
+	int idx = static_cast<int>(ceil(ratio * (category_count - 2)));
+
+	if (idx >= category_count)
+		idx = category_count - 1; // 防止越界
+
+	assert(idx < 256);
+	return idx;
+}
+
 void Ideal::process_crosses(map<int, vector<cross_info>> edges_info)
 {
 	int num_edge_seqs = 0;
@@ -806,7 +849,7 @@ void Ideal::calculate_fullness()
 			// calculate its area and classify it
 
 			double clippedArea = computePolygonArea(clippedPoints);
-			type = classifySubpolygon(clippedArea, step_x * step_y, category_count);
+			type = encodePixelArea(clippedArea);
 
 			// if(id == 0){
 			// 	printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
@@ -971,7 +1014,7 @@ void Ideal::merge_status(Hraster &r)
 			double mergedArea = merge_area(r.get_pixel_box(x, y), st);
 			uint8_t fullness;
 			if(st == BORDER){
-				fullness = classifySubpolygon(mergedArea, r.get_step_x() * r.get_step_y(), category_count);
+				fullness = classifyPixel(mergedArea, r.get_step_x() * r.get_step_y(), category_count);
 			}else if(st == IN){
 				fullness = category_count - 1;
 			}else{
@@ -1162,78 +1205,19 @@ PartitionStatus Ideal::segment_contain(Point &p)
 	}
 }
 
-bool Ideal::contain(Ideal *target, query_context *ctx, bool profile)
+bool Ideal::intersect(Ideal *target, query_context *ctx)
 {
-	if (!getMBB()->contain(*target->getMBB()))
-	{
-		// log("mbb do not contain");
-		return false;
-	}
 	vector<int> pxs = retrieve_pixels(target->getMBB());
-	int etn = 0;
-	int itn = 0;
-	for (auto p : pxs)
-	{
-		if (show_status(p) == OUT)
-		{
-			etn++;
-		}
-		else if (show_status(p) == IN)
-		{
-			itn++;
-		}
-	}
-	if (etn == pxs.size())
-	{
-		return false;
-	}
-	if (itn == pxs.size())
-	{
-		return true;
-	}
-
-	vector<int> tpxs;
 
 	for (auto p : pxs)
 	{
+		if(show_status(p) != BORDER) continue;
 		box bx = get_pixel_box(get_x(p), get_y(p));
-		tpxs = target->retrieve_pixels(&bx);
+		vector<int> tpxs = target->retrieve_pixels(&bx);
 		for (auto p2 : tpxs)
 		{
-			// an external pixel of the container intersects an internal
-			// pixel of the containee, which means the containment must be false
-			if (show_status(p) == IN)
-				continue;
-			if (show_status(p) == OUT && target->show_status(p2) == IN)
-			{
-				return false;
-			}
-			if (show_status(p) == OUT && target->show_status(p2) == BORDER)
-			{
-				Point pix_border[5];
-				pix_border[0].x = bx.low[0];
-				pix_border[0].y = bx.low[1];
-				pix_border[1].x = bx.low[0];
-				pix_border[1].y = bx.high[1];
-				pix_border[2].x = bx.high[0];
-				pix_border[2].y = bx.high[1];
-				pix_border[3].x = bx.high[0];
-				pix_border[3].y = bx.low[1];
-				pix_border[4].x = bx.low[0];
-				pix_border[4].y = bx.low[1];
-				for (int e = 0; e < target->get_num_sequences(p2); e++)
-				{
-					auto edges = target->get_edge_sequence(target->get_offset(p2) + e);
-					auto pos = edges.first;
-					auto size = edges.second;
-					if (segment_intersect_batch(target->boundary->p + pos, pix_border, size, 4))
-					{
-						return false;
-					}
-				}
-			}
 			// evaluate the state
-			if (show_status(p) == BORDER && target->show_status(p2) == BORDER)
+			if (target->show_status(p2) == BORDER)
 			{
 				for (int i = 0; i < get_num_sequences(p); i++)
 				{
@@ -1243,7 +1227,7 @@ bool Ideal::contain(Ideal *target, query_context *ctx, bool profile)
 						auto r2 = target->get_edge_sequence(target->get_offset(p2) + j);
 						if (segment_intersect_batch(boundary->p + r.first, target->boundary->p + r2.first, r.second, r2.second))
 						{
-							return false;
+							return true;
 						}
 					}
 				}
@@ -1253,10 +1237,7 @@ bool Ideal::contain(Ideal *target, query_context *ctx, bool profile)
 	}
 	pxs.clear();
 
-	// this is the last step for all the cases, when no intersection segment is identified
-	// pick one point from the target and it must be contained by this polygon
-	Point p(target->getx(0), target->gety(0));
-	return contain(p, ctx, false);
+	return false;
 }
 
 inline int binary_search(vector<Segment> &sorted_array, int left, int right, Point target)
@@ -1901,7 +1882,7 @@ double Ideal::distance(Ideal *target, int pix, query_context *ctx, bool profile)
 						{
 							dist = segment_to_segment_within_batch(target->boundary->p + cur_er.first,
 																   boundary->p + pix_er.first, cur_er.second, pix_er.second,
-																   ctx->within_distance, ctx->geography, ctx->edge_checked.counter);
+																   ctx->within_distance, ctx->geography);
 						}
 						else
 						{
@@ -1959,10 +1940,10 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 	uint t_level = target->get_num_layers();
 	box source_pixel_box, target_pixel_box;
 
-	queue<pair<int, int>> candidate_pairs;
+	queue<pair<int, int>> pairs;
 	for(int i = 0; i < layers[0].get_num_pixels(); i ++){
 		for(int j = 0; j < target->layers[0].get_num_pixels(); j ++){
-			candidate_pairs.push(make_pair(i, j));
+			pairs.push(make_pair(i, j));
 		}
 	}
 
@@ -1981,12 +1962,12 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 			t_next_layer = true;
 		}
 
-		int size = candidate_pairs.size();
+		int size = pairs.size();
 		if(size == 0) break;
 		for(int k = 0; k < size; k ++){
-			auto pair = candidate_pairs.front();
+			auto pair = pairs.front();
 			// printf("id = (%d %d)\n", pair.first, pair.second);
-			candidate_pairs.pop();
+			pairs.pop();
 			int s_pix_id = pair.first, t_pix_id = pair.second;
 			
 			if(s_next_layer){
@@ -2032,7 +2013,7 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 
 		// printf("%d %d\n", s_pxs.size(), t_pxs.size());
 
-		float max_box_dist = 100000.0;
+		double max_box_dist = 100000.0;
 		// printf("pxs size %d %d\n", s_pxs.size(), t_pxs.size());
 		// cout << s_pxs.size() << " !" << t_pxs.size() << endl;
 		for(auto id1 : s_pxs){
@@ -2041,7 +2022,7 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 				auto box2 = target->get_layers()[j].get_pixel_box(target->get_layers()[j].get_x(id2), target->get_layers()[j].get_y(id2));
 				// box1.print();
 				// box2.print();
-				float max_distacne = box1.max_distance(box2, true);
+				double max_distacne = box1.max_distance(box2, true);
 				if(max_distacne <= ctx->within_distance) return true;
 				max_box_dist = min(max_box_dist, max_distacne);
 			}
@@ -2052,26 +2033,120 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 			for(auto id2 : t_pxs){
 				auto box2 = target->get_layers()[j].get_pixel_box(target->get_layers()[j].get_x(id2), target->get_layers()[j].get_y(id2));
 				
-				float min_distance = box1.distance(box2, true);
+				double min_distance = box1.distance(box2, true);
 				if(min_distance > ctx->within_distance) continue;
 				if(min_distance < max_box_dist) {
-					candidate_pairs.push(make_pair(id1, id2));
+					pairs.push(make_pair(id1, id2));
 				}
 			}
 		}
 		if(!s_next_layer && !t_next_layer) break;
 	}
 
-	vector<tuple<float, int, int>> sorted_pairs(candidate_pairs.size());
-	while(!candidate_pairs.empty()){
-		auto pair = candidate_pairs.front();
-		candidate_pairs.pop();
+	vector<tuple<double, int, int>> candidate_pairs;
+	while(!pairs.empty()){
+		auto pair = pairs.front();
+		pairs.pop();
 		int id1 = pair.first, id2 = pair.second;
+		auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
+		auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
+		auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
+		auto pf = classifyPixel(s_p_apx + t_p_apx, get_pixel_area() + target->get_pixel_area(), 100);
+
 		auto box1 = get_pixel_box(get_x(id1), get_y(id1));
 		auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));
-		
+		double dist_low = box1.distance(box2, true);
+		double dist_high = box1.max_distance(box2, true);
+	
+		double dist_apx = (pf / 100) * (dist_high - dist_low) + dist_low;
+		candidate_pairs.push_back({dist_apx, id1, id2});
 	}
-	// printf("result %d\n", candidate_pairs.size());
-	ctx->found += candidate_pairs.size();
+
+	// std::map<int, std::ofstream> outputFiles;
+
+	for(int _i = 0; _i < candidate_pairs.size(); _i ++){
+		auto id1 = get<1>(candidate_pairs[_i]);
+		auto id2 = get<2>(candidate_pairs[_i]);
+		auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
+		auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
+		auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
+		auto pf = classifyPixel(s_p_apx + t_p_apx, get_pixel_area() + target->get_pixel_area(), 10);
+
+		auto box1 = get_pixel_box(get_x(id1), get_y(id1));
+		auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));
+		double dist_low = box1.distance(box2, true);
+		double dist_high = box1.max_distance(box2, true);
+
+		double min_dist = 100000.0;
+		for(int i = 0; i < get_num_sequences(id1); i ++){
+			auto er1 = get_edge_sequence(get_offset(id1) + i);
+			for(int j = 0; j < target->get_num_sequences(id2); j ++){
+				auto er2 = target->get_edge_sequence(target->get_offset(id2) + j);
+				if(er1.second < 2 || er2.second < 2) continue;
+				double dist = segment_to_segment_within_batch(target->boundary->p+er2.first,
+																boundary->p+er1.first, er2.second, er1.second,
+																ctx->within_distance, ctx->geography);
+				min_dist = min(dist, min_dist);
+			}
+		}
+
+		if(min_dist == 100000){
+			continue;
+			// printf("id = %d, dimx = %d, dimy = %d\n", id, get_dimx(), get_dimy());
+			// MyPolygon::print();
+			// MyRaster::print();
+			// printf("id = %d, dimx = %d, dimy = %d\n", target->id, target->get_dimx(), target->get_dimy());
+			// target->MyPolygon::print();
+			// target->MyRaster::print();
+			// printf("id1 = %d %d id2 = %d %d dist = %lf dist_low = %lf dist_high = %lf\n", id1, get_fullness(id1), id2, target->get_fullness(id2), min_dist, dist_low, dist_high);
+			// printf("%d %d\n", get_num_sequences(id1), target->get_num_sequences(id2));
+		}
+
+		double ratio = (min_dist - dist_low) / (dist_high - dist_low);
+
+
+		// if (outputFiles.find(pf) == outputFiles.end())
+		// {
+		// 	std::string filename = "class_" + std::to_string(pf) + ".txt";
+		// 	outputFiles[pf].open(filename);
+		// 	if (!outputFiles[pf])
+		// 	{
+		// 		std::cerr << "无法创建文件: " << filename << std::endl;
+		// 		return 1;
+		// 	}
+		// }
+		std::string filename = "class_" + std::to_string(pf) + ".txt";
+		std::ofstream outfile(filename, std::ios::app);
+
+        outfile << std::fixed << std::setprecision(6) << ratio << endl;
+
+
+	}
+
 	return 0;
+
+	sort(candidate_pairs.begin(), candidate_pairs.end());
+	
+	double min_dist = 100000.0;
+	for(int pair_id = 0; pair_id < candidate_pairs.size(); pair_id ++){
+		auto id1 = get<1>(candidate_pairs[pair_id]);
+		auto id2 = get<2>(candidate_pairs[pair_id]);
+		for(int i = 0; i < get_num_sequences(id1); i ++){
+			auto er1 = get_edge_sequence(get_offset(id1) + i);
+			for(int j = 0; j < target->get_num_sequences(id2); j ++){
+				auto er2 = target->get_edge_sequence(target->get_offset(id2) + j);
+				if(er1.second < 2 || er2.second < 2) continue;
+				double dist = segment_to_segment_within_batch(target->boundary->p+er2.first,
+									boundary->p+er1.first, er2.second, er1.second,
+									ctx->within_distance, ctx->geography);
+
+				min_dist = min(dist, min_dist);
+				if(min_dist < ctx->within_distance){
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
 }

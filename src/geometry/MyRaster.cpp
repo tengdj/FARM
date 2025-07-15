@@ -327,10 +327,10 @@ int MyRaster::get_pixel_id(Point &p){
 
 vector<int> MyRaster::retrieve_pixels(box *target){
 	vector<int> ret;
-	int start_x = get_offset_x(target->low[0] + 1e-9);
-	int start_y = get_offset_y(target->low[1] + 1e-9);
-	int end_x = get_offset_x(target->high[0] - 1e-9);
-	int end_y = get_offset_y(target->high[1] - 1e-9);
+	int start_x = get_offset_x(target->low[0] + 1e-6);
+	int start_y = get_offset_y(target->low[1] + 1e-6);
+	int end_x = get_offset_x(target->high[0] - 1e-6);
+	int end_y = get_offset_y(target->high[1] - 1e-6);
 
 	//log("%d %d %d %d %d %d",dimx,dimy,start_x,end_x,start_y,end_y);
 	for(int i=start_x;i<=end_x;i++){

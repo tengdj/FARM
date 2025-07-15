@@ -140,51 +140,50 @@ inline double segment_sequence_distance(Point *vs1, Point *vs2, size_t s1, size_
 	return mindist;
 }
 
-inline double point_to_segment_within_batch(Point &p, Point *vs, size_t seq_len, double within_distance, bool geography, size_t &checked)
+inline double point_to_segment_within_batch(Point &p, Point *vs, size_t seq_len, double within_distance, bool geography)
 {
 	double mindist = DBL_MAX;
 	for (int i = 0; i < seq_len - 1; i++)
 	{
-		checked++;
 		double dist = point_to_segment_distance(p, vs[i], vs[i + 1], geography);
 		if (dist < mindist)
 		{
 			mindist = dist;
 		}
-		if (mindist <= within_distance)
-		{
-			return mindist;
-		}
+		// if (mindist <= within_distance)
+		// {
+		// 	return mindist;
+		// }
 	}
 	return mindist;
 }
 
-inline double segment_to_segment_within_batch(Point *vs1, Point *vs2, size_t s1, size_t s2, double within_distance, bool geography, size_t &checked)
+inline double segment_to_segment_within_batch(Point *vs1, Point *vs2, size_t s1, size_t s2, double within_distance, bool geography)
 {
 	double mindist = DBL_MAX;
 	for (int i = 0; i < s1; i++)
 	{
-		double dist = point_to_segment_within_batch(vs1[i], vs2, s2, within_distance, geography, checked);
+		double dist = point_to_segment_within_batch(vs1[i], vs2, s2, within_distance, geography);
 		if (dist < mindist)
 		{
 			mindist = dist;
 		}
-		if (mindist <= within_distance)
-		{
-			return mindist;
-		}
+		// if (mindist <= within_distance)
+		// {
+		// 	return mindist;
+		// }
 	}
 	for (int i = 0; i < s2; i++)
 	{
-		double dist = point_to_segment_within_batch(vs2[i], vs1, s1, within_distance, geography, checked);
+		double dist = point_to_segment_within_batch(vs2[i], vs1, s1, within_distance, geography);
 		if (dist < mindist)
 		{
 			mindist = dist;
 		}
-		if (mindist <= within_distance)
-		{
-			return mindist;
-		}
+		// if (mindist <= within_distance)
+		// {
+		// 	return mindist;
+		// }
 	}
 	return mindist;
 }
@@ -258,18 +257,6 @@ inline void segment_intersect_batch(Point *p1, Point *p2, int s1, int s2, int e1
 
 			double denom = d1.cross(d2);
 
-			// -81.485810000000 42.755655000000, -81.485585000000 42.755404000000
-
-			// if (abs(p2[j].x + 81.485810) < 1e-9 && abs(p2[j].y - 42.755655) < 1e-9)
-			// {
-				// printf("----------------------------CHECK----------------------------\n");
-				// p1[i].print();
-				// p1[i + 1].print();
-				// p2[j].print();
-				// p2[j + 1].print();
-				// printf("----------------------------CHECK----------------------------\n");
-			// }
-
 			if (std::abs(denom) < 1e-12) continue;
 
 			double t = r.cross(d2) / denom;
@@ -316,7 +303,7 @@ inline double computePolygonArea(vector<Point> &polygon)
 	return std::abs(area) / 2.0;
 }
 
-inline uint8_t classifySubpolygon(double area, double pixelArea, int count)
+inline uint8_t classifyPixel(double area, double pixelArea, int count)
 {
 	double ratio = area / pixelArea;
 	// area calculation has precision error
@@ -332,11 +319,10 @@ inline uint8_t classifySubpolygon(double area, double pixelArea, int count)
 		return 0;
 	}
 
-	int idx = static_cast<int>((ratio * (count - 2)) + 1);
+	int idx = static_cast<int>(ceil(ratio * (count - 2)));
 	if (idx >= count)
 		idx = count - 1; // 防止越界
 
-	// int idx = static_cast<int>(ceil(ratio * (count - 2)));
 	assert(idx < 256);
 	return idx;
 }

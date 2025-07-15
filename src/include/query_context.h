@@ -30,7 +30,8 @@ enum QueryType
 	contain_polygon = 1,
 	within = 2,
 	within_polygon = 3,
-	intersection = 4
+	intersection = 4,
+	intersect = 5
 };
 
 class execute_step

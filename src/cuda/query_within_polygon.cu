@@ -15,6 +15,11 @@ struct Task
     int pair_id = 0;
 };
 
+struct BinData{
+    uint8_t pair_wise_fullness;
+    double ratio;
+};
+
 struct BoxDistRange
 {
     int sourcePixelId;
@@ -377,13 +382,51 @@ struct CompareKeyValuePairs {
     }
 };
 
-__global__ void kernel_merge(BoxDistRange *pixpairs, int *pixelpairidx, int pairsize, BoxDistRange* buffer, uint *buffer_size, float *max_box_dist)
+__global__ void initialize_bindata(BoxDistRange *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *info, uint8_t *status, uint size, BinData *bindata, uint *bindata_size, uint8_t category_count, uint8_t bin_count){
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if(x < size){
+
+        // 计算pa.low pa.high pb.low pb.high pa.area pb.area
+        int pa = pixpairs[x].sourcePixelId;
+        int pb = pixpairs[x].targetPixelId;
+        int pair_id = pixpairs[x].pairId;
+
+        pair<uint32_t, uint32_t> pair = pairs[pair_id];
+        uint32_t src_idx = pair.first;
+        uint32_t tar_idx = pair.second;
+        IdealOffset source = idealoffset[src_idx];
+        IdealOffset target = idealoffset[tar_idx];
+
+        uint8_t pa_fullness = (status + source.status_start)[pa], pb_fullness = (status + target.status_start)[pb];
+        double pa_pixelArea = info[src_idx].step_x * info[src_idx].step_y;
+        double pb_pixelArea = info[tar_idx].step_x * info[tar_idx].step_y;
+        double pa_low = gpu_decode_fullness(pa_fullness, pa_pixelArea, category_count, true);
+        double pa_high = gpu_decode_fullness(pa_fullness, pa_pixelArea, category_count, false);
+        double pa_apx = (pa_low + pa_high) / 2;
+        double pb_low = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, true);
+        double pb_high = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, false);
+        double pb_apx = (pb_low + pb_high) / 2;
+        // double ratio = 
+
+
+        // 计算出当前pair的pair wise fullness
+
+    //     uint8_t pair_wise_fullness = gpu_encode_fullness(pa_apx + pb_apx, pa_pixelArea + pb_pixelArea, bin_count);
+
+    //     // 计算ratio
+
+    //     int idx = atomicAdd(bindata_size, 1);
+    //     bindata[idx] = {pair_wise_fullness, }
+    // }
+}
+
+__global__ void kernel_merge(BoxDistRange *pixpairs, int *pixelpairidx, int *pixelpairsize, uint pairsize, BoxDistRange* buffer, uint *buffer_size, float *max_box_dist)
 {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid < pairsize)
+    if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0)
     {
         int start = pixelpairidx[tid];
-        int end = pixelpairidx[tid + 1];
+        int end = pixelpairsize[tid + 1];
         int pairId = pixpairs[start].pairId;
         if(max_box_dist[pairId] < 0) return;
 
@@ -688,7 +731,7 @@ void cuda_within_polygon(query_context *gctx)
 
     d_flags[0] = 1;	
 
-    int num_groups = thrust::count(d_flags.begin(), d_flags.end(), 1);
+    uint num_groups = thrust::count(d_flags.begin(), d_flags.end(), 1);
 
     thrust::device_vector<int> d_starts(num_groups + 1, num_pixel_pairs);
 
@@ -697,7 +740,7 @@ void cuda_within_polygon(query_context *gctx)
         d_flags.begin(), d_starts.begin(),
         thrust::identity<int>());
 
-    int* start_ptr = thrust::raw_pointer_cast(d_starts.data());
+    int* d_start_ptr = thrust::raw_pointer_cast(d_starts.data());
 
     // free up
     thrust::device_vector<int>().swap(d_indices);
@@ -711,71 +754,20 @@ void cuda_within_polygon(query_context *gctx)
 
     // return ;
 
-    // grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
-    // uint *d_input = nullptr;
-    // CUDA_SAFE_CALL(cudaMalloc((void **)&d_input, batch_size * sizeof(uint)));
-    // CUDA_SAFE_CALL(cudaMemset(d_input, 0, batch_size * sizeof(uint)));
-    // uint *d_flags = nullptr;
-    // CUDA_SAFE_CALL(cudaMalloc((void **)&d_flags, batch_size * sizeof(uint)));
-    // uint *d_prefix_sum = nullptr;
-    // CUDA_SAFE_CALL(cudaMalloc((void **)&d_prefix_sum, batch_size * sizeof(uint)));
-    // int *h_count = new int();
-
-    // statistic_size<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, h_bufferinput_size, d_input);
-    // cudaDeviceSynchronize();
-    // check_execution("statistic_size"); 
-
-    // grid_size = (batch_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
-    // mark_nonzeros<<<grid_size, block_size>>>(d_input, d_flags, batch_size);
-    // cudaDeviceSynchronize();
-    // check_execution("mark_nonzeros");
-
-    // thrust::device_ptr<uint> d_flags_ptr(d_flags);
-    // thrust::device_ptr<uint> d_prefix_sum_ptr(d_prefix_sum);
-    // thrust::exclusive_scan(d_flags_ptr, d_flags_ptr + batch_size, d_prefix_sum_ptr);
-
-    // int count;
-    // cudaMemcpy(&count, d_prefix_sum + batch_size - 1, sizeof(int), cudaMemcpyDeviceToHost);
-    // cudaMemcpy(h_count, d_flags + batch_size - 1, sizeof(int), cudaMemcpyDeviceToHost);
-    // count += *h_count; // Is the last element non-zero?
-
-    // uint *d_pixelpairidx = nullptr; 
-    // CUDA_SAFE_CALL(cudaMalloc((void **)&d_pixelpairidx, (count+1) * sizeof(uint)));
-    // uint *d_pixelpairsize = nullptr; 
-    // CUDA_SAFE_CALL(cudaMalloc((void **)&d_pixelpairsize, (count+1) * sizeof(uint)));
-
-    // compact_array<<<grid_size, block_size>>>(d_input, d_prefix_sum, d_pixelpairidx, batch_size);
-    // cudaDeviceSynchronize();
-    // check_execution("compact_array");
-
-    // delete h_count;
-    // CUDA_SAFE_CALL(cudaFree(d_input));
-    // CUDA_SAFE_CALL(cudaFree(d_flags));
-    // CUDA_SAFE_CALL(cudaFree(d_prefix_sum));
-
-    // thrust::device_ptr<uint> scan_begin = thrust::device_pointer_cast(d_pixelpairidx);
-    // thrust::device_ptr<uint> scan_end = thrust::device_pointer_cast(d_pixelpairidx + count + 1);
-
-    // thrust::exclusive_scan(scan_begin, scan_end, scan_begin);
-
-    // CUDA_SAFE_CALL(cudaMemcpy(d_pixelpairsize, d_pixelpairidx, (count+1) * sizeof(uint), cudaMemcpyDeviceToDevice));
-
-    // thrust::device_ptr<BoxDistRange> begin = thrust::device_pointer_cast((BoxDistRange*)gctx->d_BufferInput);
-    // thrust::device_ptr<BoxDistRange> end = thrust::device_pointer_cast((BoxDistRange*)gctx->d_BufferInput + h_bufferinput_size);
-    // thrust::sort(thrust::device, begin, end, CompareKeyValuePairs());
-
     BoxDistRange* d_pixpairs = nullptr;
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_pixpairs, h_bufferinput_size * sizeof(BoxDistRange)));
     CUDA_SAFE_CALL(cudaMemcpy(d_pixpairs, gctx->d_BufferInput, h_bufferinput_size * sizeof(BoxDistRange), cudaMemcpyDeviceToDevice));
+
+    int *d_end_ptr = nullptr; 
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_end_ptr, (num_groups + 1) * sizeof(int)));
+    CUDA_SAFE_CALL(cudaMemcpy(d_end_ptr, d_start_ptr, (num_groups + 1) * sizeof(int), cudaMemcpyDeviceToDevice));
 
     while(true){
         printf("nun_groups = %d\n", num_groups);
 
         grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
         auto merge_start = std::chrono::high_resolution_clock::now();
-        kernel_merge<<<grid_size, block_size>>>(d_pixpairs, start_ptr, num_groups, (BoxDistRange *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_max_box_dist);
+        kernel_merge<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, d_end_ptr, num_groups, (BoxDistRange *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_max_box_dist);
         cudaDeviceSynchronize();
         check_execution("kernel_merge"); 
         auto merge_end = std::chrono::high_resolution_clock::now();
@@ -831,7 +823,7 @@ void cuda_within_polygon(query_context *gctx)
     cudaDeviceSynchronize();
     check_execution("statistic_result");
 
-    PrintBuffer((float*)d_max_box_dist, batch_size);
+    // PrintBuffer((float*)d_max_box_dist, batch_size);
 
     uint h_result;
     CUDA_SAFE_CALL(cudaMemcpy(&h_result, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
