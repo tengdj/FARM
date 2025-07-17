@@ -2064,66 +2064,66 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 
 	// std::map<int, std::ofstream> outputFiles;
 
-	for(int _i = 0; _i < candidate_pairs.size(); _i ++){
-		auto id1 = get<1>(candidate_pairs[_i]);
-		auto id2 = get<2>(candidate_pairs[_i]);
-		auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
-		auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
-		auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
-		auto pf = classifyPixel(s_p_apx, get_pixel_area(), t_p_apx, target->get_pixel_area(), 10);
+	// for(int _i = 0; _i < candidate_pairs.size(); _i ++){
+	// 	auto id1 = get<1>(candidate_pairs[_i]);
+	// 	auto id2 = get<2>(candidate_pairs[_i]);
+	// 	auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
+	// 	auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
+	// 	auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
+	// 	auto pf = classifyPixel(s_p_apx, get_pixel_area(), t_p_apx, target->get_pixel_area(), 10);
 
-		auto box1 = get_pixel_box(get_x(id1), get_y(id1));
-		auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));
-		double dist_low = box1.distance(box2, true);
-		double dist_high = box1.max_distance(box2, true);
+	// 	auto box1 = get_pixel_box(get_x(id1), get_y(id1));
+	// 	auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));
+	// 	double dist_low = box1.distance(box2, true);
+	// 	double dist_high = box1.max_distance(box2, true);
 
-		double min_dist = 100000.0;
-		for(int i = 0; i < get_num_sequences(id1); i ++){
-			auto er1 = get_edge_sequence(get_offset(id1) + i);
-			for(int j = 0; j < target->get_num_sequences(id2); j ++){
-				auto er2 = target->get_edge_sequence(target->get_offset(id2) + j);
-				if(er1.second < 2 || er2.second < 2) continue;
-				double dist = segment_to_segment_within_batch(target->boundary->p+er2.first,
-																boundary->p+er1.first, er2.second, er1.second,
-																ctx->within_distance, ctx->geography);
-				min_dist = min(dist, min_dist);
-			}
-		}
+	// 	double min_dist = 100000.0;
+	// 	for(int i = 0; i < get_num_sequences(id1); i ++){
+	// 		auto er1 = get_edge_sequence(get_offset(id1) + i);
+	// 		for(int j = 0; j < target->get_num_sequences(id2); j ++){
+	// 			auto er2 = target->get_edge_sequence(target->get_offset(id2) + j);
+	// 			if(er1.second < 2 || er2.second < 2) continue;
+	// 			double dist = segment_to_segment_within_batch(target->boundary->p+er2.first,
+	// 															boundary->p+er1.first, er2.second, er1.second,
+	// 															ctx->within_distance, ctx->geography);
+	// 			min_dist = min(dist, min_dist);
+	// 		}
+	// 	}
 
-		if(min_dist == 100000){
-			continue;
-			// printf("id = %d, dimx = %d, dimy = %d\n", id, get_dimx(), get_dimy());
-			// MyPolygon::print();
-			// MyRaster::print();
-			// printf("id = %d, dimx = %d, dimy = %d\n", target->id, target->get_dimx(), target->get_dimy());
-			// target->MyPolygon::print();
-			// target->MyRaster::print();
-			// printf("id1 = %d %d id2 = %d %d dist = %lf dist_low = %lf dist_high = %lf\n", id1, get_fullness(id1), id2, target->get_fullness(id2), min_dist, dist_low, dist_high);
-			// printf("%d %d\n", get_num_sequences(id1), target->get_num_sequences(id2));
-		}
+	// 	if(min_dist == 100000){
+	// 		continue;
+	// 		// printf("id = %d, dimx = %d, dimy = %d\n", id, get_dimx(), get_dimy());
+	// 		// MyPolygon::print();
+	// 		// MyRaster::print();
+	// 		// printf("id = %d, dimx = %d, dimy = %d\n", target->id, target->get_dimx(), target->get_dimy());
+	// 		// target->MyPolygon::print();
+	// 		// target->MyRaster::print();
+	// 		// printf("id1 = %d %d id2 = %d %d dist = %lf dist_low = %lf dist_high = %lf\n", id1, get_fullness(id1), id2, target->get_fullness(id2), min_dist, dist_low, dist_high);
+	// 		// printf("%d %d\n", get_num_sequences(id1), target->get_num_sequences(id2));
+	// 	}
 
-		double ratio = (min_dist - dist_low) / (dist_high - dist_low);
-
-
-		// if (outputFiles.find(pf) == outputFiles.end())
-		// {
-		// 	std::string filename = "class_" + std::to_string(pf) + ".txt";
-		// 	outputFiles[pf].open(filename);
-		// 	if (!outputFiles[pf])
-		// 	{
-		// 		std::cerr << "无法创建文件: " << filename << std::endl;
-		// 		return 1;
-		// 	}
-		// }
-		std::string filename = "class_" + std::to_string(pf) + ".txt";
-		std::ofstream outfile(filename, std::ios::app);
-
-        outfile << std::fixed << std::setprecision(6) << ratio << endl;
+	// 	double ratio = (min_dist - dist_low) / (dist_high - dist_low);
 
 
-	}
+	// 	// if (outputFiles.find(pf) == outputFiles.end())
+	// 	// {
+	// 	// 	std::string filename = "class_" + std::to_string(pf) + ".txt";
+	// 	// 	outputFiles[pf].open(filename);
+	// 	// 	if (!outputFiles[pf])
+	// 	// 	{
+	// 	// 		std::cerr << "无法创建文件: " << filename << std::endl;
+	// 	// 		return 1;
+	// 	// 	}
+	// 	// }
+	// 	std::string filename = "class_" + std::to_string(pf) + ".txt";
+	// 	std::ofstream outfile(filename, std::ios::app);
 
-	return 0;
+    //     outfile << std::fixed << std::setprecision(6) << ratio << endl;
+
+
+	// }
+
+	// return 0;
 
 	sort(candidate_pairs.begin(), candidate_pairs.end());
 	

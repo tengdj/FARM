@@ -350,24 +350,27 @@ void preprocess_for_gpu(query_context *gctx)
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_degree_per_kilometer_longitude_arr, h_degree_per_kilometer_longitude_arr, sizeof(h_degree_per_kilometer_longitude_arr), cudaMemcpyHostToDevice));
 
     // GPU Buffer
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 4UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 8UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferinput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 4UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 8UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferoutput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
 
     // 临时的batch size
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_flags, gctx->batch_size * sizeof(int8_t)));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_result, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
+
+    gctx->num_pairs = gctx->object_pairs.size();
+    gctx->h_candidate_pairs = gctx->object_pairs.data();
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_candidate_pairs, gctx->num_pairs * sizeof(pair<uint32_t, uint32_t>)));
+	cudaMemcpy(gctx->d_candidate_pairs, gctx->h_candidate_pairs, gctx->num_pairs * sizeof(pair<uint32_t, uint32_t>), cudaMemcpyHostToDevice);
 
 }
 
 void ResetDevice(query_context *gctx){
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMemset(gctx->d_flags, 0, gctx->batch_size * sizeof(int8_t)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
 
     if(gctx->query_type == intersection){

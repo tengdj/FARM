@@ -32,6 +32,8 @@ struct BoxDistRange
 
 struct PixelDist
 {
+    int sourcePixelId;
+    int targetPixelId;
     uint8_t pf;
     int pairId;
     float apxDist;
@@ -373,7 +375,7 @@ __global__ void calculate_apxDist(BoxDistRange *bufferinput, pair<uint32_t, uint
         uint8_t pf = gpu_encode_fullness(pa_low, pa_pixelArea, pb_low, pb_pixelArea, 10);
 
         int idx = atomicAdd(bufferoutput_size, 1U);
-        bufferoutput[idx] = {pf, pair_id, bufferinput[bufferId].minDist + mean[pf] * (bufferinput[bufferId].maxDist - bufferinput[bufferId].minDist), bufferinput[bufferId].minDist};
+        bufferoutput[idx] = {pa, pb, pf, pair_id, bufferinput[bufferId].minDist + mean[pf] * (bufferinput[bufferId].maxDist - bufferinput[bufferId].minDist), bufferinput[bufferId].minDist, bufferinput[bufferId].maxDist};
 
     }
 }
@@ -432,7 +434,7 @@ __global__ void preprocess_suffixmin(PixelDist *pixpairs, int *pixelpairidx, uin
     }
 }
 
-__global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelpairsize, float *suffix_min, uint pairsize, PixelDist* buffer, uint *buffer_size, float *max_box_dist, float *mean, float *stddev, float threshold)
+__global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelpairsize, float *suffix_min, uint pairsize, PixPair* buffer, uint *buffer_size, float *max_box_dist, float *mean, float *stddev, float threshold)
 {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0)
@@ -462,173 +464,173 @@ __global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelp
                 return;
             } 
             int idx = atomicAdd(buffer_size, 1);
-            buffer[idx] = pixpairs[i];
+            buffer[idx] = {pixpairs[i].sourcePixelId, pixpairs[i].targetPixelId, pixpairs[i].pairId};
         }
 
         pixelpairidx[tid] = end;
     }
 }
 
-// __global__ void kernel_unroll_within_polygon(BoxDistRange *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, uint32_t *es_offset, EdgeSeq *edge_sequences, uint* size, Task *tasks, uint *task_size)
-// {
-//     const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
-//     if (bufferId < *size)
-//     {
-//         int p = pixpairs[bufferId].sourcePixelId;
-//         int p2 = pixpairs[bufferId].targetPixelId;
-//         int pairId = pixpairs[bufferId].pairId;
-
-//         pair<uint32_t, uint32_t> &pair = pairs[pairId];
-//         IdealOffset &source = idealoffset[pair.first];
-//         IdealOffset &target = idealoffset[pair.second];
-
-//         // printf("%d %d %d\n", pair.first, (es_offset + source.offset_start)[p], (es_offset + source.offset_start)[p + 1]);
-
-//         // if((es_offset + source.offset_start)[p] >= (es_offset + source.offset_start)[p + 1]){
-//         //     printf("ERROR %d %d %d\n", pair.first, (es_offset + source.offset_start)[p], (es_offset + source.offset_start)[p + 1]);
-//         // }
-
-//         int s_num_sequence = (es_offset + source.offset_start)[p + 1] - (es_offset + source.offset_start)[p];
-//         int t_num_sequence = (es_offset + target.offset_start)[p2 + 1] - (es_offset + target.offset_start)[p2];
-
-//         // printf("t_num_sequence = %d\n", t_num_sequence);
-//         // printf("s_num_sequence = %d\n", s_num_sequence);
-//         // printf("s_num_sequence = %d t_num_sequence = %d\n", s_num_sequence, t_num_sequence);
-
-//         for (int i = 0; i < s_num_sequence; ++ i)
-//         {
-//             EdgeSeq r = (edge_sequences + source.edge_sequences_start)[(es_offset + source.offset_start)[p] + i];
-//             for (int j = 0; j < t_num_sequence; ++j)
-//             {
-//                 EdgeSeq r2 = (edge_sequences + target.edge_sequences_start)[(es_offset + target.offset_start)[p2] + j];
-//                 // printf("r.length = %d, r2.length = %d\n", r.length, r2.length);
-//                 // atomicAdd(task_size, r.length * r2.length);
-//                 int max_size = 32;
-//                 for (uint s = 0; s < r.length; s += max_size)
-//                 {
-//                     uint end_s = min(s + max_size, r.length);
-//                     for (uint t = 0; t < r2.length; t += max_size)
-//                     {
-//                         uint end_t = min(t + max_size, r2.length);
-//                         int idx = atomicAdd(task_size, 1U);
-//                         tasks[idx] = {source.vertices_start + r.start + s, target.vertices_start + r2.start + t, end_s - s, end_t - t, pairId};
-//                     }
-//                 }
-//            }
-//         }
-//     }
-// }
-
-__global__ void kernel_unroll_within_polygon(
-    BoxDistRange *pixpairs, 
-    pair<uint32_t, uint32_t> *pairs, 
-    IdealOffset *idealoffset, 
-    uint32_t *es_offset, 
-    EdgeSeq *edge_sequences, 
-    uint32_t *size, 
-    Task *tasks, 
-    uint32_t *task_size)
+__global__ void kernel_unroll_within_polygon(PixPair *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, uint32_t *es_offset, EdgeSeq *edge_sequences, uint* size, Task *tasks, uint *task_size)
 {
-    // Shared memory for frequently accessed data
-    extern __shared__ char shared_mem[];
-    BoxDistRange *shared_pixpair = (BoxDistRange*)shared_mem;
-    IdealOffset *shared_source = (IdealOffset*)(shared_pixpair + 1);
-    IdealOffset *shared_target = (IdealOffset*)(shared_source + 1);
-
-    // Thread and block indices
     const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
-    const int tid = threadIdx.x;
+    if (bufferId < *size)
+    {
+        int p = pixpairs[bufferId].source_pixid;
+        int p2 = pixpairs[bufferId].target_pixid;
+        int pairId = pixpairs[bufferId].pair_id;
 
-    // Load pixel pair into shared memory (first thread in block)
-    if (bufferId < *size && tid == 0) {
-        shared_pixpair[0] = pixpairs[bufferId];
-    }
-    __syncthreads();
+        pair<uint32_t, uint32_t> &pair = pairs[pairId];
+        IdealOffset &source = idealoffset[pair.first];
+        IdealOffset &target = idealoffset[pair.second];
 
-    if (bufferId >= *size) return;
+        // printf("%d %d %d\n", pair.first, (es_offset + source.offset_start)[p], (es_offset + source.offset_start)[p + 1]);
 
-    // Extract pixel pair information
-    int p = shared_pixpair[0].sourcePixelId;
-    int p2 = shared_pixpair[0].targetPixelId;
-    int pairId = shared_pixpair[0].pairId;
+        // if((es_offset + source.offset_start)[p] >= (es_offset + source.offset_start)[p + 1]){
+        //     printf("ERROR %d %d %d\n", pair.first, (es_offset + source.offset_start)[p], (es_offset + source.offset_start)[p + 1]);
+        // }
 
-    // Load pair and offset data
-    pair<uint32_t, uint32_t> pair = pairs[pairId];
-    if (tid == 0) {
-        shared_source[0] = idealoffset[pair.first];
-        shared_target[0] = idealoffset[pair.second];
-    }
-    __syncthreads();
+        int s_num_sequence = (es_offset + source.offset_start)[p + 1] - (es_offset + source.offset_start)[p];
+        int t_num_sequence = (es_offset + target.offset_start)[p2 + 1] - (es_offset + target.offset_start)[p2];
 
-    // Calculate edge sequence counts
-    int s_num_sequence = (es_offset + shared_source[0].offset_start)[p + 1] - 
-                         (es_offset + shared_source[0].offset_start)[p];
-    int t_num_sequence = (es_offset + shared_target[0].offset_start)[p2 + 1] - 
-                         (es_offset + shared_target[0].offset_start)[p2];
+        // printf("t_num_sequence = %d\n", t_num_sequence);
+        // printf("s_num_sequence = %d\n", s_num_sequence);
+        // printf("s_num_sequence = %d t_num_sequence = %d\n", s_num_sequence, t_num_sequence);
 
-    // Dynamic task size based on sequence length
-    const uint32_t max_size = (s_num_sequence * t_num_sequence > 1024) ? 16 : 32;
-
-    // Pre-calculate total tasks for this pixel pair
-    uint32_t total_tasks = 0;
-    for (int i = 0; i < s_num_sequence; ++i) {
-        EdgeSeq r = (edge_sequences + shared_source[0].edge_sequences_start)[
-            (es_offset + shared_source[0].offset_start)[p] + i];
-        for (int j = 0; j < t_num_sequence; ++j) {
-            EdgeSeq r2 = (edge_sequences + shared_target[0].edge_sequences_start)[
-                (es_offset + shared_target[0].offset_start)[p2] + j];
-            total_tasks += ((r.length + max_size - 1) / max_size) * 
-                          ((r2.length + max_size - 1) / max_size);
-        }
-    }
-
-    // Allocate task indices using atomic operation (first thread only)
-    uint32_t base_task_idx = 0;
-    if (tid == 0) {
-        base_task_idx = atomicAdd(task_size, total_tasks);
-    }
-    __syncthreads();
-
-    // Broadcast base_task_idx to all threads in block
-    uint32_t *shared_base_idx = (uint32_t*)(shared_target + 1);
-    if (tid == 0) {
-        shared_base_idx[0] = base_task_idx;
-    }
-    __syncthreads();
-
-    // Generate tasks
-    uint32_t current_task_idx = shared_base_idx[0];
-    for (int i = 0; i < s_num_sequence; ++i) {
-        EdgeSeq r = (edge_sequences + shared_source[0].edge_sequences_start)[
-            (es_offset + shared_source[0].offset_start)[p] + i];
-        for (int j = 0; j < t_num_sequence; ++j) {
-            EdgeSeq r2 = (edge_sequences + shared_target[0].edge_sequences_start)[
-                (es_offset + shared_target[0].offset_start)[p2] + j];
-
-            for (uint32_t s = 0; s < r.length; s += max_size) {
-                uint32_t end_s = min(s + max_size, r.length);
-                for (uint32_t t = 0; t < r2.length; t += max_size) {
-                    uint32_t end_t = min(t + max_size, r2.length);
-                    if (tid == 0) {
-                        tasks[current_task_idx] = {
-                            shared_source[0].vertices_start + r.start + s,
-                            shared_target[0].vertices_start + r2.start + t,
-                            end_s - s,
-                            end_t - t,
-                            pairId
-                        };
-                        current_task_idx++;
+        for (int i = 0; i < s_num_sequence; ++ i)
+        {
+            EdgeSeq r = (edge_sequences + source.edge_sequences_start)[(es_offset + source.offset_start)[p] + i];
+            for (int j = 0; j < t_num_sequence; ++j)
+            {
+                EdgeSeq r2 = (edge_sequences + target.edge_sequences_start)[(es_offset + target.offset_start)[p2] + j];
+                // printf("r.length = %d, r2.length = %d\n", r.length, r2.length);
+                // atomicAdd(task_size, r.length * r2.length);
+                int max_size = 8;
+                for (uint s = 0; s < r.length; s += max_size)
+                {
+                    uint end_s = min(s + max_size, r.length);
+                    for (uint t = 0; t < r2.length; t += max_size)
+                    {
+                        uint end_t = min(t + max_size, r2.length);
+                        int idx = atomicAdd(task_size, 1U);
+                        tasks[idx] = {source.vertices_start + r.start + s, target.vertices_start + r2.start + t, end_s - s, end_t - t, pairId};
                     }
                 }
-            }
+           }
         }
     }
-
-    // Update task_size if necessary (first thread only)
-    if (tid == 0 && current_task_idx > shared_base_idx[0]) {
-        atomicMax(task_size, current_task_idx);
-    }
 }
+
+// __global__ void kernel_unroll_within_polygon(
+//     PixPair *pixpairs, 
+//     pair<uint32_t, uint32_t> *pairs, 
+//     IdealOffset *idealoffset, 
+//     uint32_t *es_offset, 
+//     EdgeSeq *edge_sequences, 
+//     uint32_t *size, 
+//     Task *tasks, 
+//     uint32_t *task_size)
+// {
+//     // Shared memory for frequently accessed data
+//     extern __shared__ char shared_mem[];
+//     PixPair *shared_pixpair = (PixPair *)shared_mem;
+//     IdealOffset *shared_source = (IdealOffset*)(shared_pixpair + 1);
+//     IdealOffset *shared_target = (IdealOffset*)(shared_source + 1);
+
+//     // Thread and block indices
+//     const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
+//     const int tid = threadIdx.x;
+
+//     // Load pixel pair into shared memory (first thread in block)
+//     if (bufferId < *size && tid == 0) {
+//         shared_pixpair[0] = pixpairs[bufferId];
+//     }
+//     __syncthreads();
+
+//     if (bufferId >= *size) return;
+
+//     // Extract pixel pair information
+//     int p = shared_pixpair[0].source_pixid;
+//     int p2 = shared_pixpair[0].target_pixid;
+//     int pairId = shared_pixpair[0].pair_id;
+
+//     // Load pair and offset data
+//     pair<uint32_t, uint32_t> pair = pairs[pairId];
+//     if (tid == 0) {
+//         shared_source[0] = idealoffset[pair.first];
+//         shared_target[0] = idealoffset[pair.second];
+//     }
+//     __syncthreads();
+
+//     // Calculate edge sequence counts
+//     int s_num_sequence = (es_offset + shared_source[0].offset_start)[p + 1] - 
+//                          (es_offset + shared_source[0].offset_start)[p];
+//     int t_num_sequence = (es_offset + shared_target[0].offset_start)[p2 + 1] - 
+//                          (es_offset + shared_target[0].offset_start)[p2];
+
+//     // Dynamic task size based on sequence length
+//     const uint32_t max_size = (s_num_sequence * t_num_sequence > 1024) ? 16 : 32;
+
+//     // Pre-calculate total tasks for this pixel pair
+//     uint32_t total_tasks = 0;
+//     for (int i = 0; i < s_num_sequence; ++i) {
+//         EdgeSeq r = (edge_sequences + shared_source[0].edge_sequences_start)[
+//             (es_offset + shared_source[0].offset_start)[p] + i];
+//         for (int j = 0; j < t_num_sequence; ++j) {
+//             EdgeSeq r2 = (edge_sequences + shared_target[0].edge_sequences_start)[
+//                 (es_offset + shared_target[0].offset_start)[p2] + j];
+//             total_tasks += ((r.length + max_size - 1) / max_size) * 
+//                           ((r2.length + max_size - 1) / max_size);
+//         }
+//     }
+
+//     // Allocate task indices using atomic operation (first thread only)
+//     uint32_t base_task_idx = 0;
+//     if (tid == 0) {
+//         base_task_idx = atomicAdd(task_size, total_tasks);
+//     }
+//     __syncthreads();
+
+//     // Broadcast base_task_idx to all threads in block
+//     uint32_t *shared_base_idx = (uint32_t*)(shared_target + 1);
+//     if (tid == 0) {
+//         shared_base_idx[0] = base_task_idx;
+//     }
+//     __syncthreads();
+
+//     // Generate tasks
+//     uint32_t current_task_idx = shared_base_idx[0];
+//     for (int i = 0; i < s_num_sequence; ++i) {
+//         EdgeSeq r = (edge_sequences + shared_source[0].edge_sequences_start)[
+//             (es_offset + shared_source[0].offset_start)[p] + i];
+//         for (int j = 0; j < t_num_sequence; ++j) {
+//             EdgeSeq r2 = (edge_sequences + shared_target[0].edge_sequences_start)[
+//                 (es_offset + shared_target[0].offset_start)[p2] + j];
+
+//             for (uint32_t s = 0; s < r.length; s += max_size) {
+//                 uint32_t end_s = min(s + max_size, r.length);
+//                 for (uint32_t t = 0; t < r2.length; t += max_size) {
+//                     uint32_t end_t = min(t + max_size, r2.length);
+//                     if (tid == 0) {
+//                         tasks[current_task_idx] = {
+//                             shared_source[0].vertices_start + r.start + s,
+//                             shared_target[0].vertices_start + r2.start + t,
+//                             end_s - s,
+//                             end_t - t,
+//                             pairId
+//                         };
+//                         current_task_idx++;
+//                     }
+//                 }
+//             }
+//         }
+//     }
+
+//     // Update task_size if necessary (first thread only)
+//     if (tid == 0 && current_task_idx > shared_base_idx[0]) {
+//         atomicMax(task_size, current_task_idx);
+//     }
+// }
 
 __global__ void kernel_refine_within_polygon(Task *tasks, Point *vertices, uint *size, float *max_box_dist, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
 {
@@ -801,7 +803,7 @@ void cuda_within_polygon(query_context *gctx)
 
         grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
         auto merge_start = std::chrono::high_resolution_clock::now();
-        kernel_merge<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, d_end_ptr, d_suffix_min, num_groups, (PixelDist *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_max_box_dist, gctx->d_mean, gctx->d_stddev, gctx->merge_threshold);
+        kernel_merge<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, d_end_ptr, d_suffix_min, num_groups, (PixPair *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_max_box_dist, gctx->d_mean, gctx->d_stddev, gctx->merge_threshold);
         cudaDeviceSynchronize();
         check_execution("kernel_merge"); 
 
@@ -817,23 +819,15 @@ void cuda_within_polygon(query_context *gctx)
 
         CUDA_SWAP_BUFFER();
 
-        unsigned long long *d_test = nullptr;
-        CUDA_SAFE_CALL(cudaMalloc((void **)&d_test, sizeof(unsigned long long)));
-
         grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
         auto unroll_start = std::chrono::high_resolution_clock::now();
-        kernel_unroll_within_polygon<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
+        kernel_unroll_within_polygon<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
         cudaDeviceSynchronize();
         check_execution("kernel_unroll_within_polygon");
         auto unroll_end = std::chrono::high_resolution_clock::now();
         auto unroll_duration = std::chrono::duration_cast<std::chrono::milliseconds>(unroll_end - unroll_start);
 
         std::cout << "unroll运行时间: " << unroll_duration.count() << " 毫秒" << std::endl;
-
-        unsigned long long h_test;
-        CUDA_SAFE_CALL(cudaMemcpy(&h_test, d_test, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
-
-        printf("test: %llu\n", h_test);
    
         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
         printf("h_bufferoutput_size = %d\n", h_bufferoutput_size);

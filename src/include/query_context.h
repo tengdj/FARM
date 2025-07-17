@@ -209,7 +209,6 @@ public:
 	char* d_BufferOutput = nullptr;
 	uint *d_bufferoutput_size = nullptr;
 
-	int8_t *d_flags = nullptr;
 	uint *d_result = nullptr;
 
 	// for hierachy
@@ -219,7 +218,8 @@ public:
 	int num_layers = 0;
 	int max_layers = 25;
 
-	// for rt spatial index
+	// for index
+	vector<pair<uint32_t, uint32_t>> object_pairs;
 	pair<uint32_t, uint32_t>* h_candidate_pairs = nullptr;
 	pair<uint32_t, uint32_t>* d_candidate_pairs = nullptr;
 	size_t num_pairs = 0;
