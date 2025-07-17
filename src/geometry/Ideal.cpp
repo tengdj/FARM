@@ -2051,14 +2051,14 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 		auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
 		auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
 		auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
-		auto pf = classifyPixel(s_p_apx + t_p_apx, get_pixel_area() + target->get_pixel_area(), 100);
+		auto pf = classifyPixel(s_p_apx, get_pixel_area(), t_p_apx, target->get_pixel_area(), 10);
 
 		auto box1 = get_pixel_box(get_x(id1), get_y(id1));
 		auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));
 		double dist_low = box1.distance(box2, true);
 		double dist_high = box1.max_distance(box2, true);
 	
-		double dist_apx = (pf / 100) * (dist_high - dist_low) + dist_low;
+		double dist_apx = dist_low + mean[pf] * (dist_high - dist_low);
 		candidate_pairs.push_back({dist_apx, id1, id2});
 	}
 
@@ -2070,7 +2070,7 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 		auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
 		auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
 		auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
-		auto pf = classifyPixel(s_p_apx + t_p_apx, get_pixel_area() + target->get_pixel_area(), 10);
+		auto pf = classifyPixel(s_p_apx, get_pixel_area(), t_p_apx, target->get_pixel_area(), 10);
 
 		auto box1 = get_pixel_box(get_x(id1), get_y(id1));
 		auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));

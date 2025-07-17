@@ -118,17 +118,34 @@ double box::distance(box &t, bool geography){
 }
 
 double box::max_distance(box &target, bool geography){
-	double highx = max(high[0],target.high[0]);
-	double highy = max(high[1],target.high[1]);
-	double lowx = min(low[0], target.low[0]);
-	double lowy = min(low[1], target.low[1]);
-	double dx = highx - lowx;
-	double dy = highy - lowy;
-	if(geography){
-		dy = dy/degree_per_kilometer_latitude;
-		dx = dx/degree_per_kilometer_longitude(low[1]);
+	Point vertices1[4] = {
+		Point(low[0], low[1]),
+		Point(low[0], high[1]),  
+		Point(high[0], low[1]),  
+		Point(high[0], high[1])	 
+	};
+
+	Point vertices2[4] = {
+		Point(target.low[0], target.low[1]), 
+		Point(target.low[0], target.high[1]), 
+		Point(target.high[0], target.low[1]), 
+		Point(target.high[0], target.high[1])
+	};
+	double max_dist = 0.0;
+	for (int i = 0; i < 4; i ++){
+		for (int j = 0; j < 4; j ++){
+			double dx = vertices1[i].x - vertices2[j].x;
+			double dy = vertices1[i].y - vertices2[j].y;
+			if (geography)
+			{
+				dy = dy / degree_per_kilometer_latitude;
+				dx = dx / degree_per_kilometer_longitude(low[1]);
+			}
+			max_dist = max(max_dist, sqrt(dx * dx + dy * dy));
+		}
 	}
-	return sqrt(dx * dx + dy * dy);
+
+	return max_dist;
 }
 
 // point to box

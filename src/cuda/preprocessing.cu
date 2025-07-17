@@ -242,6 +242,14 @@ void preprocess_for_gpu(query_context *gctx)
         CUDA_SAFE_CALL(cudaMemcpy(gctx->d_layer_offset, gctx->h_layer_offset, gctx->num_layers * sizeof(uint32_t), cudaMemcpyHostToDevice));
     }
 
+    float h_mean[10] = {0.0, 0.540068, 0.460776, 0.404151, 0.388371, 0.282591, 0.223975, 0.15, 0.1, 0.0};
+	float h_stddev[10] = {0.0, 0.204095, 0.17973, 0.174895, 0.191615, 0.152102, 0.134357, 0.1, 0.08, 0.0};
+
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_mean, sizeof(h_mean)));
+    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_mean, h_mean, sizeof(h_mean), cudaMemcpyHostToDevice));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_stddev, sizeof(h_stddev)));
+    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_stddev, h_stddev, sizeof(h_stddev), cudaMemcpyHostToDevice));
+
     float h_degree_per_kilometer_latitude = 360.0/40076.0;
     float h_degree_per_kilometer_longitude_arr[] = {
             0.008983,0.008983,0.008983,0.008983,0.008983,0.008983,0.008983,0.008984,0.008984,0.008984

@@ -109,7 +109,7 @@ public:
 	double load_factor = 1.0;
 	size_t batch_size = 0;
 	int category_count = 8;
-	
+	float merge_threshold = 0.9;
 
 	int small_threshold = 500;
 	int big_threshold = 400000;
@@ -197,6 +197,9 @@ public:
 	size_t num_vertices = 0;
 	size_t num_gridline_offset = 0;
 	size_t num_gridline_nodes = 0;
+
+	float *d_mean = nullptr;
+	float *d_stddev = nullptr;
 
 	float *d_degree_degree_per_kilometer_latitude = nullptr;
 	float *d_degree_per_kilometer_longitude_arr = nullptr;
