@@ -13,6 +13,12 @@ bool MySearchCallback(Ideal *ideal, void *arg)
 	Ideal *target = (Ideal *)ctx->target;
 	if (ideal->id == target->id)
 		return true;
+	if(ideal->getMBB()->intersect(*target->getMBB()))
+		return true;
+	if(ideal->getMBB()->contain(*target->getMBB()))
+		return true;
+	if(target->getMBB()->contain(*ideal->getMBB()))
+		return true;
 	ctx->object_pairs.push_back(make_pair(ideal->id, target->id));
 	return true;
 }
@@ -100,6 +106,7 @@ int main(int argc, char** argv) {
 	auto preprocess_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start);
 	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
 
+	// global_ctx.num_threads = 1;
 	timeval start = get_cur_time();
 	pthread_t threads2[global_ctx.num_threads];
 	query_context ctx2[global_ctx.num_threads];

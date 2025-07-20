@@ -108,7 +108,7 @@ public:
 	float sample_rate = 1.0;
 	double load_factor = 1.0;
 	size_t batch_size = 0;
-	int category_count = 8;
+	int category_count = 20;
 	float merge_threshold = 0.9;
 
 	int small_threshold = 500;

@@ -175,19 +175,24 @@ __device__ __forceinline__ int binary_search_count(const double *arr, uint32_t s
 	uint32_t left = start;
 	uint32_t right = end;
 
-	while (left < right)
-	{
-		uint32_t mid = (left + right) / 2;
-		if (arr[mid] <= target)
-		{
-			count = mid - start + 1;
-			left = mid + 1;
-		}
-		else
-		{
-			right = mid;
-		}
-	}
+	// while (left < right)
+	// {
+	// 	uint32_t mid = (left + right) / 2;
+	// 	if (arr[mid] <= target)
+	// 	{
+	// 		count = mid - start + 1;
+	// 		left = mid + 1;
+	// 	}
+	// 	else
+	// 	{
+	// 		right = mid;
+	// 	}
+	// }
+
+    while(left < right && arr[left] < target){
+        count ++;
+        left ++;
+    }
 
 	return count;
 }

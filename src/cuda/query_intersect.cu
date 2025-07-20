@@ -11,6 +11,10 @@ struct PixelPairWithProb
 	int source_pixid = 0;
 	int target_pixid = 0;
 	int pair_id = 0;
+
+    void print(){
+        printf("prob = %lf, pa = %d, pb = %d, pair_id = %d\n", probability, source_pixid, target_pixid, pair_id);
+    }
 };
 
 
@@ -25,7 +29,7 @@ struct Task
 
 __global__ void kernel_filter_intersect(pair<uint32_t,uint32_t>* pairs, IdealOffset *idealoffset,
                                              RasterInfo *info, uint8_t *status, uint size, 
-                                             PixPair *pixpairs, uint *pp_size, uint8_t category_count)
+                                             PixPair *pixpairs, uint *pp_size, uint8_t category_count, bool *res)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x >= size) return;  
@@ -51,9 +55,9 @@ __global__ void kernel_filter_intersect(pair<uint32_t,uint32_t>* pairs, IdealOff
 	{
 		for (int j = j_min; j <= j_max; j++)
 		{
-			int p = gpu_get_id(i, j, s_dimx);
-			PartitionStatus source_status = gpu_show_status(status, source.status_start, p, category_count);
-            if(source_status != BORDER) continue;
+			int pa = gpu_get_id(i, j, s_dimx);
+			PartitionStatus source_status = gpu_show_status(status, source.status_start, pa, category_count);
+            if(source_status == OUT) continue;
 
 			box bx = gpu_get_pixel_box(i, j, s_mbr.low[0], s_mbr.low[1], s_step_x, s_step_y);
 
@@ -71,31 +75,33 @@ __global__ void kernel_filter_intersect(pair<uint32_t,uint32_t>* pairs, IdealOff
 			{
 				for (int _j = _j_min; _j <= _j_max; _j++)
 				{
-					int p2 = gpu_get_id(_i, _j, t_dimx);
+					int pb = gpu_get_id(_i, _j, t_dimx);
 
-					PartitionStatus target_status = gpu_show_status(status, target.status_start, p2, category_count);
+					PartitionStatus target_status = gpu_show_status(status, target.status_start, pb, category_count);
 
-					if (target_status == BORDER)
-					{
-						int idx = atomicAdd(pp_size, 1U);
+					if (target_status == OUT) continue;
 
-						pixpairs[idx].source_pixid = s_step_x > t_step_x ? p : p2;
-						pixpairs[idx].target_pixid = s_step_x > t_step_x ? p2 : p;
-						pixpairs[idx].pair_id = x;
-					}
-				}
+                    if(source_status == IN || target_status == IN){
+                        res[x] = true;
+                    }else{
+                        int idx = atomicAdd(pp_size, 1U);
+                        pixpairs[idx] = {pa, pb, x};
+                    }
+                }
 			}
 		}
 	}
     return;
 }
 
-__global__ void kernel_calculate_probability(PixPair *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *info, uint8_t *status, uint *size, PixelPairWithProb *p_pixpairs, uint *p_pixpairs_size, uint8_t category_count){
+__global__ void kernel_calculate_probability(PixPair *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *info, uint8_t *status, uint *size, PixelPairWithProb *p_pixpairs, uint *p_pixpairs_size, uint8_t category_count, bool *res){
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     if(x < *size){
         int pa = pixpairs[x].source_pixid;
         int pb = pixpairs[x].target_pixid;
         int pair_id = pixpairs[x].pair_id;
+
+        if(res[pair_id]) return;
 
         pair<uint32_t, uint32_t> pair = pairs[pair_id];
         uint32_t src_idx = pair.first;
@@ -112,7 +118,7 @@ __global__ void kernel_calculate_probability(PixPair *pixpairs, pair<uint32_t, u
         double pb_low = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, true);
         double pb_high = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, false);
         double pb_apx = (pb_low + pb_high) / 2;
-        double probability = (pa_apx + pb_apx) / pa_pixelArea;
+        double probability = (pa_apx + pb_apx) / max(pa_pixelArea, pb_pixelArea);
 
         int idx = atomicAdd(p_pixpairs_size, 1U);
         p_pixpairs[idx] = {probability, pa, pb, pair_id};
@@ -121,22 +127,27 @@ __global__ void kernel_calculate_probability(PixPair *pixpairs, pair<uint32_t, u
 
 __global__ void kernel_merge_intersect(PixelPairWithProb *pixpairs, int *pixelpairidx, int *pixelpairsize, int pairsize, PixPair *buffer, uint *buffer_size, bool *res, double threshold){
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0 && !res[tid])
+    if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0)
     {
         int start = pixelpairidx[tid];
         int end = pixelpairidx[tid + 1];
         int pairId = pixpairs[start].pair_id;
+
+        if(res[tid]){
+            pixelpairidx[tid] = end;
+            return;
+        }
         
         double obj_prob = 1;
         for(int i = start; i < end; i ++){
-            double pix_prob = pixpairs[start].probability;
+            double pix_prob = pixpairs[i].probability;
             obj_prob = obj_prob * (1 - pix_prob);
             if(1 - obj_prob >= threshold) {
                 pixelpairidx[tid] = i;
                 return;
             } 
             int idx = atomicAdd(buffer_size, 1);
-            buffer[idx] = {pixpairs[i].source_pixid, pixpairs[i].target_pixid, pixpairs[i].pair_id};
+            buffer[idx] = {pixpairs[i].source_pixid, pixpairs[i].target_pixid, pairId};
         }
 
         pixelpairidx[tid] = end;
@@ -210,7 +221,10 @@ __global__ void kernel_refinement_intersect(Task *tasks, Point *d_vertices, uint
 	uint len2 = tasks[x].t_length;
 	int pair_id = tasks[x].pair_id;
 
-	res[pair_id] = gpu_segment_intersect_batch((d_vertices + s1), (d_vertices + s2), len1, len2);
+    if(gpu_segment_intersect_batch((d_vertices + s1), (d_vertices + s2), len1, len2)){
+	    res[pair_id] = true;
+    }
+    return;
 }
 
 __global__ void statistic_result(bool *res, uint size, uint *result){
@@ -226,11 +240,15 @@ void cuda_intersect(query_context *gctx)
 	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
 	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
 
+    bool *d_res = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_res, batch_size * sizeof(bool)));
+    CUDA_SAFE_CALL(cudaMemset(d_res, 0, batch_size * sizeof(bool)));
+
 	/*1. Raster Model Filtering*/
     const int block_size = BLOCK_SIZE;
     int grid_size = (batch_size + block_size - 1) / block_size;
 
-    kernel_filter_intersect<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, batch_size, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->category_count);
+    kernel_filter_intersect<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, batch_size, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->category_count, d_res);
     cudaDeviceSynchronize();
     check_execution("kernel_filter_intersect");
 
@@ -239,7 +257,7 @@ void cuda_intersect(query_context *gctx)
 
     grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     
-    kernel_calculate_probability<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, gctx->d_bufferinput_size, (PixelPairWithProb*)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->category_count);
+    kernel_calculate_probability<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, gctx->d_bufferinput_size, (PixelPairWithProb*)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->category_count, d_res);
     cudaDeviceSynchronize();
     check_execution("kernel_calculate_probability");
 
@@ -254,7 +272,7 @@ void cuda_intersect(query_context *gctx)
             if(a.pair_id != b.pair_id){
                 return a.pair_id < b.pair_id;
             }else{
-			    return a.probability < b.probability;
+			    return a.probability > b.probability;
             }
     });
 
@@ -294,27 +312,24 @@ void cuda_intersect(query_context *gctx)
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_pixpairs, h_bufferinput_size * sizeof(PixelPairWithProb)));
     CUDA_SAFE_CALL(cudaMemcpy(d_pixpairs, gctx->d_BufferInput, h_bufferinput_size * sizeof(PixelPairWithProb), cudaMemcpyDeviceToDevice));
 
-    bool *d_res = nullptr;
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_res, batch_size * sizeof(bool)));
-    CUDA_SAFE_CALL(cudaMemset(d_res, 0, batch_size * sizeof(bool)));
-
     int *d_end_ptr = nullptr; 
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_end_ptr, (num_groups + 1) * sizeof(int)));
     CUDA_SAFE_CALL(cudaMemcpy(d_end_ptr, d_start_ptr, (num_groups + 1) * sizeof(int), cudaMemcpyDeviceToDevice));
 
-    double threshold = 0.9;
+    PrintBuffer(d_pixpairs, h_bufferinput_size);
 
+    printf("num_groups = %d\n", num_groups);
     while(true){
         grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-        kernel_merge_intersect<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, d_end_ptr, num_groups, (PixPair*)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_res, threshold);
+        kernel_merge_intersect<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, d_end_ptr, num_groups, (PixPair*)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_res, gctx->merge_threshold);
         cudaDeviceSynchronize();
         check_execution("kernel_calculate_probability");
 
         CUDA_SWAP_BUFFER();
-
+        printf("merge_count = %u\n", h_bufferinput_size);
         if(h_bufferinput_size == 0) break;
-
+        PrintBuffer((PixPair *)gctx->d_BufferInput, h_bufferinput_size);
         /*2. Unroll Refinement*/
 
         grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -324,8 +339,7 @@ void cuda_intersect(query_context *gctx)
         check_execution("kernel_unroll_intersect");
 
         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-        printf("h_buffer_size = %u\n", h_bufferoutput_size);
-        
+        printf("unroll: %u\n", h_bufferoutput_size);
         /*3. Refinement step*/
 
         grid_size = (h_bufferoutput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;

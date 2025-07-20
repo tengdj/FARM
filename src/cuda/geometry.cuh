@@ -19,6 +19,10 @@ struct PixPair
 	int source_pixid = 0;
 	int target_pixid = 0;
 	int pair_id = 0;
+
+	void print(){
+		printf("pa = %d pb = %d pair_id = %d\n", source_pixid, target_pixid, pair_id);
+	}
 };
 
 __device__ __forceinline__ float atomicMinFloat(float* address, float val) {
@@ -348,13 +352,13 @@ __device__ inline void gpu_segment_intersect_batch(Point *p, int s1, int s2, int
 			Point d2 = p[j + 1] - p[j];
 			Point r = p[j] - p_i;
 
-			float denom = d1.cross(d2);
+			double denom = d1.cross(d2);
 
-			if (abs(denom) < 1e-9) continue;
+			if (abs(denom) < 1e-12) continue;
 			
-			float inv_denom = 1.0 / denom;
-			float t = r.cross(d2) * inv_denom;
-			float u = r.cross(d1) * inv_denom;
+			double inv_denom = 1.0 / denom;
+			double t = r.cross(d2) * inv_denom;
+			double u = r.cross(d1) * inv_denom;
 			
 			if (t >= -1e-9 && t <= 1 + 1e-9 && u >= -1e-9 && u <= 1 + 1e-9) {
                 Point intersect_p = p_i + d1 * t;

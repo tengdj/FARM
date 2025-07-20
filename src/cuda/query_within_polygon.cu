@@ -372,7 +372,7 @@ __global__ void calculate_apxDist(BoxDistRange *bufferinput, pair<uint32_t, uint
         double pb_low = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, true);
         double pb_high = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, false);
         double pb_apx = (pb_low + pb_high) / 2;
-        uint8_t pf = gpu_encode_fullness(pa_low, pa_pixelArea, pb_low, pb_pixelArea, 10);
+        uint8_t pf = gpu_encode_fullness(pa_apx, pa_pixelArea, pb_apx, pb_pixelArea, 10);
 
         int idx = atomicAdd(bufferoutput_size, 1U);
         bufferoutput[idx] = {pa, pb, pf, pair_id, bufferinput[bufferId].minDist + mean[pf] * (bufferinput[bufferId].maxDist - bufferinput[bufferId].minDist), bufferinput[bufferId].minDist, bufferinput[bufferId].maxDist};

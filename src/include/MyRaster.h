@@ -30,7 +30,7 @@ protected:
 	int dimx = 0;
 	int dimy = 0;
     uint status_size = 0;
-    int category_count = 8;
+    int category_count = 20;
 public:
     MyRaster() {
         pthread_mutex_init(&raster_lock, NULL);

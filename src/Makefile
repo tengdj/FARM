@@ -26,24 +26,11 @@ PARTITION_OBJS := $(patsubst %.cpp,%.o,$(PARTITION_SRCS))
 CU_SRCS := $(wildcard cuda/*.cu)
 CU_OBJS := $(patsubst %.cu,%_cu.o,$(CU_SRCS))
 
-RT_SRCS := $(wildcard rt/*.cu)
-RT_OBJS := $(patsubst %.cu,%_cu.o,$(RT_SRCS))
-
-PTXS := $(wildcard index/*.ptx)
-
-ifdef USE_RT
-CPPFLAGS += -DUSE_RT
-	LIBS  += ${CUDALIBS}
-	GEOMETRY_OBJS += ${RT_OBJS}
-endif
-
 ifdef USE_GPU
 	CPPFLAGS += -DUSE_GPU
+	LIBS  += ${CUDALIBS}
 	GEOMETRY_OBJS += ${CU_OBJS}
 endif
-
-
-
 
 %_cu.o: %.cu
 	$(NVCC) -c $(NVCCFLAGS) $(INCLUDES) -o $@ $<	
@@ -54,19 +41,16 @@ endif
 all:	contain_polygon within_polygon
 
 
-contain_polygon:	query/contain_polygon.o $(GEOMETRY_OBJS)
+intersect:	query/intersect.o $(GEOMETRY_OBJS)
+	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
+
+intersect_cpu:	query/intersect_cpu.o $(GEOMETRY_OBJS)
 	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
 	
 within_polygon:	query/within_polygon.o $(GEOMETRY_OBJS)
 	$(CXX) -O2 -o ../build/$@ $^ $(LIBS) 
 
 within_polygon_cpu:	query/within_polygon_cpu.o $(GEOMETRY_OBJS)
-	$(CXX) -O2 -o ../build/$@ $^ $(LIBS) 
-	
-within:	query/within.o $(GEOMETRY_OBJS)
-	$(CXX) -O2 -o ../build/$@ $^ $(LIBS) 
-	
-contain:	query/contain.o $(GEOMETRY_OBJS)
 	$(CXX) -O2 -o ../build/$@ $^ $(LIBS) 
 
 intersection:	query/intersection.o $(GEOMETRY_OBJS)
@@ -81,23 +65,17 @@ print_raster:	test/print_raster.o $(GEOMETRY_OBJS)
 print_layers:	test/print_layers.o $(GEOMETRY_OBJS)
 	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 
-distance_test:	test/distance_test.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-
 dump_points:	datagen/dump_points.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
 
 dump_polygons:	datagen/dump_polygons.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
 
-dist_point_polygon:	test/dist_point_polygon.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
+random_distribution:	datagen/random_distribution.o $(GEOMETRY_OBJS)
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 
-rtspatial:	test/rtspatial_cu.o $(GEOMETRY_OBJS) $(PTXS)
-	$(NVCC) -o ../build/$@ $^ $(LIBS) 
-
-float_test:	test/float_test_cu.o $(GEOMETRY_OBJS)
-	$(NVCC) -o ../build/$@ $^ $(LIBS) 
+filter_polygons:	datagen/filter_polygons.o $(GEOMETRY_OBJS)
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 
 clean:
 	rm -fr ../build/* $(OBJS) $(CU_OBJS)

@@ -394,7 +394,35 @@ void Ideal::evaluate_edges()
 						xval = (double)x * step_x + start_x;
 					}
 					yval = xval * a + b;
+					if(abs((yval - start_y) / step_y - round((yval - start_y) / step_y)) < 1e-9){
+						if (cur_startx < cur_endx && cur_starty < cur_endy){
+							vertical_intersect_info[x + 1].push_back(yval);
+							set_status(get_id(x, y), BORDER);
+							edges_info[get_id(x ++, y ++)].push_back(cross_info(LEAVE, i));
+							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
+							set_status(get_id(x, y), BORDER);
+						}
+						else if(cur_startx < cur_endx && cur_starty > cur_endy){
+							vertical_intersect_info[x].push_back(yval);
+							set_status(get_id(x, y), BORDER);
+							edges_info[get_id(x ++, y --)].push_back(cross_info(LEAVE, i));
+							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
+							set_status(get_id(x, y), BORDER);
+						}else if(cur_startx > cur_endx && cur_starty < cur_endy){
+							set_status(get_id(x, y), BORDER);
+							edges_info[get_id(x --, y ++)].push_back(cross_info(LEAVE, i));
+							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
+							set_status(get_id(x, y), BORDER);
+						}else if(cur_startx > cur_endx && cur_starty > cur_endy){
+							set_status(get_id(x, y), BORDER);
+							edges_info[get_id(x --, y --)].push_back(cross_info(LEAVE, i));
+							edges_info[get_id(x, y)].push_back(cross_info(ENTER, i));
+							set_status(get_id(x, y), BORDER);
+						}
+						continue;
+					}
 					cur_y = (yval - start_y) / step_y;
+				
 					// printf("y %f %d\n",(yval-start_y)/step_y,cur_y);
 					if (cur_y > max(cur_endy, cur_starty))
 					{
@@ -438,7 +466,7 @@ void Ideal::evaluate_edges()
 						yval = y * step_y + start_y;
 					}
 					xval = (yval - b) / a;
-					int cur_x = (xval - start_x) / step_x;
+					cur_x = (xval - start_x) / step_x;
 					// printf("x %f %d\n",(xval-start_x)/step_x,cur_x);
 					if (cur_x > max(cur_endx, cur_startx))
 					{
@@ -474,7 +502,12 @@ void Ideal::evaluate_edges()
 				{
 					boundary->print();
 					cout << "dim\t" << dimx << " " << dimy << endl;
-					printf("val\t%f %f\n", (xval - start_x) / step_x, (yval - start_y) / step_y);
+					cout << "step\t" << step_x << " " << step_y << endl;
+					mbr->print();
+					printf("POINT (%lf %lf)\n", x1, y1);
+					printf("POINT (%lf %lf)\n", x2, y2);
+					printf("check %.12lf %.12lf %.12lf\n", yval-start_y, step_y, fmod(yval - start_y + step_y, step_y));
+					printf("val\t%.12f %.12f\n", (xval - start_x) / step_x, (yval - start_y) / step_y);
 					cout << "curxy\t" << x << " " << y << endl;
 					cout << "calxy\t" << cur_x << " " << cur_y << endl;
 					cout << "xrange\t" << cur_startx << " " << cur_endx << endl;
@@ -890,13 +923,13 @@ void Ideal::rasterization()
 	// 1. create space for the pixels
 	init_pixels();
 
-	// 3. edge crossing to identify BORDER pixels
+	// 2. edge crossing to identify BORDER pixels
 	evaluate_edges();
 
 	// 3. determine the status of rest pixels with scanline rendering
 	scanline_reandering();
 
-	// 2. determine the fullness of pixels
+	// 4. determine the fullness of pixels
 	calculate_fullness();
 }
 
@@ -1207,35 +1240,47 @@ PartitionStatus Ideal::segment_contain(Point &p)
 
 bool Ideal::intersect(Ideal *target, query_context *ctx)
 {
-	vector<int> pxs = retrieve_pixels(target->getMBB());
+	vector<tuple<double, int, int>> candidate_pairs;
 
-	for (auto p : pxs)
+	vector<int> pxs = retrieve_pixels(target->getMBB());
+	for (auto pa : pxs)
 	{
-		if(show_status(p) != BORDER) continue;
-		box bx = get_pixel_box(get_x(p), get_y(p));
+		if(show_status(pa) != BORDER) continue;
+		box bx = get_pixel_box(get_x(pa), get_y(pa));
 		vector<int> tpxs = target->retrieve_pixels(&bx);
-		for (auto p2 : tpxs)
+		for (auto pb : tpxs)
 		{
 			// evaluate the state
-			if (target->show_status(p2) == BORDER)
+			if (target->show_status(pb) != BORDER) continue;
+			auto s_fullness = get_fullness(pa), t_fullness = target->get_fullness(pb);
+			auto s_p_apx = (decodePixelArea(pa, true) + decodePixelArea(pa, false)) / 2;
+			auto t_p_apx = (target->decodePixelArea(pb, true) + target->decodePixelArea(pb, false)) / 2;
+			auto prob = (s_p_apx + t_p_apx) / get_pixel_area();
+
+			candidate_pairs.push_back({prob, pa, pb});
+		}
+	}
+
+	sort(candidate_pairs.begin(), candidate_pairs.end(), [](const auto& a, const auto& b) {
+		return a > b;
+	});
+
+	for(int pair_id = 0; pair_id < candidate_pairs.size(); pair_id ++){
+		auto pa = get<1>(candidate_pairs[pair_id]);
+		auto pb = get<2>(candidate_pairs[pair_id]);
+		for (int i = 0; i < get_num_sequences(pa); i++)
+		{
+			auto r = get_edge_sequence(get_offset(pa) + i);
+			for (int j = 0; j < target->get_num_sequences(pb); j++)
 			{
-				for (int i = 0; i < get_num_sequences(p); i++)
+				auto r2 = target->get_edge_sequence(target->get_offset(pb) + j);
+				if (segment_intersect_batch(boundary->p + r.first, target->boundary->p + r2.first, r.second, r2.second))
 				{
-					auto r = get_edge_sequence(get_offset(p) + i);
-					for (int j = 0; j < target->get_num_sequences(p2); j++)
-					{
-						auto r2 = target->get_edge_sequence(target->get_offset(p2) + j);
-						if (segment_intersect_batch(boundary->p + r.first, target->boundary->p + r2.first, r.second, r2.second))
-						{
-							return true;
-						}
-					}
+					return true;
 				}
 			}
 		}
-		tpxs.clear();
 	}
-	pxs.clear();
 
 	return false;
 }
@@ -1324,15 +1369,6 @@ void Ideal::intersection(Ideal *target, query_context *ctx)
 
 	int num_inters = inters.size();
 
-	// printf("num_inters = %d\n", num_inters);
-
-	// for (auto inter : inters)
-	// {
-	// 	inter.print();
-	// }
-
-	// return;
-
 	std::sort(inters.begin(), inters.end(),
 			  [](const Intersection &a, const Intersection &b)
 			  {
@@ -1342,6 +1378,15 @@ void Ideal::intersection(Ideal *target, query_context *ctx)
 				  }
 				  return a.t < b.t;
 			  });
+
+	// printf("num_inters = %d\n", num_inters);
+
+	// for (auto inter : inters)
+	// {
+	// 	inter.print();
+	// }
+
+	// return;
 
 	vector<Segment> segments;
 
@@ -1428,7 +1473,6 @@ void Ideal::intersection(Ideal *target, query_context *ctx)
 	}
 
 	auto num_segments = segments.size();
-	// printf("num_segments = %d\n", num_segments);
 
 	sort(segments.begin(), segments.end(),
 		 [](const Segment &a, const Segment &b)
@@ -1454,6 +1498,14 @@ void Ideal::intersection(Ideal *target, query_context *ctx)
 				 return a.is_source < b.is_source;
 			 }
 		 });
+
+	// printf("num_segments = %d\n", num_segments);
+	// for (int i = 0; i < num_segments; i++)
+	// {
+	// 	segments[i].print();
+	// }
+
+	// return;
 
 	vector<PartitionStatus> status;
 	for (auto seg : segments)
@@ -1912,8 +1964,372 @@ double Ideal::distance(Ideal *target, int pix, query_context *ctx, bool profile)
 	return mindist;
 }
 
+// TEMP 
+bool IsInsideHorizontalDual(double Yi, double Yi1, double py)
+{
+    if (py < Yi || py > Yi1)
+    {
+        return false;
+    }
+    return true;
+}
+
+bool IsInsideVerticalDual(double Xi, double Xi1, double px)
+{
+    if (px < Xi || px > Xi1)
+    {
+        return false;
+    }
+    return true;
+}
+
+TempPolygon IntersectionDualX(MyPolygon &pol, double Xi, double Xi1)
+{
+    double slope;
+    double yi, yi1;
+    TempPolygon clippedPolygon;
+
+    // for each edge of the polygon
+    //  ITERATES THE VERTICES WHICH MUST BE IN A COUNTER-CLOCKWISE DIRECTION!!!
+    //  so that right of the line means inside, left means outside
+    for (auto itV = 0; itV < pol.get_num_vertices() - 1; itV++)
+    {
+        Point pointA = pol.get_boundary()->p[itV];
+        Point pointB = pol.get_boundary()->p[itV + 1];
+
+        // check cases
+        if (pointA.x == pointB.x)
+        {
+            // edge is vertical
+            // set the lowest point as the intersection point
+            yi = min(pointA.y, pointB.y);
+            yi1 = min(pointA.y, pointB.y);
+        }
+        else
+        {
+            // solve for y
+            slope = getSlope(pointA, pointB);
+            // check if AB is horizontal, if it is it only intersects if pointA.y == Yi or pointA.y == Yi1
+            // find intersection points for both Xi and Xi1
+            yi = slope * (Xi - pointB.x) + pointB.y;
+            yi1 = slope * (Xi1 - pointB.x) + pointB.y;
+        }
+
+        // intersection points
+        Point pi(Xi, yi);
+        Point pi1(Xi1, yi1);
+        // cout << "X CLIPPING " << endl;
+        // POINT A
+        if (IsInsideVerticalDual(Xi, Xi1, pointA.x))
+        {
+            // pointA inside, clipping result
+            clippedPolygon.addPoint(pointA);
+            // cout << "point(" << pointA.x << " " << pointA.y << ") added" << endl;
+        }
+
+        // intersection points in PROPER ORDER
+        if (pointA.x < pointB.x)
+        {
+            // first pi, then pi1
+            if (IsInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi.y) && IsInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi.x))
+            {
+                // intersection point pi is a clipping result
+                clippedPolygon.addPoint(pi);
+                // cout << "point pi (" << pi.x << " " << pi.y << ") added2" << endl;
+            }
+
+            if (IsInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi1.y) && IsInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi1.x))
+            {
+                // intersection point pi1 is a clipping result
+                clippedPolygon.addPoint(pi1);
+                // cout << "point pi1 (" << pi1.x << " " << pi1.y << ") added2" << endl;
+            }
+        }
+        else
+        {
+            // first pi1 then pi
+            if (IsInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi1.y) && IsInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi1.x))
+            {
+                // intersection point pi1 is a clipping result
+                clippedPolygon.addPoint(pi1);
+                // cout << "point pi1 (" << pi1.x << " " << pi1.y << ") added2" << endl;
+            }
+            if (IsInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi.y) && IsInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi.x))
+            {
+                // intersection point pi is a clipping result
+                clippedPolygon.addPoint(pi);
+                // cout << "point pi (" << pi.x << " " << pi.y << ") added2" << endl;
+            }
+        }
+
+        // POINT B
+        if (IsInsideVerticalDual(Xi, Xi1, pointB.x))
+        {
+            // pointB inside, clipping result
+            clippedPolygon.addPoint(pointB);
+            // cout << "point B (" << pointB.x << " " << pointB.y << ") added" << endl;
+        }
+    }
+    // add the first point to the end
+    //  so that the polygon "closes"
+    if (clippedPolygon.vertices.size() != 0)
+    {
+        clippedPolygon.vertices.push_back(*clippedPolygon.vertices.begin());
+    }
+
+    return clippedPolygon;
+}
+
+vector<Point> IntersectionDualY(TempPolygon &pol, double Yi, double Yi1)
+{
+    double slope;
+    double xi, xi1;
+    TempPolygon clippedPolygon;
+
+    for (auto itV = pol.vertices.begin(); itV != pol.vertices.end() - 1; itV++)
+    {
+        Point pointA = *itV;
+        Point pointB = *(itV + 1);
+
+        // cout << "POINTA" << endl;
+        // pointA.print();
+        // pointB.print();
+        // cout << "POINTB" << endl;
+
+        bool parallels = false;
+        // calculate the slope (if any)
+        if (pointA.x == pointB.x)
+        {
+            // edge is vertical
+            // the only possible point of intersection is y (Yi or Yi1)
+            //  do nothing
+            xi = pointA.x;
+            xi1 = pointA.x;
+        }
+        else
+        {
+            slope = getSlope(pointA, pointB);
+            // check if AB is horizontal, if it is it only intersects if pointA.y == Yi or pointA.y == Yi1
+            // this flag will skip unnecessary checks in this event
+            if (pointA.y == pointB.y)
+            {
+                if (pointA.y == Yi)
+                {
+                    xi = pointA.x;
+                    xi1 = -numeric_limits<double>::max();
+                }
+                else if (pointA.y == Yi1)
+                {
+                    xi = -numeric_limits<double>::max();
+                    xi1 = pointA.x;
+                }
+                else
+                {
+                    // THEY DO NOT INETERSECT, THEY ARE PARALLELS
+                    parallels = true;
+                }
+            }
+            else
+            {
+                // solve for x
+                xi = ((Yi - pointB.y) / slope) + pointB.x;
+                xi1 = ((Yi1 - pointB.y) / slope) + pointB.x;
+                // cout << "   solved for x" << endl;
+            }
+        }
+
+        // POINT A
+        if (IsInsideHorizontalDual(Yi, Yi1, pointA.y))
+        {
+            // pointA inside, clipping result
+            // clippedPolygon.addPoint(pointA);
+            clippedPolygon.vertices.push_back(pointA);
+            // cout << "point A (" << pointA.x << " " << pointA.y << ") added" << endl;
+        }
+
+        if (!parallels)
+        {
+            // intersection points
+            Point pi(xi, Yi);
+            Point pi1(xi1, Yi1);
+
+            // intersection points in PROPER ORDER
+            if (pointA.y < pointB.y)
+            {
+                // first pi, then pi1
+                if (IsInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi.x) && IsInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi.y))
+                {
+                    // intersection point pi is a clipping result
+                    // clippedPolygon.addPoint(pi);
+                    clippedPolygon.vertices.push_back(pi);
+                    // cout << "point pi (" << pi.x << " " << pi.y << ") added" << endl;
+                }
+
+                if (IsInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi1.x) && IsInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi1.y))
+                {
+                    // intersection point pi1 is a clipping result
+                    // clippedPolygon.addPoint(pi1);
+                    clippedPolygon.vertices.push_back(pi1);
+                    // cout << "point pi1 (" << pi1.x << " " << pi1.y << ") added" << endl;
+                }
+            }
+            else
+            {
+                // first pi1 then pi
+                if (IsInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi1.x) && IsInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi1.y))
+                {
+                    // intersection point pi1 is a clipping result
+                    // clippedPolygon.addPoint(pi1);
+                    clippedPolygon.vertices.push_back(pi1);
+                    // cout << "point pi1 (" << pi1.x << " " << pi1.y << ") added" << endl;
+                }
+                if (IsInsideVerticalDual(min(pointA.x, pointB.x), max(pointA.x, pointB.x), pi.x) && IsInsideHorizontalDual(min(pointA.y, pointB.y), max(pointA.y, pointB.y), pi.y))
+                {
+                    // intersection point pi is a clipping result
+                    // clippedPolygon.addPoint(pi);
+                    clippedPolygon.vertices.push_back(pi);
+                    // cout << "point pi (" << pi.x << " " << pi.y << ") added" << endl;
+                }
+            }
+
+            // POINT B
+            // if (IsInsideHorizontalDual(Yi, Yi1, pointB.y))
+            // {
+            //     // pointB inside, clipping result
+            //     clippedPolygon.addPoint(pointB);
+            //     // cout << "point B (" << pointB.x << " " << pointB.y << ") added" << endl;
+            // }
+        }
+    }
+    // cout << "sort before" << endl;
+    // for (auto x : clippedPolygon.vertices)
+    //     x.print();
+    // sort points
+    // sort_by_polar_angle(clippedPolygon.vertices);
+
+    // cout << "sort after" << endl;
+    // for (auto x : clippedPolygon.vertices)
+    //     x.print();
+
+    //"close" the polygon (first and last points in order must be the same point)
+    if (clippedPolygon.vertices.size() != 0 && clippedPolygon.vertices.front() != clippedPolygon.vertices.back())
+    {
+        clippedPolygon.vertices.push_back(*clippedPolygon.vertices.begin());
+    }
+
+    return clippedPolygon.vertices;
+}
+
+void RasterizePolygon(MyPolygon *mappedPol, Ideal *ideal, vector<vector<Point>> &clippedPolygons)
+{
+    double Xi, Xi1, Yi, Yi1;
+    double kx, ky;
+    double step_x = ideal->get_step_x(), step_y = ideal->get_step_y();
+    int dimx = ideal->get_dimx(), dimy = ideal->get_dimy();
+
+    vector<Point> clippedPoints;
+    vector<TempPolygon> subpolygonsAfterX;
+
+    // initialize the x axis sweep lines
+    Xi = ideal->getMBB()->low[0];
+    Xi1 = Xi + step_x;
+
+    // define the end x
+    kx = Xi + dimx * step_x;
+    // cout << Xi << " and " << Xi1 << "/" << kx << endl;
+
+    TempPolygon tempPol;
+    subpolygonsAfterX.reserve(dimx);
+
+    int x = 0;
+    // sweep the x axis getting pairs of vertical lines Xi & Xi+1
+    while (Xi1 < kx + 1e-9)
+    {
+        // cout << Xi << " and " << Xi1 << "/" << kx << endl;
+        // returns the sub polygon when pol is clipped by Xi and Xi1
+        tempPol = IntersectionDualX(*mappedPol, Xi, Xi1);
+        // add the sub polygon to the polygon's list
+        //  we need to save it to further clip it in the y axis later
+        // printf("----------------------------------------------------\n");
+        // printf("tempPol%d\n", x);
+        // for (auto x : tempPol.vertices)
+        //     x.print();
+        // printf("----------------------------------------------------\n");
+
+        if (tempPol.vertices.size() > 0)
+        {
+            tempPol.cellX = x;
+            subpolygonsAfterX.push_back(tempPol);
+        }
+
+        // move both vertical lines equally
+        Xi += step_x;
+        Xi1 = Xi + step_x;
+        x++;
+    }
+
+    // define the end y
+    ky = ideal->getMBB()->low[1] + dimy * step_y;
+
+    int type;
+
+    // iterate the subpolygons created by the x axis clipping instead of the original polygons
+    auto it = subpolygonsAfterX.begin();
+    while (it != subpolygonsAfterX.end())
+    {
+        // FOR NORMALIZED
+        Yi = ideal->getMBB()->low[1];
+        Yi1 = Yi + step_y;
+
+        int y = 0;
+        // sweep the y axis getting pairs of horizontal lines Yi & Yi+1
+        while (Yi1 < ky + 1e-9)
+        {
+            // returns the subpolygon furtherly clipped in the y axis by Yi and Yi+1
+            clippedPoints = IntersectionDualY(*it, Yi, Yi1);
+
+            // this helps ignore a large portion of the empty cells for a polygon
+            // if (clippedPoints.size() > 2)
+            // {
+            // calculate its area and classify it
+
+            // double clippedArea = computePolygonArea(clippedPoints);
+
+            // printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
+            // for (auto point : clippedPoints)
+            //     point.print();
+
+            // printf("x = %d y = %d area = %.12lf pixelArea = %.12lf type = %d\n", it->cellX, y, clippedArea, step_x * step_y, type);
+
+            // printf("--------------------------------------------------------------------------------------------------------------------------------------------------------\n");
+
+            // if (type != 0)
+            // {
+            // printf("CHECK = %d %d    %d\n", it->cellX, y, y * (dimx + 1) + it->cellX);
+            clippedPolygons[y * dimx + it->cellX] = clippedPoints;
+            // rasterizationCells.emplace_back(it->cellX, Yi, it->cellX + step_x, Yi1, type);
+            // }
+            // }
+
+            // move the horizontal lines equally to the next position
+            Yi += step_y;
+            Yi1 = Yi + step_y;
+            y++;
+        }
+        it++;
+    }
+    return;
+}
+
+// TEMP
+
 bool Ideal::within(Ideal *target, query_context *ctx)
 {
+	vector<vector<Point>> sourceClippedPolygons(get_num_pixels());
+	vector<vector<Point>> targetClippedPolygons(target->get_num_pixels());
+	RasterizePolygon(this, this, sourceClippedPolygons);
+	RasterizePolygon(target, target, targetClippedPolygons);
+	
 	// MyPolygon::print();
 	// MyRaster::print();
 
@@ -2051,7 +2467,9 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 		auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
 		auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
 		auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
-		auto pf = classifyPixel(s_p_apx, get_pixel_area(), t_p_apx, target->get_pixel_area(), 10);
+		// auto pf = classifyPixel(s_p_apx, get_pixel_area(), t_p_apx, target->get_pixel_area(), 20);
+		// auto pf = classifyPixel(get_areas(id1) , get_pixel_area(), target->get_areas(id2), target->get_pixel_area(), 20);
+		auto pf = classifyPixel(get_areas(id1) + target->get_areas(id2), get_pixel_area() + target->get_pixel_area(), 20);
 
 		auto box1 = get_pixel_box(get_x(id1), get_y(id1));
 		auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));
@@ -2062,68 +2480,114 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 		candidate_pairs.push_back({dist_apx, id1, id2});
 	}
 
-	// std::map<int, std::ofstream> outputFiles;
+	std::map<int, std::ofstream> outputFiles;
 
-	// for(int _i = 0; _i < candidate_pairs.size(); _i ++){
-	// 	auto id1 = get<1>(candidate_pairs[_i]);
-	// 	auto id2 = get<2>(candidate_pairs[_i]);
-	// 	auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
-	// 	auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
-	// 	auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
-	// 	auto pf = classifyPixel(s_p_apx, get_pixel_area(), t_p_apx, target->get_pixel_area(), 10);
+	for(int _i = 0; _i < candidate_pairs.size(); _i ++){
+		auto id1 = get<1>(candidate_pairs[_i]);
+		auto id2 = get<2>(candidate_pairs[_i]);
+		auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
+		auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
+		auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
+		// auto pf = classifyPixel(s_p_apx, get_pixel_area(), t_p_apx, target->get_pixel_area(), 20);
+		// auto pf = classifyPixel(get_areas(id1) , get_pixel_area(), target->get_areas(id2), target->get_pixel_area(), 20);
+		// auto pf = classifyPixel(s_p_apx + t_p_apx, get_pixel_area() + target->get_pixel_area(), 20);
+		auto pf = classifyPixel(get_areas(id1) + target->get_areas(id2), get_pixel_area() + target->get_pixel_area(), 20);
 
-	// 	auto box1 = get_pixel_box(get_x(id1), get_y(id1));
-	// 	auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));
-	// 	double dist_low = box1.distance(box2, true);
-	// 	double dist_high = box1.max_distance(box2, true);
+		auto box1 = get_pixel_box(get_x(id1), get_y(id1));
+		auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));
+		if(box1.intersect(box2)) continue;
+		if(box1.contain(box2)) continue;
+		if(box2.contain(box1)) continue;
+		double dist_low = box1.distance(box2, false);
+		double dist_high = box1.max_distance(box2, false);
 
-	// 	double min_dist = 100000.0;
-	// 	for(int i = 0; i < get_num_sequences(id1); i ++){
-	// 		auto er1 = get_edge_sequence(get_offset(id1) + i);
-	// 		for(int j = 0; j < target->get_num_sequences(id2); j ++){
-	// 			auto er2 = target->get_edge_sequence(target->get_offset(id2) + j);
-	// 			if(er1.second < 2 || er2.second < 2) continue;
-	// 			double dist = segment_to_segment_within_batch(target->boundary->p+er2.first,
-	// 															boundary->p+er1.first, er2.second, er1.second,
-	// 															ctx->within_distance, ctx->geography);
-	// 			min_dist = min(dist, min_dist);
-	// 		}
-	// 	}
+		// double min_dist = 100000.0;
+		// for(int i = 0; i < get_num_sequences(id1); i ++){
+		// 	auto er1 = get_edge_sequence(get_offset(id1) + i);
+		// 	for(int j = 0; j < target->get_num_sequences(id2); j ++){
+		// 		auto er2 = target->get_edge_sequence(target->get_offset(id2) + j);
+		// 		if(er1.second < 2 || er2.second < 2) continue;
+		// 		double dist = segment_to_segment_within_batch(target->boundary->p+er2.first,
+		// 														boundary->p+er1.first, er2.second, er1.second,
+		// 														ctx->within_distance, ctx->geography);
+		// 		min_dist = min(dist, min_dist);
+		// 	}
+		// }
 
-	// 	if(min_dist == 100000){
-	// 		continue;
-	// 		// printf("id = %d, dimx = %d, dimy = %d\n", id, get_dimx(), get_dimy());
-	// 		// MyPolygon::print();
-	// 		// MyRaster::print();
-	// 		// printf("id = %d, dimx = %d, dimy = %d\n", target->id, target->get_dimx(), target->get_dimy());
-	// 		// target->MyPolygon::print();
-	// 		// target->MyRaster::print();
-	// 		// printf("id1 = %d %d id2 = %d %d dist = %lf dist_low = %lf dist_high = %lf\n", id1, get_fullness(id1), id2, target->get_fullness(id2), min_dist, dist_low, dist_high);
-	// 		// printf("%d %d\n", get_num_sequences(id1), target->get_num_sequences(id2));
-	// 	}
+		double min_dist = DBL_MAX;
+		auto poly1 = sourceClippedPolygons[id1];
+		auto poly2 = targetClippedPolygons[id2];
+		// 检查poly1的每个点到poly2的所有边的最短距离
+		for (const auto& p1 : poly1) {
+			for (size_t i = 0; i < poly2.size(); ++i) {
+				Point a = poly2[i];
+				Point b = poly2[(i + 1) % poly2.size()];
+				min_dist = std::min(min_dist, point_to_segment_distance(p1, a, b, false));
+			}
+		}
+		
+		// 检查poly2的每个点到poly1的所有边的最短距离
+		for (const auto& p2 : poly2) {
+			for (size_t i = 0; i < poly1.size(); ++i) {
+				Point a = poly1[i];
+				Point b = poly1[(i + 1) % poly1.size()];
+				min_dist = std::min(min_dist, point_to_segment_distance(p2, a, b, false));
+			}
+		}
 
-	// 	double ratio = (min_dist - dist_low) / (dist_high - dist_low);
+		if(min_dist == 100000){
+			continue;
+			// printf("id = %d, dimx = %d, dimy = %d\n", id, get_dimx(), get_dimy());
+			// MyPolygon::print();
+			// MyRaster::print();
+			// printf("id = %d, dimx = %d, dimy = %d\n", target->id, target->get_dimx(), target->get_dimy());
+			// target->MyPolygon::print();
+			// target->MyRaster::print();
+			// printf("id1 = %d %d id2 = %d %d dist = %lf dist_low = %lf dist_high = %lf\n", id1, get_fullness(id1), id2, target->get_fullness(id2), min_dist, dist_low, dist_high);
+			// printf("%d %d\n", get_num_sequences(id1), target->get_num_sequences(id2));
+		}
+
+		double ratio = (min_dist - dist_low) / (dist_high - dist_low);
+
+		// if(pf == 9 && ratio < 0){
+		// 	printf("id = %d, dimx = %d, dimy = %d\n", id, get_dimx(), get_dimy());
+		// 	MyPolygon::print();
+		// 	MyRaster::print();
+		// 	printf("id = %d, dimx = %d, dimy = %d\n", target->id, target->get_dimx(), target->get_dimy());
+		// 	target->MyPolygon::print();
+		// 	target->MyRaster::print();
+		// 	printf("id1 = %d %d id2 = %d %d dist = %lf dist_low = %lf dist_high = %lf\n", id1, get_fullness(id1), id2, target->get_fullness(id2), min_dist, dist_low, dist_high);
+		// 	printf("source\n");
+		// 	for(auto p : sourceClippedPolygons[id1]){
+		// 		p.print();
+		// 	}
+		// 	printf("target\n");
+		// 	for(auto p : targetClippedPolygons[id2]){
+		// 		p.print();
+		// 	}
+		// }
 
 
-	// 	// if (outputFiles.find(pf) == outputFiles.end())
-	// 	// {
-	// 	// 	std::string filename = "class_" + std::to_string(pf) + ".txt";
-	// 	// 	outputFiles[pf].open(filename);
-	// 	// 	if (!outputFiles[pf])
-	// 	// 	{
-	// 	// 		std::cerr << "无法创建文件: " << filename << std::endl;
-	// 	// 		return 1;
-	// 	// 	}
-	// 	// }
-	// 	std::string filename = "class_" + std::to_string(pf) + ".txt";
-	// 	std::ofstream outfile(filename, std::ios::app);
+		// if (outputFiles.find(pf) == outputFiles.end())
+		// {
+		// 	std::string filename = "class_" + std::to_string(pf) + ".txt";
+		// 	outputFiles[pf].open(filename);
+		// 	if (!outputFiles[pf])
+		// 	{
+		// 		std::cerr << "无法创建文件: " << filename << std::endl;
+		// 		return 1;
+		// 	}
+		// }
 
-    //     outfile << std::fixed << std::setprecision(6) << ratio << endl;
+		std::string filename = "class_" + std::to_string(pf) + ".txt";
+		std::ofstream outfile(filename, std::ios::app);
+
+        outfile << std::fixed << std::setprecision(6) << ratio << endl;
 
 
-	// }
+	}
 
-	// return 0;
+	return 0;
 
 	sort(candidate_pairs.begin(), candidate_pairs.end());
 	

@@ -274,7 +274,6 @@ MyPolygon *MyPolygon::read_polygon(const char *wkt, size_t &offset){
 	if(polygon->boundary->clockwise()){
 		polygon->boundary->reverse();
 	}
-	polygon->boundary->fix();
 	skip_space(wkt, offset);
 	//polygons as the holes of the boundary polygon
 	while(wkt[offset]==','){
@@ -283,7 +282,6 @@ MyPolygon *MyPolygon::read_polygon(const char *wkt, size_t &offset){
 		if(!vc->clockwise()){
 			vc->reverse();
 		}
-		vc->fix();
 		polygon->holes.push_back(vc);
 
 		skip_space(wkt, offset);
@@ -722,7 +720,7 @@ void MyPolygon::print(bool print_id, bool print_hole){
 	// if(print_id){
 	// 	cout<<"id:\t"<<this->id<<endl;
 	// }
-	cout<<"LINESTRING ";
+	cout<<"POLYGON ";
 	print_without_head(print_hole);
 	cout<<endl;
 }

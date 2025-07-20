@@ -17,12 +17,10 @@ void cuda_create_buffer(query_context *gctx)
 
     for (auto &ideal : gctx->source_ideals)
     {
-        // ideal->id = idx ++;
-
         num_status += ideal->get_status_size();
         num_offset += ideal->get_num_pixels() + 1;
         num_edge_sequences += ideal->get_len_edge_sequences();
-        num_vertices += ideal->get_num_vertices() + 1;
+        num_vertices += ideal->get_num_vertices();
         num_gridline_offset += ideal->get_vertical()->get_num_grid_lines();
         num_gridline_nodes += ideal->get_vertical()->get_num_crosses();
         if(gctx->use_hierachy){
@@ -36,7 +34,7 @@ void cuda_create_buffer(query_context *gctx)
         num_status += ideal->get_status_size();
         num_offset += ideal->get_num_pixels() + 1;
         num_edge_sequences += ideal->get_len_edge_sequences();
-        num_vertices += ideal->get_num_vertices() + 1;
+        num_vertices += ideal->get_num_vertices();
         num_gridline_offset += ideal->get_vertical()->get_num_grid_lines();
         num_gridline_nodes += ideal->get_vertical()->get_num_crosses();
         if(gctx->use_hierachy){
@@ -154,7 +152,7 @@ void preprocess_for_gpu(query_context *gctx)
         idealoffset.edge_sequences_start = eidx;
         eidx += edge_sequences_size;
 
-        uint vertices_size = source->get_num_vertices() + 1;
+        uint vertices_size = source->get_num_vertices();
         memcpy(gctx->h_vertices + vidx, source->get_boundary()->p, vertices_size * sizeof(Point));
         idealoffset.vertices_start = vidx;
         vidx += vertices_size;
@@ -199,7 +197,7 @@ void preprocess_for_gpu(query_context *gctx)
         idealoffset.edge_sequences_start = eidx;
         eidx += edge_sequences_size;
 
-        uint vertices_size = target->get_num_vertices() + 1;
+        uint vertices_size = target->get_num_vertices();
         memcpy(gctx->h_vertices + vidx, target->get_boundary()->p, vertices_size * sizeof(Point));
         idealoffset.vertices_start = vidx;
         vidx += vertices_size;
@@ -350,10 +348,10 @@ void preprocess_for_gpu(query_context *gctx)
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_degree_per_kilometer_longitude_arr, h_degree_per_kilometer_longitude_arr, sizeof(h_degree_per_kilometer_longitude_arr), cudaMemcpyHostToDevice));
 
     // GPU Buffer
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 8UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 4UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferinput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 8UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 4UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferoutput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
 

@@ -135,8 +135,6 @@ void query_context::merge_global(){
 		}
 	}
 
-	global_ctx->intersection_polygons.insert(global_ctx->intersection_polygons.end(), intersection_polygons.begin(), intersection_polygons.end());
-
 	global_ctx->object_pairs.insert(global_ctx->object_pairs.end(), object_pairs.begin(), object_pairs.end());
 
 	
@@ -243,9 +241,6 @@ query_context get_parameters(int argc, char **argv){
 	desc.add_options()
 		("help", "produce help message")
 		("rasterize,r", "partition with rasterization")
-		("qtree,q", "partition with qtree")
-		("raster_only", "query with raster only")
-		("vector", "use techniques like MER convex hull and internal RTree")
 		("gpu,g", "query with gpu")
 		("hierachy,h", "partition with hierarchical grid")
 
@@ -254,11 +249,7 @@ query_context get_parameters(int argc, char **argv){
 		("threads,n", po::value<int>(&global_ctx.num_threads), "number of threads")
 		("vpr,v", po::value<int>(&global_ctx.vpr), "number of vertices per raster")
 		("batch_size,b", po::value<size_t>(&global_ctx.batch_size), "batch size")
-		("load_factor,l", po::value<double>(&global_ctx.load_factor), "load factor")
-		// ("big_threshold,b", po::value<int>(&global_ctx.big_threshold), "up threshold for complex polygon")
-		// ("small_threshold", po::value<int>(&global_ctx.small_threshold), "low threshold for complex polygon")
-		// ("sample_rate", po::value<float>(&global_ctx.sample_rate), "sample rate")
-		// ("latency,l","collect the latency information")
+		("merge_threshold,m", po::value<float>(&global_ctx.merge_threshold), "merge threshold")
 		;
 	po::variables_map vm;
 	try{
@@ -274,9 +265,6 @@ query_context get_parameters(int argc, char **argv){
 	po::notify(vm);
 
 	global_ctx.use_ideal = vm.count("rasterize");
-	global_ctx.use_vector = vm.count("vector");
-	global_ctx.use_raster = vm.count("raster_only");
-	global_ctx.use_qtree = vm.count("qtree");
 	global_ctx.use_gpu = vm.count("gpu");
 	global_ctx.use_hierachy = vm.count("hierachy");
 

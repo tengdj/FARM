@@ -228,7 +228,6 @@ MyPolygon *read_polygon_binary_file(ifstream &infile)
 		{
 			vs->reverse();
 		}
-		vs->fix();
 		poly->get_holes().push_back(vs);
 	}
 	return poly;
@@ -703,7 +702,6 @@ Ideal *read_polygon(const char *wkt, size_t &offset)
 	{
 		ideal->get_boundary()->reverse();
 	}
-	ideal->get_boundary()->fix();
 	skip_space(wkt, offset);
 	// polygons as the holes of the boundary polygon
 	while (wkt[offset] == ',')
@@ -714,7 +712,6 @@ Ideal *read_polygon(const char *wkt, size_t &offset)
 		{
 			vc->reverse();
 		}
-		vc->fix();
 		ideal->get_holes().push_back(vc);
 
 		skip_space(wkt, offset);
