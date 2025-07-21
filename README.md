@@ -1,2 +1,2 @@
-# IDEAL: a Vector-Raster Hybrid Model for Efficient Spatial Queries over Complex Polygons
-IDEAL is a vector-raster hybrid approach through information-preserving rasterization. The rasterization not only converts a polygon to a grid of pixels, but also maintains information between rasterized pixels (raster) and the polygon (vector) on spatial relationship (interior, boundary or exterior), intersected edges, and vertices of the intersected edges at the pixel level. Indeed, the raster model not only works as a grid index but also provides sufficient knowledge for conducting geometric computations over only part of the polygon primitives. By building spatial querying methods with such a hybrid approach, the query performance and throughput can be significantly improved.
+# FPGA
+FPGA is a spatial database management system that supports efficient querying of complex polygons with Fullness-aware Pyramidal Raster Models and GPU Acceleration.
