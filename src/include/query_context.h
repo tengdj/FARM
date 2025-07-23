@@ -137,6 +137,9 @@ public:
 	double area = 0.0f;
 
 	// query statistic
+	double raster_filter_time = 0.0;
+	double refine_time = 0.0;
+
 	size_t found = 0;
 	size_t query_count = 0;
 	size_t refine_count = 0;

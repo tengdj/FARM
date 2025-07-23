@@ -46,7 +46,6 @@ void *query(void *args){
 			auto pair = gctx->object_pairs[i];
 			auto sourceIdx = pair.first;
 			auto targetIdx = pair.second;
-			printf("%d\t%d\n", sourceIdx, targetIdx);
 			Ideal *source = gctx->source_ideals[sourceIdx];
 			Ideal *target = gctx->target_ideals[targetIdx];
 			// if(ctx->thread_id == 0){
@@ -77,7 +76,6 @@ int main(int argc, char** argv) {
 	query_context global_ctx;
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::intersection;
-    global_ctx.num_threads = 1;
 
     global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
     for (Ideal *p : global_ctx.source_ideals)
@@ -105,10 +103,7 @@ int main(int argc, char** argv) {
 	}
 
 	global_ctx.index = 0;
-	global_ctx.object_pairs.resize(100);
 	global_ctx.target_num = global_ctx.object_pairs.size();    
-
-    global_ctx.num_threads = 128;
 
 	auto preprocess_start = std::chrono::high_resolution_clock::now();
 	preprocess(&global_ctx);
@@ -132,10 +127,10 @@ int main(int argc, char** argv) {
 		pthread_join(threads2[i], &status);
 	}
 
-    for(auto p : global_ctx.intersection_polygons){
-        p->MyPolygon::print();
-		global_ctx.area += p->area();
-    }
+    // for(auto p : global_ctx.intersection_polygons){
+    //     p->MyPolygon::print();
+	// 	global_ctx.area += p->area();
+    // }
 
 	printf("AREA: %lf\n", global_ctx.area);
 

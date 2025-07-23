@@ -70,7 +70,8 @@ int main(int argc, char** argv) {
 		pthread_join(threads[i], &status);
 	}
 
-	// if (!global_ctx.batch_size) global_ctx.batch_size = global_ctx.target_num;
+	global_ctx.index = 0;
+	global_ctx.target_num = global_ctx.object_pairs.size();
 	
 	auto preprocess_start = std::chrono::high_resolution_clock::now();
 	preprocess(&global_ctx);
@@ -128,6 +129,8 @@ int main(int argc, char** argv) {
 	// // }
 	// global_ctx.batch_size = 1;
 	printf("num pairs: %d\n", global_ctx.num_pairs);
+	
+	if (!global_ctx.batch_size) global_ctx.batch_size = global_ctx.num_pairs;
 	for(int i = 0; i < global_ctx.num_pairs; i += global_ctx.batch_size){
 		global_ctx.index = i;
 		global_ctx.index_end = min(i + global_ctx.batch_size, global_ctx.num_pairs);

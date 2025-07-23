@@ -226,6 +226,10 @@ void MyRaster::set_status(int id, uint8_t state){   // The multiplication by 2 i
 // }
 
 PartitionStatus MyRaster::show_status(int id){
+	// if(id >= get_num_pixels()){
+	// 	log("id = %d num_pixels = %d\n", id, get_num_pixels());
+	// }
+	// assert(id < get_num_pixels());
 	if (status[id] == 0)
 		return OUT;
 	else if (status[id] == category_count - 1)
@@ -439,7 +443,6 @@ size_t MyRaster::get_num_pixels(PartitionStatus status){
 
 void MyRaster::grid_align(){
 	UniversalGrid &space = UniversalGrid::getInstance();
-
 	bool flag1 = false, flag2 = false;
 	auto x = space.get_step_x();
 	auto y = space.get_step_y();
@@ -461,6 +464,11 @@ void MyRaster::grid_align(){
 			break;
 		x *= 2;
 		y *= 2;
+	}
+	if(!flag1 || !flag2){
+		// printf("%lf %lf %lf %lf\n", x, y ,step_x, step_y);
+		cout << flag1 << " " << flag2 << endl;
+		cout << x << " " << y << " " << step_x << " " << step_y << endl;
 	}
 	assert(flag1 && flag2);
 

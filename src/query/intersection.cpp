@@ -41,7 +41,6 @@ int main(int argc, char** argv) {
 	query_context global_ctx;
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::intersection;
-    global_ctx.num_threads = 1;
 
     global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
     for (Ideal *p : global_ctx.source_ideals)
@@ -71,8 +70,6 @@ int main(int argc, char** argv) {
 	global_ctx.index = 0;
 	global_ctx.target_num = global_ctx.object_pairs.size();    
 
-    global_ctx.num_threads = 128;
-
 	auto preprocess_start = std::chrono::high_resolution_clock::now();
 	preprocess(&global_ctx);
 	auto preprocess_end = std::chrono::high_resolution_clock::now();
@@ -87,9 +84,9 @@ int main(int argc, char** argv) {
 
 	auto total_start = std::chrono::high_resolution_clock::now();
 
-    if(global_ctx.batch_size == 0) global_ctx.batch_size = global_ctx.num_pairs;
-    global_ctx.batch_size = 100;
+	printf("num_pairs = %d\n", global_ctx.num_pairs);
 
+    if(global_ctx.batch_size == 0) global_ctx.batch_size = global_ctx.num_pairs;
 	for(int i = 0; i < global_ctx.num_pairs; i += global_ctx.batch_size){
         auto batch_start = std::chrono::high_resolution_clock::now();
 		global_ctx.index = i;
@@ -108,7 +105,6 @@ int main(int argc, char** argv) {
 		auto batch_end = std::chrono::high_resolution_clock::now();
 		auto batch_duration = std::chrono::duration_cast<std::chrono::milliseconds>(batch_end - batch_start);
 		std::cout << "batch time: " << batch_duration.count() << " ms" << std::endl;
-        return 0;
     }
 
 	auto total_end = std::chrono::high_resolution_clock::now();

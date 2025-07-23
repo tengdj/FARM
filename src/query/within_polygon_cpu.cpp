@@ -13,12 +13,12 @@ bool MySearchCallback(Ideal *ideal, void *arg)
 	Ideal *target = (Ideal *)ctx->target;
 	if (ideal->id == target->id)
 		return true;
-	if(ideal->getMBB()->intersect(*target->getMBB()))
-		return true;
-	if(ideal->getMBB()->contain(*target->getMBB()))
-		return true;
-	if(target->getMBB()->contain(*ideal->getMBB()))
-		return true;
+	// if(ideal->getMBB()->intersect(*target->getMBB()))
+	// 	return true;
+	// if(ideal->getMBB()->contain(*target->getMBB()))
+	// 	return true;
+	// if(target->getMBB()->contain(*ideal->getMBB()))
+	// 	return true;
 	ctx->object_pairs.push_back(make_pair(ideal->id, target->id));
 	return true;
 }
@@ -111,7 +111,8 @@ int main(int argc, char** argv) {
 	pthread_t threads2[global_ctx.num_threads];
 	query_context ctx2[global_ctx.num_threads];
 	for(int i=0;i<global_ctx.num_threads;i++){
-		ctx2[i] = query_context(global_ctx);
+		ctx2[i] = query_context();
+		ctx2[i].global_ctx = &global_ctx;
 		ctx2[i].thread_id = i;
 	}
 	for(int i=0;i<global_ctx.num_threads;i++){

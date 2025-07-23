@@ -183,7 +183,7 @@ __global__ void kernel_unroll_intersect(PixPair *pixpairs, pair<uint32_t, uint32
 	uint s_vertices_start = source.vertices_start;
 	uint t_vertices_start = target.vertices_start;
 
-	const int max_size = 16;
+	const int max_size = 32;
 
 	for (int i = 0; i < s_num_sequence; ++i)
 	{
@@ -316,7 +316,7 @@ void cuda_intersect(query_context *gctx)
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_end_ptr, (num_groups + 1) * sizeof(int)));
     CUDA_SAFE_CALL(cudaMemcpy(d_end_ptr, d_start_ptr, (num_groups + 1) * sizeof(int), cudaMemcpyDeviceToDevice));
 
-    PrintBuffer(d_pixpairs, h_bufferinput_size);
+    // PrintBuffer(d_pixpairs, h_bufferinput_size);
 
     printf("num_groups = %d\n", num_groups);
     while(true){
@@ -329,7 +329,7 @@ void cuda_intersect(query_context *gctx)
         CUDA_SWAP_BUFFER();
         printf("merge_count = %u\n", h_bufferinput_size);
         if(h_bufferinput_size == 0) break;
-        PrintBuffer((PixPair *)gctx->d_BufferInput, h_bufferinput_size);
+        // PrintBuffer((PixPair *)gctx->d_BufferInput, h_bufferinput_size);
         /*2. Unroll Refinement*/
 
         grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;

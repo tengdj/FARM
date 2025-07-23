@@ -742,26 +742,26 @@ void cuda_intersection(query_context *gctx)
     // return;
 
 	// printf("---------------------------------------------------------------------------------------------------\n");
-	auto transfer_start = std::chrono::high_resolution_clock::now();
+	// auto transfer_start = std::chrono::high_resolution_clock::now();
 
-	int* start_ptr = thrust::raw_pointer_cast(d_starts.data());
-	double *d_area = nullptr;
-	CUDA_SAFE_CALL(cudaMalloc((void **) &d_area, sizeof(double)));
+	// int* start_ptr = thrust::raw_pointer_cast(d_starts.data());
+	// double *d_area = nullptr;
+	// CUDA_SAFE_CALL(cudaMalloc((void **) &d_area, sizeof(double)));
 
-	grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	// grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-	rebuild_polygons<<<grid_size, block_size>>>((Segment *)gctx->d_BufferInput, pip, num_groups, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_vertices, start_ptr, d_area);
-	cudaDeviceSynchronize();
-    check_execution("kernel_refinement_segment_contain");	
+	// rebuild_polygons<<<grid_size, block_size>>>((Segment *)gctx->d_BufferInput, pip, num_groups, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_vertices, start_ptr, d_area);
+	// cudaDeviceSynchronize();
+    // check_execution("kernel_refinement_segment_contain");	
 
-	double h_area;
-	CUDA_SAFE_CALL(cudaMemcpy(&h_area, d_area, sizeof(double), cudaMemcpyDeviceToHost));
-	printf("area = %lf\n", h_area);
-	gctx->area += h_area;
+	// double h_area;
+	// CUDA_SAFE_CALL(cudaMemcpy(&h_area, d_area, sizeof(double), cudaMemcpyDeviceToHost));
+	// printf("area = %lf\n", h_area);
+	// gctx->area += h_area;
 
-    auto transfer_end = std::chrono::high_resolution_clock::now();
-	auto transfer_duration = std::chrono::duration_cast<std::chrono::milliseconds>(transfer_end - transfer_start);
-	std::cout << "transfer time: " << transfer_duration.count() << " ms" << std::endl;
+    // auto transfer_end = std::chrono::high_resolution_clock::now();
+	// auto transfer_duration = std::chrono::duration_cast<std::chrono::milliseconds>(transfer_end - transfer_start);
+	// std::cout << "transfer time: " << transfer_duration.count() << " ms" << std::endl;
 	
 	// CUDA_SAFE_CALL(cudaHostAlloc((void**)&gctx->segments, num_segments * sizeof(Segment), cudaHostAllocDefault));
 	// gctx->num_segments = num_segments;
@@ -772,6 +772,6 @@ void cuda_intersection(query_context *gctx)
 
 	CUDA_SAFE_CALL(cudaFree(d_inters_per_pair));
 	CUDA_SAFE_CALL(cudaFree(pip));
-	CUDA_SAFE_CALL(cudaFree(d_area));
+	// CUDA_SAFE_CALL(cudaFree(d_area));
     return;
 }

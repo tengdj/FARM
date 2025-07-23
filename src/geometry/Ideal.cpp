@@ -1240,26 +1240,41 @@ PartitionStatus Ideal::segment_contain(Point &p)
 
 bool Ideal::intersect(Ideal *target, query_context *ctx)
 {
+	auto start = std::chrono::high_resolution_clock::now();
 	vector<tuple<double, int, int>> candidate_pairs;
 
 	vector<int> pxs = retrieve_pixels(target->getMBB());
 	for (auto pa : pxs)
 	{
-		if(show_status(pa) != BORDER) continue;
+		if(show_status(pa) == OUT) continue;
 		box bx = get_pixel_box(get_x(pa), get_y(pa));
 		vector<int> tpxs = target->retrieve_pixels(&bx);
 		for (auto pb : tpxs)
 		{
 			// evaluate the state
-			if (target->show_status(pb) != BORDER) continue;
+			if (target->show_status(pb) == OUT) continue;
+			if(show_status(pa) == IN || target->show_status(pb) == IN) {
+				auto end = std::chrono::high_resolution_clock::now();
+				std::chrono::duration<double, std::milli> duration = end - start;
+				ctx->raster_filter_time += duration.count();
+				return true;
+			}
 			auto s_fullness = get_fullness(pa), t_fullness = target->get_fullness(pb);
 			auto s_p_apx = (decodePixelArea(pa, true) + decodePixelArea(pa, false)) / 2;
 			auto t_p_apx = (target->decodePixelArea(pb, true) + target->decodePixelArea(pb, false)) / 2;
-			auto prob = (s_p_apx + t_p_apx) / get_pixel_area();
+			auto prob = (s_p_apx + t_p_apx) / max(get_pixel_area(), target->get_pixel_area());
 
 			candidate_pairs.push_back({prob, pa, pb});
 		}
 	}
+
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double, std::milli> duration = end - start;
+	ctx->raster_filter_time += duration.count();
+
+	// // printf("%d\n", candidate_pairs.size());
+
+	start = std::chrono::high_resolution_clock::now();
 
 	sort(candidate_pairs.begin(), candidate_pairs.end(), [](const auto& a, const auto& b) {
 		return a > b;
@@ -1276,11 +1291,18 @@ bool Ideal::intersect(Ideal *target, query_context *ctx)
 				auto r2 = target->get_edge_sequence(target->get_offset(pb) + j);
 				if (segment_intersect_batch(boundary->p + r.first, target->boundary->p + r2.first, r.second, r2.second))
 				{
+					end = std::chrono::high_resolution_clock::now();
+					duration = end - start;
+					ctx->refine_time += duration.count();
 					return true;
 				}
 			}
 		}
 	}
+
+	end = std::chrono::high_resolution_clock::now();
+	duration = end - start;
+	ctx->refine_time += duration.count();
 
 	return false;
 }
@@ -1532,6 +1554,8 @@ void Ideal::intersection(Ideal *target, query_context *ctx)
 	// }
 
 	// return;
+
+	return;
 
 	for (size_t startIdx = 0; startIdx < segments.size(); startIdx++)
 	{
@@ -2325,10 +2349,10 @@ void RasterizePolygon(MyPolygon *mappedPol, Ideal *ideal, vector<vector<Point>> 
 
 bool Ideal::within(Ideal *target, query_context *ctx)
 {
-	vector<vector<Point>> sourceClippedPolygons(get_num_pixels());
-	vector<vector<Point>> targetClippedPolygons(target->get_num_pixels());
-	RasterizePolygon(this, this, sourceClippedPolygons);
-	RasterizePolygon(target, target, targetClippedPolygons);
+	// vector<vector<Point>> sourceClippedPolygons(get_num_pixels());
+	// vector<vector<Point>> targetClippedPolygons(target->get_num_pixels());
+	// RasterizePolygon(this, this, sourceClippedPolygons);
+	// RasterizePolygon(target, target, targetClippedPolygons);
 	
 	// MyPolygon::print();
 	// MyRaster::print();
@@ -2459,7 +2483,7 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 		if(!s_next_layer && !t_next_layer) break;
 	}
 
-	vector<tuple<double, int, int>> candidate_pairs;
+	vector<tuple<double, double, double, int, int>> candidate_pairs;
 	while(!pairs.empty()){
 		auto pair = pairs.front();
 		pairs.pop();
@@ -2477,9 +2501,9 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 		double dist_high = box1.max_distance(box2, true);
 	
 		double dist_apx = dist_low + mean[pf] * (dist_high - dist_low);
-		candidate_pairs.push_back({dist_apx, id1, id2});
+		candidate_pairs.push_back({dist_apx, dist_low, dist_high, id1, id2});
 	}
-
+/*
 	std::map<int, std::ofstream> outputFiles;
 
 	for(int _i = 0; _i < candidate_pairs.size(); _i ++){
@@ -2588,13 +2612,17 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 	}
 
 	return 0;
-
+*/
 	sort(candidate_pairs.begin(), candidate_pairs.end());
 	
 	double min_dist = 100000.0;
 	for(int pair_id = 0; pair_id < candidate_pairs.size(); pair_id ++){
-		auto id1 = get<1>(candidate_pairs[pair_id]);
-		auto id2 = get<2>(candidate_pairs[pair_id]);
+		double reference_dist = 100000;
+		for(int i = pair_id + 1; i < candidate_pairs.size(); i ++){
+			reference_dist = min(reference_dist, get<1>(candidate_pairs[i]));
+		}
+		auto id1 = get<3>(candidate_pairs[pair_id]);
+		auto id2 = get<4>(candidate_pairs[pair_id]);
 		for(int i = 0; i < get_num_sequences(id1); i ++){
 			auto er1 = get_edge_sequence(get_offset(id1) + i);
 			for(int j = 0; j < target->get_num_sequences(id2); j ++){
@@ -2607,6 +2635,8 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 				min_dist = min(dist, min_dist);
 				if(min_dist < ctx->within_distance){
 					return true;
+				}else if(min_dist < reference_dist){
+					return false;
 				}
 			}
 		}
