@@ -110,6 +110,8 @@ public:
 	size_t batch_size = 0;
 	int category_count = 20;
 	float merge_threshold = 0.9;
+	int NLow = 1;
+	int unroll_size = 16;
 
 	int small_threshold = 500;
 	int big_threshold = 400000;

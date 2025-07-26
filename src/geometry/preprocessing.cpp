@@ -16,7 +16,7 @@ void *rasterization_unit(void *args){
 			ideals[i]->use_hierachy = gctx->use_hierachy;
 			if(gctx->use_hierachy) {
 				ideals[i]->grid_align();
-				ideals[i]->layering();
+				ideals[i]->layering(gctx->NLow);
 			}else{
 				ideals[i]->set_status_size();
 			}

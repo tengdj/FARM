@@ -942,9 +942,9 @@ void Ideal::rasterization(int vpr)
 
 	if (use_hierachy)
 	{
-		layers[num_layers].set_status(status);
+		layers[num_layers - 1].set_status(status);
 
-		for (int i = num_layers - 1; i >= 0; i--)
+		for (int i = num_layers - 2; i >= 0; i--)
 		{
 			merge_status(layers[i]);
 			memcpy(status + layer_offset[i], layers[i].get_status(), layers[i].get_dimx() * layers[i].get_dimy() * sizeof(uint8_t));
@@ -1058,21 +1058,35 @@ void Ideal::merge_status(Hraster &r)
 	}
 }
 
-void Ideal::layering()
+void Ideal::layering(int NLow)
 {
-	num_layers = static_cast<int>(ceil(max(log(dimx) / log(2.0), log(dimy) / log(2.0))));
-	layers = new Hraster[num_layers + 1];
-	layer_offset = new uint32_t[num_layers + 1];
-	layer_info = new RasterInfo[num_layers + 1];
+	int high_layers = static_cast<int>(ceil(max(log(dimx) / log(2.0), log(dimy) / log(2.0))));
+	int low_layers = high_layers;
+	
+	double _step_x = get_step_x(), _step_y = get_step_y();
+	double _dimx = get_dimx(), _dimy = get_dimy();
+	for (int i = high_layers - 1; i >= 0; i--)
+	{
+		if(_dimx * _dimy <= NLow) break;
+		_step_x *= 2, _step_y *= 2;
+		_dimx = static_cast<int>(ceil(_dimx / 2.0)), _dimy = static_cast<int>(ceil(_dimy / 2.0));
+		low_layers --;
+	}
+
+	num_layers = high_layers - low_layers + 1;
+
+	layers = new Hraster[num_layers];
+	layer_offset = new uint32_t[num_layers];
+	layer_info = new RasterInfo[num_layers];
 
 	// process the last layer
-	layers[num_layers].init(step_x, step_y, dimx, dimy, getMBB(), true);
-	layer_info[num_layers] = {*mbr, dimx, dimy, step_x, step_y};
-	layer_offset[num_layers] = 0;
+	layers[num_layers - 1].init(step_x, step_y, dimx, dimy, getMBB(), true);
+	layer_info[num_layers - 1] = {*mbr, dimx, dimy, step_x, step_y};
+	layer_offset[num_layers - 1] = 0;
 
 	status_size = get_num_pixels();
 
-	for (int i = num_layers - 1; i >= 0; i--)
+	for (int i = num_layers - 2; i >= 0; i--)
 	{
 		double _step_x = layers[i + 1].get_step_x() * 2, _step_y = layers[i + 1].get_step_y() * 2;
 		int _dimx = static_cast<int>(ceil(layers[i + 1].get_dimx() / 2.0)), _dimy = static_cast<int>(ceil(layers[i + 1].get_dimy() / 2.0));
@@ -1140,6 +1154,80 @@ bool Ideal::contain(Point &p, query_context *ctx, bool profile)
 		ret = !ret;
 	}
 	return ret;
+}
+
+bool Ideal::contain(Ideal *target, query_context *ctx, bool profile){
+	if(!getMBB()->contain(*target->getMBB())){
+		//log("mbb do not contain");
+		return false;
+	}
+
+	vector<int> pxs = retrieve_pixels(target->getMBB());
+	int etn = 0;
+	int itn = 0;
+	for(auto p : pxs){
+		if(show_status(p) == OUT){
+			etn++;
+		}else if(show_status(p) == IN){
+			itn++;
+		}
+	}
+	if(etn == pxs.size()){
+		return false;
+	}
+	if(itn == pxs.size()){
+		return true;
+	}
+
+	vector<int> tpxs;
+
+	for(auto p : pxs){
+		box bx =  get_pixel_box(get_x(p), get_y(p));
+		tpxs = target->retrieve_pixels(&bx);
+		for(auto p2 : tpxs){
+			// an external pixel of the container intersects an internal
+			// pixel of the containee, which means the containment must be false
+			if(show_status(p) == IN) continue;
+			if(show_status(p) == OUT && target->show_status(p2) == IN){
+				return false;
+			}
+			if (show_status(p) == OUT && target->show_status(p2) == BORDER){
+				Point pix_border[5];
+				pix_border[0].x = bx.low[0]; pix_border[0].y = bx.low[1];
+				pix_border[1].x = bx.low[0]; pix_border[1].y = bx.high[1];
+				pix_border[2].x = bx.high[0]; pix_border[2].y = bx.high[1];
+				pix_border[3].x = bx.high[0]; pix_border[3].y = bx.low[1];
+				pix_border[4].x = bx.low[0]; pix_border[4].y = bx.low[1];
+				for (int e = 0; e < target->get_num_sequences(p2); e++){
+					auto edges = target->get_edge_sequence(target->get_offset(p2) + e);
+					auto pos = edges.first;
+					auto size = edges.second;
+					if (segment_intersect_batch(target->boundary->p + pos, pix_border, size, 4)){
+						return false;
+					}
+				}
+			}
+			// evaluate the state
+			if(show_status(p) == BORDER && target->show_status(p2) == BORDER){
+				for(int i = 0; i < get_num_sequences(p); i ++){
+					auto r = get_edge_sequence(get_offset(p) + i);
+					for(int j = 0; j < target->get_num_sequences(p2); j ++){
+						auto r2 = target->get_edge_sequence(target->get_offset(p2) + j);
+						if(segment_intersect_batch(boundary->p+r.first, target->boundary->p+r2.first, r.second, r2.second)){
+							return false;
+						}
+					}
+				}
+			}
+		}
+		tpxs.clear();
+	}
+	pxs.clear();
+
+	// this is the last step for all the cases, when no intersection segment is identified
+	// pick one point from the target and it must be contained by this polygon
+	Point p(target->getx(0),target->gety(0));
+	return contain(p, ctx,false);
 }
 
 PartitionStatus Ideal::segment_contain(Point &p)
@@ -1267,6 +1355,32 @@ bool Ideal::intersect(Ideal *target, query_context *ctx)
 			candidate_pairs.push_back({prob, pa, pb});
 		}
 	}
+	// for(int pair_id = 0; pair_id < candidate_pairs.size(); pair_id ++){
+	// 	auto prob = get<0>(candidate_pairs[pair_id]);
+	// 	auto pa = get<1>(candidate_pairs[pair_id]);
+	// 	auto pb = get<2>(candidate_pairs[pair_id]);
+
+	// 	if(prob > 1.0) continue;
+	// 	auto pf = classifyPixel(prob, 20);
+		
+	// 	std::string filename = "class_" + std::to_string(pf) + ".txt";
+	// 	std::ofstream outfile(filename, std::ios::app);
+
+	// 	for (int i = 0; i < get_num_sequences(pa); i++)
+	// 	{
+	// 		auto r = get_edge_sequence(get_offset(pa) + i);
+	// 		for (int j = 0; j < target->get_num_sequences(pb); j++)
+	// 		{
+	// 			auto r2 = target->get_edge_sequence(target->get_offset(pb) + j);
+	// 			if (segment_intersect_batch(boundary->p + r.first, target->boundary->p + r2.first, r.second, r2.second))
+	// 			{
+	// 				outfile << std::fixed << std::setprecision(6) << 1 << endl;
+	// 			}else{
+	// 				outfile << std::fixed << std::setprecision(6) << 0 << endl;
+	// 			}
+	// 		}
+	// 	}
+	// }
 
 	auto end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double, std::milli> duration = end - start;
@@ -2349,10 +2463,10 @@ void RasterizePolygon(MyPolygon *mappedPol, Ideal *ideal, vector<vector<Point>> 
 
 bool Ideal::within(Ideal *target, query_context *ctx)
 {
-	// vector<vector<Point>> sourceClippedPolygons(get_num_pixels());
-	// vector<vector<Point>> targetClippedPolygons(target->get_num_pixels());
-	// RasterizePolygon(this, this, sourceClippedPolygons);
-	// RasterizePolygon(target, target, targetClippedPolygons);
+	vector<vector<Point>> sourceClippedPolygons(get_num_pixels());
+	vector<vector<Point>> targetClippedPolygons(target->get_num_pixels());
+	RasterizePolygon(this, this, sourceClippedPolygons);
+	RasterizePolygon(target, target, targetClippedPolygons);
 	
 	// MyPolygon::print();
 	// MyRaster::print();
@@ -2376,8 +2490,8 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 	// 	target->get_layers()[i].print();
 	// }
 
-	uint s_level = num_layers;
-	uint t_level = target->get_num_layers();
+	uint s_level = num_layers - 1;
+	uint t_level = target->get_num_layers() - 1;
 	box source_pixel_box, target_pixel_box;
 
 	queue<pair<int, int>> pairs;
@@ -2388,7 +2502,9 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 	}
 
 	int i = 0, j = 0;
+	int level = 0;
 	while(true){
+		cout << "level: " << ++ level << endl;
 		unordered_set<int> s_pxs, t_pxs;
 		bool s_next_layer = false, t_next_layer = false;
 		double s_step = layers[i].get_step_x(), t_step = target->get_layers()[j].get_step_x();
@@ -2503,12 +2619,12 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 		double dist_apx = dist_low + mean[pf] * (dist_high - dist_low);
 		candidate_pairs.push_back({dist_apx, dist_low, dist_high, id1, id2});
 	}
-/*
+
 	std::map<int, std::ofstream> outputFiles;
 
 	for(int _i = 0; _i < candidate_pairs.size(); _i ++){
-		auto id1 = get<1>(candidate_pairs[_i]);
-		auto id2 = get<2>(candidate_pairs[_i]);
+		auto id1 = get<3>(candidate_pairs[_i]);
+		auto id2 = get<4>(candidate_pairs[_i]);
 		auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
 		auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
 		auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
@@ -2573,7 +2689,7 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 
 		double ratio = (min_dist - dist_low) / (dist_high - dist_low);
 
-		// if(pf == 9 && ratio < 0){
+		// if(pf == 1 && ratio < 0){
 		// 	printf("id = %d, dimx = %d, dimy = %d\n", id, get_dimx(), get_dimy());
 		// 	MyPolygon::print();
 		// 	MyRaster::print();
@@ -2581,14 +2697,14 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 		// 	target->MyPolygon::print();
 		// 	target->MyRaster::print();
 		// 	printf("id1 = %d %d id2 = %d %d dist = %lf dist_low = %lf dist_high = %lf\n", id1, get_fullness(id1), id2, target->get_fullness(id2), min_dist, dist_low, dist_high);
-		// 	printf("source\n");
-		// 	for(auto p : sourceClippedPolygons[id1]){
-		// 		p.print();
-		// 	}
-		// 	printf("target\n");
-		// 	for(auto p : targetClippedPolygons[id2]){
-		// 		p.print();
-		// 	}
+		// 	// printf("source\n");
+		// 	// for(auto p : sourceClippedPolygons[id1]){
+		// 	// 	p.print();
+		// 	// }
+		// 	// printf("target\n");
+		// 	// for(auto p : targetClippedPolygons[id2]){
+		// 	// 	p.print();
+		// 	// }
 		// }
 
 
@@ -2612,7 +2728,7 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 	}
 
 	return 0;
-*/
+
 	sort(candidate_pairs.begin(), candidate_pairs.end());
 	
 	double min_dist = 100000.0;
@@ -2644,3 +2760,82 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 
 	return false;
 }
+
+// bool Ideal::intersect_o(Ideal *target, query_context *ctx){
+
+// 	if(!getMBB()->intersect(*target->getMBB())){
+// 		return false;
+// 	}
+
+// 	vector<int> pxs = retrieve_pixels(target->getMBB());
+// 	int etn = 0;
+// 	int itn = 0;
+// 	vector<int> bpxs;
+// 	for(auto p : pxs){
+// 		if(show_status(p) == OUT){
+// 			etn++;
+// 		}else if(show_status(p)==IN){
+// 			itn++;
+// 		}else{
+// 			bpxs.push_back(p);
+// 		}
+// 	}
+// 	//log("%d %d %d",etn,itn,pxs.size());
+// 	if(etn == pxs.size()){
+// 		return false;
+// 	}
+// 	if(itn == pxs.size()){
+// 		return true;
+// 	}
+
+// 	vector<pair<int, int>> candidates;
+// 	vector<int> bpxs2;
+// 	for(auto p : bpxs){
+// 		bpxs2 = target->retrieve_pixels(&get_pixel_box(get_x(p), get_y(p)));
+// 		// cannot determine anything; e-i e-e e-b
+// 		if(show_status(p) == OUT){
+// 			continue;
+// 		}
+// 		for(auto p2 : bpxs2){
+
+// 			// nothing specific; i-e b-e
+// 			if(target->show_status(p2) == OUT){
+// 				continue;
+// 			}
+
+// 			// must intersect; i-i
+// 			if(show_status(p) == IN && target->show_status(p2) == IN){
+// 				return true;
+// 			}
+
+// 			// b-b b-i i-b
+// 			candidates.push_back(make_pair(p, p2));
+// 		}
+// 		bpxs2.clear();
+// 	}
+
+
+// 	for(auto pa : candidates){
+// 		int p = pa.first;
+// 		int p2 = pa.second;
+// 		if(show_status(p) == BORDER && target->show_status(p2) == BORDER){
+// 			for (int i = 0; i < get_num_sequences(p); i++){
+// 				auto r = get_edge_sequence(get_offset(p) + i);
+// 				for (int j = 0; j < target->get_num_sequences(p2); j++)
+// 				{
+// 					auto r2 = target->get_edge_sequence(target->get_offset(p2) + j);
+// 					if (segment_intersect_batch(boundary->p + r.first, target->boundary->p + r2.first, r.second, r2.second))
+// 					{
+// 						return true;
+// 					}
+// 				}
+// 			}
+// 		} else if (show_status(p) == BORDER){
+// 			return true;
+// 		} else {
+// 			return true;
+// 		}
+// 	}
+
+// 	return segment_intersect_batch(this->boundary->p, target->boundary->p, this->boundary->num_vertices, target->boundary->num_vertices);
+// }

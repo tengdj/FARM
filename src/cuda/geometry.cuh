@@ -21,7 +21,8 @@ struct PixPair
 	int pair_id = 0;
 
 	void print(){
-		printf("pa = %d pb = %d pair_id = %d\n", source_pixid, target_pixid, pair_id);
+		// printf("pa = %d pb = %d pair_id = %d\n", source_pixid, target_pixid, pair_id);
+		printf("%d, %d, %d\n", source_pixid, target_pixid, pair_id);
 	}
 };
 

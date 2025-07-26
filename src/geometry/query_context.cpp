@@ -250,6 +250,8 @@ query_context get_parameters(int argc, char **argv){
 		("vpr,v", po::value<int>(&global_ctx.vpr), "number of vertices per raster")
 		("batch_size,b", po::value<size_t>(&global_ctx.batch_size), "batch size")
 		("merge_threshold,m", po::value<float>(&global_ctx.merge_threshold), "merge threshold")
+		("NLow", po::value<int>(&global_ctx.NLow), "NLow")
+		("unorll_size,u", po::value<int>(&global_ctx.unroll_size), "unroll size")
 		;
 	po::variables_map vm;
 	try{

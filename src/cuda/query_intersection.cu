@@ -7,6 +7,8 @@
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/remove.h>
 #include <thrust/adjacent_difference.h>
+#include <thrust/unique.h>
+#include <thrust/count.h>
 
 struct Task
 {

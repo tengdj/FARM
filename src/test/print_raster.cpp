@@ -7,8 +7,8 @@ int main(int argc, char **argv)
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.geography = false;
 
-	// global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
-	global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str());
+	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
+	// global_ctx.source_ideals = load_polygon_wkt(global_ctx.source_path.c_str());
 	
 	// preprocess(&global_ctx);
 
@@ -23,7 +23,7 @@ int main(int argc, char **argv)
 		// 	p->get_boundary()->p[i].y = (p->get_boundary()->p[i].y / y_max) * 120 - 60.0;
 		// }
 		// p->MyPolygon::print();
-		if(p->get_num_vertices() > 500)
+		// if(p->get_num_vertices() > 500)
 			p->MyPolygon::print();
 	}
 

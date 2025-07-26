@@ -24,7 +24,7 @@ void cuda_create_buffer(query_context *gctx)
         num_gridline_offset += ideal->get_vertical()->get_num_grid_lines();
         num_gridline_nodes += ideal->get_vertical()->get_num_crosses();
         if(gctx->use_hierachy){
-            num_layers += ideal->get_num_layers() + 1;
+            num_layers += ideal->get_num_layers();
         }
     }
     for (auto &ideal : gctx->target_ideals)
@@ -38,7 +38,7 @@ void cuda_create_buffer(query_context *gctx)
         num_gridline_offset += ideal->get_vertical()->get_num_grid_lines();
         num_gridline_nodes += ideal->get_vertical()->get_num_crosses();
         if(gctx->use_hierachy){
-            num_layers += ideal->get_num_layers() + 1;
+            num_layers += ideal->get_num_layers();
         }
     }
 
@@ -168,7 +168,8 @@ void preprocess_for_gpu(query_context *gctx)
         gnidx += gridline_nodes_size;
 
         if(gctx->use_hierachy){
-            uint layer_size = source->get_num_layers() + 1;
+            uint layer_size = source->get_num_layers();
+            assert(layer_size > 0);
             memcpy(gctx->h_layer_info + lidx, source->get_layer_info(), layer_size * sizeof(RasterInfo));
             memcpy(gctx->h_layer_offset + lidx, source->get_layer_offset(), layer_size * sizeof(uint32_t));
             idealoffset.layer_start = lidx;
@@ -213,7 +214,8 @@ void preprocess_for_gpu(query_context *gctx)
         gnidx += gridline_nodes_size;
 
         if(gctx->use_hierachy){
-            uint layer_size = target->get_num_layers() + 1;
+            uint layer_size = target->get_num_layers();
+            assert(layer_size > 0);
             memcpy(gctx->h_layer_info + lidx, target->get_layer_info(), layer_size * sizeof(RasterInfo));
             memcpy(gctx->h_layer_offset + lidx, target->get_layer_offset(), layer_size * sizeof(uint32_t));
             idealoffset.layer_start = lidx;
@@ -240,8 +242,8 @@ void preprocess_for_gpu(query_context *gctx)
         CUDA_SAFE_CALL(cudaMemcpy(gctx->d_layer_offset, gctx->h_layer_offset, gctx->num_layers * sizeof(uint32_t), cudaMemcpyHostToDevice));
     }
 
-    float h_mean[10] = {0.0, 0.540068, 0.460776, 0.404151, 0.388371, 0.282591, 0.223975, 0.15, 0.1, 0.0};
-	float h_stddev[10] = {0.0, 0.204095, 0.17973, 0.174895, 0.191615, 0.152102, 0.134357, 0.1, 0.08, 0.0};
+    float h_mean[20] = {0.0, 0.7, 0.62, 0.55, 0.52, 0.45, 0.42, 0.4, 0.38, 0.34, 0.31, 0.28, 0.25, 0.22, 0.18, 0.15, 0.1, 0.05, 0.0 ,0.0};
+	float h_stddev[20] = {0.0, 0.2, 0.19, 0.18, 0.17, 0.16, 0.16, 0.15, 0.15, 0.14, 0.13, 0.13, 0.12, 0.12, 0.11, 0.11, 0.1, 0.09, 0.08, 0.0};
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_mean, sizeof(h_mean)));
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_mean, h_mean, sizeof(h_mean), cudaMemcpyHostToDevice));
@@ -348,10 +350,10 @@ void preprocess_for_gpu(query_context *gctx)
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_degree_per_kilometer_longitude_arr, h_degree_per_kilometer_longitude_arr, sizeof(h_degree_per_kilometer_longitude_arr), cudaMemcpyHostToDevice));
 
     // GPU Buffer
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 4UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 8UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferinput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 4UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 8UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferoutput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
 

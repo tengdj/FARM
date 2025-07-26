@@ -352,4 +352,27 @@ inline uint8_t classifyPixel(double area1, double pixelArea1, double area2, doub
 	return idx;
 }
 
+inline uint8_t classifyPixel(double ratio, int count)
+{
+	// area calculation has precision error
+	if (fabs(ratio - 1.0) < 1e-9)
+	{
+		// full
+		return count - 1;
+	}
+
+	if (fabs(ratio) < 1e-9)
+	{
+		// empty
+		return 0;
+	}
+
+	int idx = static_cast<int>(ceil(ratio * (count - 2)));
+	if (idx >= count)
+		idx = count - 1; // 防止越界
+
+	assert(idx < 256);
+	return idx;
+}
+
 #endif /* SRC_GEOMETRY_GEOMETRY_COMPUTATION_H_ */

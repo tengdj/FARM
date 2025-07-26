@@ -4,6 +4,7 @@
 #include <thrust/sort.h>
 #include <thrust/device_ptr.h>
 #include <thrust/adjacent_difference.h>
+#include <thrust/count.h>
 
 struct PixelPairWithProb
 {
@@ -13,7 +14,8 @@ struct PixelPairWithProb
 	int pair_id = 0;
 
     void print(){
-        printf("prob = %lf, pa = %d, pb = %d, pair_id = %d\n", probability, source_pixid, target_pixid, pair_id);
+        // printf("prob = %lf, pa = %d, pb = %d, pair_id = %d\n", probability, source_pixid, target_pixid, pair_id);
+        printf("%lf, %d, %d, %d\n", probability, source_pixid, target_pixid, pair_id);
     }
 };
 
@@ -84,6 +86,7 @@ __global__ void kernel_filter_intersect(pair<uint32_t,uint32_t>* pairs, IdealOff
                     if(source_status == IN || target_status == IN){
                         res[x] = true;
                     }else{
+                        assert(source_status == BORDER && target_status == BORDER);
                         int idx = atomicAdd(pp_size, 1U);
                         pixpairs[idx] = {pa, pb, x};
                     }
@@ -118,14 +121,14 @@ __global__ void kernel_calculate_probability(PixPair *pixpairs, pair<uint32_t, u
         double pb_low = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, true);
         double pb_high = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, false);
         double pb_apx = (pb_low + pb_high) / 2;
-        double probability = (pa_apx + pb_apx) / max(pa_pixelArea, pb_pixelArea);
+        double probability = min(1.0, (pa_apx + pb_apx) / max(pa_pixelArea, pb_pixelArea));
 
         int idx = atomicAdd(p_pixpairs_size, 1U);
         p_pixpairs[idx] = {probability, pa, pb, pair_id};
     }
 }
 
-__global__ void kernel_merge_intersect(PixelPairWithProb *pixpairs, int *pixelpairidx, int *pixelpairsize, int pairsize, PixPair *buffer, uint *buffer_size, bool *res, double threshold){
+__global__ void kernel_merge_intersect(PixelPairWithProb *pixpairs, int *pixelpairidx, int *pixelpairsize, int pairsize, PixPair *buffer, uint *buffer_size, bool *res, double threshold, int *times){
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0)
     {
@@ -133,21 +136,36 @@ __global__ void kernel_merge_intersect(PixelPairWithProb *pixpairs, int *pixelpa
         int end = pixelpairidx[tid + 1];
         int pairId = pixpairs[start].pair_id;
 
-        if(res[tid]){
+        if(res[pairId]){
             pixelpairidx[tid] = end;
             return;
         }
+
+        times[tid] ++;
         
         double obj_prob = 1;
         for(int i = start; i < end; i ++){
             double pix_prob = pixpairs[i].probability;
+            // if(pix_prob >= 1.0) {
+            //     res[tid] = true;
+            //     pixelpairidx[tid] = end;
+            //     return;
+            // }
+            assert(pix_prob > 0.0);
             obj_prob = obj_prob * (1 - pix_prob);
-            if(1 - obj_prob >= threshold) {
-                pixelpairidx[tid] = i;
-                return;
-            } 
+            // if(obj_prob <= 0.0){
+            //     for(int j = start; j < end; j ++){
+            //         printf("pix_prob = %lf\t", pixpairs[i].probability);
+            //     }
+            //     printf("\n");
+            // }
+            // assert(obj_prob > 0.0);
             int idx = atomicAdd(buffer_size, 1);
             buffer[idx] = {pixpairs[i].source_pixid, pixpairs[i].target_pixid, pairId};
+            if(1 - obj_prob >= threshold) { 
+                pixelpairidx[tid] = i + 1;
+                return;
+            } 
         }
 
         pixelpairidx[tid] = end;
@@ -183,7 +201,7 @@ __global__ void kernel_unroll_intersect(PixPair *pixpairs, pair<uint32_t, uint32
 	uint s_vertices_start = source.vertices_start;
 	uint t_vertices_start = target.vertices_start;
 
-	const int max_size = 32;
+	const int max_size = 16;
 
 	for (int i = 0; i < s_num_sequence; ++i)
 	{
@@ -210,20 +228,149 @@ __global__ void kernel_unroll_intersect(PixPair *pixpairs, pair<uint32_t, uint32
 	}
 }
 
-__global__ void kernel_refinement_intersect(Task *tasks, Point *d_vertices, uint *size, bool *res)
+// __global__ void kernel_refinement_intersect(Task *tasks, pair<uint32_t,uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *info, Point *d_vertices, uint32_t *gridline_offset,
+// 												double *gridline_nodes, uint *size, bool *res)
+// {
+// 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+// 	if (x >= *size) return;
+	
+// 	uint s1 = tasks[x].s_start;
+// 	uint s2 = tasks[x].t_start;
+// 	uint len1 = tasks[x].s_length;
+// 	uint len2 = tasks[x].t_length;
+// 	int pair_id = tasks[x].pair_id;
+//     pair<uint32_t, uint32_t> pair = pairs[pair_id];
+//     IdealOffset offset = idealoffset[pair.first];
+
+//     if(gpu_segment_intersect_batch((d_vertices + s1), (d_vertices + s2), len1, len2)){
+// 	    res[pair_id] = true;
+//     }else{
+//         const box mbr = info[pair.first].mbr;
+//         const double step_x = info[pair.first].step_x;
+//         const double step_y = info[pair.first].step_y;
+//         const int dimx = info[pair.first].dimx;
+//         const int dimy = info[pair.first].dimy;
+
+//         Point p = (d_vertices + s2)[0];
+       
+//         int xoff = gpu_get_offset_x(mbr.low[0], p.x, step_x, dimx);
+//         int yoff = gpu_get_offset_y(mbr.low[1], p.y, step_y, dimy);
+//         const box bx = gpu_get_pixel_box(xoff, yoff, mbr.low[0], mbr.low[1], step_x, step_y);
+
+//         bool ret = false;
+
+//         for(int i = 0; i < len1; i ++){
+//             Point v1 = (d_vertices + s1)[i];
+//             Point v2 = (d_vertices + s1)[i + 1];
+//             if ((v1.y >= p.y) != (v2.y >= p.y)){
+//                 double int_x = (v2.x - v1.x) * (p.y - v1.y) / (v2.y - v1.y) + v1.x;
+//                 if(p.x <= int_x && bx.high[0]){
+//                     ret = !ret;
+//                 }
+//             }
+//         }
+
+//         int nc = 0;
+//         const uint32_t gridline_start = offset.gridline_offset_start;
+//         const uint32_t i_start = (gridline_offset + gridline_start)[xoff + 1];
+//         const uint32_t i_end = (gridline_offset + gridline_start)[xoff + 2];
+
+//         nc = binary_search_count((gridline_nodes + offset.gridline_nodes_start), i_start, i_end, p.y);
+//         if(pair_id == 11) printf("POINT (%lf %lf) ret = %d nc = %d\n", p.x, p.y, ret, nc);
+//         if(nc % 2 == 1){
+//             ret = !ret;
+//         }
+//         if(ret) res[pair_id] = true;
+//     }
+//     return;
+// }
+
+__global__ void kernel_refinement_intersect2(PixPair *pixpairs, pair<uint32_t,uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *info, uint8_t *status,
+											 uint32_t *es_offset, EdgeSeq *edge_sequences, Point *d_vertices, 
+                                             uint32_t *gridline_offset, double *gridline_nodes, uint *size, bool *res)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	if (x >= *size) return;
-	
-	uint s1 = tasks[x].s_start;
-	uint s2 = tasks[x].t_start;
-	uint len1 = tasks[x].s_length;
-	uint len2 = tasks[x].t_length;
-	int pair_id = tasks[x].pair_id;
 
-    if(gpu_segment_intersect_batch((d_vertices + s1), (d_vertices + s2), len1, len2)){
-	    res[pair_id] = true;
+	int pair_id = pixpairs[x].pair_id;
+
+    pair<uint32_t, uint32_t> pair = pairs[pair_id];
+    const uint32_t src_idx = info[pair.first].step_x > info[pair.second].step_x ? pair.first : pair.second;
+    const uint32_t tar_idx = info[pair.first].step_x > info[pair.second].step_x ? pair.second : pair.first;
+	int p = info[pair.first].step_x > info[pair.second].step_x ? pixpairs[x].source_pixid : pixpairs[x].target_pixid;
+	int p2 = info[pair.first].step_x > info[pair.second].step_x ? pixpairs[x].target_pixid : pixpairs[x].source_pixid;
+
+	const IdealOffset source = idealoffset[src_idx];
+    const IdealOffset target = idealoffset[tar_idx];
+
+    uint s_offset_start = source.offset_start;
+	uint t_offset_start = target.offset_start;
+	uint s_edge_sequences_start = source.edge_sequences_start;
+	uint t_edge_sequences_start = target.edge_sequences_start;
+
+	int s_num_sequence = (es_offset + s_offset_start)[p + 1] - (es_offset + s_offset_start)[p];
+	int t_num_sequence = (es_offset + t_offset_start)[p2 + 1] - (es_offset + t_offset_start)[p2];
+	uint s_vertices_start = source.vertices_start;
+	uint t_vertices_start = target.vertices_start;
+
+    for(int i = 0; i < s_num_sequence; i ++){
+        EdgeSeq r = (edge_sequences + s_edge_sequences_start)[(es_offset + s_offset_start)[p] + i];
+		for (int j = 0; j < t_num_sequence; ++j){
+	 		EdgeSeq r2 = (edge_sequences + t_edge_sequences_start)[(es_offset + t_offset_start)[p2] + j];
+            if(gpu_segment_intersect_batch((d_vertices + s_vertices_start + r.start), (d_vertices + t_vertices_start + r2.start), r.length, r2.length)){
+                res[pair_id] = true;
+                // return;
+            }
+        }	
     }
+
+    const box mbr = info[src_idx].mbr;
+    const double step_x = info[src_idx].step_x;
+    const double step_y = info[src_idx].step_y;
+    const int dimx = info[src_idx].dimx;
+    const int dimy = info[src_idx].dimy;
+
+    for(int j = 0; j < t_num_sequence; j ++){
+        EdgeSeq r2 = (edge_sequences + t_edge_sequences_start)[(es_offset + t_offset_start)[p2] + j];
+        Point pt = (d_vertices + t_vertices_start)[r2.start];
+        int xoff = gpu_get_offset_x(mbr.low[0], pt.x, step_x, dimx);
+        int yoff = gpu_get_offset_y(mbr.low[1], pt.y, step_y, dimy);
+        const box bx = gpu_get_pixel_box(xoff, yoff, mbr.low[0], mbr.low[1], step_x, step_y);
+
+        bool ret = false;
+        // if(pair_id == 11 && abs(pt.x - 83.872009) < 1e-9) std::printf("POINT (%lf %lf) ret = %d\n", pt.x, pt.y, ret);
+        for(int i = 0; i < s_num_sequence; i ++){
+            EdgeSeq r = (edge_sequences + s_edge_sequences_start)[(es_offset + s_offset_start)[p] + i];
+            for(uint s = 0; s < r.length; s ++){
+                Point v1 = (d_vertices + s_vertices_start + r.start)[s];
+                Point v2 = (d_vertices + s_vertices_start + r.start)[s + 1];
+
+                if ((v1.y >= pt.y) != (v2.y >= pt.y)){
+                    double int_x = (v2.x - v1.x) * (pt.y - v1.y) / (v2.y - v1.y) + v1.x;
+                    if(pt.x <= int_x && int_x <= bx.high[0]){
+                        ret = !ret;
+                    }
+                }
+            }           
+        }
+        
+        int nc = 0;
+        const uint32_t gridline_start = source.gridline_offset_start;
+        const uint32_t i_start = (gridline_offset + gridline_start)[xoff + 1];
+        const uint32_t i_end = (gridline_offset + gridline_start)[xoff + 2];
+
+        nc = binary_search_count((gridline_nodes + source.gridline_nodes_start), i_start, i_end, pt.y);
+        if(pair_id == 466776) std::printf("POINT (%lf %lf) ret = %d nc = %d\n", pt.x, pt.y, ret, nc);
+        if(nc % 2 == 1){
+            ret = !ret;
+        }
+        // if(pair_id == 15) printf("ret = %d\n", ret);
+        if(ret) {
+            res[pair_id] = true;
+            // return;
+        }
+    }
+
     return;
 }
 
@@ -244,6 +391,8 @@ void cuda_intersect(query_context *gctx)
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_res, batch_size * sizeof(bool)));
     CUDA_SAFE_CALL(cudaMemset(d_res, 0, batch_size * sizeof(bool)));
 
+    auto raster_filter_start = std::chrono::high_resolution_clock::now();
+
 	/*1. Raster Model Filtering*/
     const int block_size = BLOCK_SIZE;
     int grid_size = (batch_size + block_size - 1) / block_size;
@@ -251,6 +400,10 @@ void cuda_intersect(query_context *gctx)
     kernel_filter_intersect<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, batch_size, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->category_count, d_res);
     cudaDeviceSynchronize();
     check_execution("kernel_filter_intersect");
+
+    auto raster_filter_end = std::chrono::high_resolution_clock::now();
+    auto raster_filter_duration = std::chrono::duration_cast<std::chrono::milliseconds>(raster_filter_end - raster_filter_start);
+    std::cout << "raster filter time: " << raster_filter_duration.count() << " ms" << std::endl;
 
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
     printf("h_buffer_size = %u\n", h_bufferinput_size);
@@ -312,49 +465,73 @@ void cuda_intersect(query_context *gctx)
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_pixpairs, h_bufferinput_size * sizeof(PixelPairWithProb)));
     CUDA_SAFE_CALL(cudaMemcpy(d_pixpairs, gctx->d_BufferInput, h_bufferinput_size * sizeof(PixelPairWithProb), cudaMemcpyDeviceToDevice));
 
+    int *d_times = nullptr; 
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_times, num_groups * sizeof(int)));
+    CUDA_SAFE_CALL(cudaMemset(d_times, 0, num_groups * sizeof(int)));
+
     int *d_end_ptr = nullptr; 
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_end_ptr, (num_groups + 1) * sizeof(int)));
     CUDA_SAFE_CALL(cudaMemcpy(d_end_ptr, d_start_ptr, (num_groups + 1) * sizeof(int), cudaMemcpyDeviceToDevice));
 
     // PrintBuffer(d_pixpairs, h_bufferinput_size);
-
+    // printf("------------------------------------\n");
+    // return;
+    auto iterative_refine_start = std::chrono::high_resolution_clock::now();
+    int iterative_round = 0;
     printf("num_groups = %d\n", num_groups);
+    printf("num_intersect = %d\n", gctx->found);
+    printf("num_pairs = %d\n", gctx->num_pairs);
     while(true){
+        iterative_round ++;
         grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-        kernel_merge_intersect<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, d_end_ptr, num_groups, (PixPair*)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_res, gctx->merge_threshold);
+        kernel_merge_intersect<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, d_end_ptr, num_groups, (PixPair*)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_res, gctx->merge_threshold, d_times);
         cudaDeviceSynchronize();
         check_execution("kernel_calculate_probability");
 
         CUDA_SWAP_BUFFER();
-        printf("merge_count = %u\n", h_bufferinput_size);
+        // printf("merge_count = %u\n", h_bufferinput_size);
         if(h_bufferinput_size == 0) break;
         // PrintBuffer((PixPair *)gctx->d_BufferInput, h_bufferinput_size);
-        /*2. Unroll Refinement*/
+        // printf("------------------------------------\n");
+
+        // /*2. Unroll Refinement*/
 
         grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-        kernel_unroll_intersect<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_status, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
+        // kernel_unroll_intersect<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_status, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
+        kernel_refinement_intersect2<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices, gctx->d_gridline_offset, gctx->d_gridline_nodes, gctx->d_bufferinput_size, d_res);
         cudaDeviceSynchronize();
         check_execution("kernel_unroll_intersect");
 
-        CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-        printf("unroll: %u\n", h_bufferoutput_size);
+        // CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
+        // printf("unroll: %u\n", h_bufferoutput_size);
         /*3. Refinement step*/
 
-        grid_size = (h_bufferoutput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        // grid_size = (h_bufferoutput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-        kernel_refinement_intersect<<<grid_size, block_size>>>((Task *)gctx->d_BufferOutput, gctx->d_vertices, gctx->d_bufferoutput_size, d_res);
-        cudaDeviceSynchronize();
-        check_execution("kernel_refinement_intersect");
+        // kernel_refinement_intersect<<<grid_size, block_size>>>((Task *)gctx->d_BufferOutput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_vertices, gctx->d_gridline_offset, gctx->d_gridline_nodes, gctx->d_bufferoutput_size, d_res);
+        // cudaDeviceSynchronize();
+        // check_execution("kernel_refinement_intersect");
 
-        CUDA_SWAP_BUFFER();
+        // CUDA_SWAP_BUFFER();
     }
+    auto iterative_refine_end = std::chrono::high_resolution_clock::now();
+    auto iterative_refine_duration = std::chrono::duration_cast<std::chrono::milliseconds>(iterative_refine_end - iterative_refine_start);
+    std::cout << "iterative refine time: " << iterative_refine_duration.count() << " ms" << std::endl;
+    printf("iterative round = %d\n", iterative_round);
     grid_size = (batch_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    int *h_times = new int[num_groups];
+    CUDA_SAFE_CALL(cudaMemcpy(h_times, d_times, num_groups * sizeof(int), cudaMemcpyDeviceToHost));
+    for(int i = 0; i < num_groups; i ++){
+        printf("%d\n", h_times[i]);
+    }
+
 
     statistic_result<<<grid_size, block_size>>>(d_res, batch_size, gctx->d_result);
     cudaDeviceSynchronize();
-    check_execution("statistic_result");
+    check_execution("statistic_result"); 
 
 	// int8_t* h_Buffer = new int8_t[batch_size];
     // CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, gctx->d_flags, batch_size * sizeof(int8_t), cudaMemcpyDeviceToHost));
@@ -371,5 +548,6 @@ void cuda_intersect(query_context *gctx)
 	uint h_result;
 	CUDA_SAFE_CALL(cudaMemcpy(&h_result, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
 	gctx->found += h_result;
+    printf("num_intersect = %d\n", gctx->found);
     return;
 }

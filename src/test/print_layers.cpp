@@ -8,6 +8,7 @@ int main(int argc, char **argv)
 	global_ctx.use_ideal = true;
 	global_ctx.use_hierachy = true;
 	global_ctx.num_threads = 128;
+	global_ctx.NLow = 20;
 	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(), global_ctx);
 
 	preprocess(&global_ctx);

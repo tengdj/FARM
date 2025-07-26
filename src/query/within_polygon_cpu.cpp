@@ -55,6 +55,11 @@ void *query(void *args){
             auto targetIdx = pair.second;
             Ideal *source = gctx->source_ideals[sourceIdx];
             Ideal *target = gctx->source_ideals[targetIdx];
+			if(source->contain(target, ctx->global_ctx)) continue;
+			if(target->contain(source, ctx->global_ctx)) continue;
+			if(source->intersect(target, ctx->global_ctx)) continue;
+			if(target->intersect(source, ctx->global_ctx)) continue;
+
             ctx->found += source->within(target, ctx);
 			ctx->report_progress();
 		}
@@ -84,7 +89,8 @@ int main(int argc, char** argv) {
 	query_context ctx[global_ctx.num_threads];
 	for (int i = 0; i < global_ctx.num_threads; i++)
 	{
-		ctx[i] = query_context(global_ctx);
+		ctx[i] = query_context();
+		ctx[i].global_ctx = &global_ctx;
 		ctx[i].thread_id = i;
 	}
 	for (int i = 0; i < global_ctx.num_threads; i++)

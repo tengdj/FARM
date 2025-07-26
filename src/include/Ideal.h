@@ -151,7 +151,7 @@ public:
 	double decodePixelArea(int id, bool isLow);
 	uint8_t encodePixelArea(double area);
 
-	void layering();
+	void layering(int NLow);
 	Hraster *get_layers() { return layers; }
 	uint get_num_layers() { return num_layers; }
 	uint get_status_size() { return status_size; }
@@ -169,8 +169,10 @@ public:
 
 	// query functions
 	bool contain(Point &p, query_context *ctx, bool profile = false);
+	bool contain(Ideal *ideal, query_context *ctx, bool profile = false);
 	PartitionStatus segment_contain(Point &p);
 	bool intersect(Ideal *target, query_context *ctx);
+	bool intersect_o(Ideal *target, query_context *ctx);
 	// bool intersect(MyPolygon *target, query_context *ctx);
 	void intersection(Ideal *target, query_context *ctx);
 	double distance(Point &p, query_context *ctx, bool profile = false);
