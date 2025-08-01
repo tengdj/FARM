@@ -11,6 +11,15 @@ enum PartitionStatus{
 	IN = 2
 };
 
+class RasterInfo{
+public:
+	box mbr;
+	int dimx = 0;
+	int dimy = 0;
+	double step_x = 0.0;
+	double step_y = 0.0;
+};
+
 class MyRaster : virtual public BaseGeometry{
     pthread_mutex_t raster_lock;
     pthread_mutex_t qtree_lock;
@@ -20,6 +29,8 @@ protected:
 	double step_y = 0.0;
 	int dimx = 0;
 	int dimy = 0;
+    uint status_size = 0;
+    int category_count = 20;
 public:
     MyRaster() {
         pthread_mutex_init(&raster_lock, NULL);
@@ -35,8 +46,12 @@ public:
 	int get_offset_x(double x);
 	int get_offset_y(double y);
 
-    void set_status(int id, PartitionStatus status);
+    void set_status(int id, uint8_t status);
+    void set_status(uint8_t *_status) { status = _status; }
     PartitionStatus show_status(int id);
+    uint8_t* get_status() {return status;}
+    uint8_t get_fullness(int id) { return status[id]; };
+    void set_status_size();
 
 	vector<int> get_intersect_pixels(box *pix);
     vector<int> get_closest_pixels(box &target);
@@ -50,15 +65,16 @@ public:
     vector<int> expand_radius(int lowx, int highx, int lowy, int highy, int step);
 	vector<int> expand_radius(int center, int step);
 
+    void grid_align();
+    void merge(int level);
+    
     // statistic collection
     size_t get_num_pixels();
     size_t get_num_pixels(PartitionStatus status);
     // double get_pixel_portion(PartitionStatus status);
 
-
     // utility
     void print();
-
     box *extractMER(int starter);
 
     // get functions
@@ -73,6 +89,8 @@ public:
 			return min(step_x, step_y);
 		}
 	}
+    inline double get_pixel_area() { return step_x * step_y; }
 };
+
 
 #endif // MYRASTER_H

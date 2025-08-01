@@ -3,29 +3,16 @@
 
 bool print_debug = false;
 
-box::box(box *b){
-	low[0] = b->low[0];
-	high[0] = b->high[0];
-	low[1] = b->low[1];
-	high[1] = b->high[1];
-}
-box::box (double lowx, double lowy, double highx, double highy){
-	low[0] = lowx;
-	low[1] = lowy;
-	high[0] = highx;
-	high[1] = highy;
-}
-
 bool box::valid(){
 	return low[0] <= high[0] && low[1] <= high[1];
 
 }
 
 void box::update(Point &p){
-	low[0] = min(low[0], p.x);
-	low[1] = min(low[1], p.y);
-	high[0] = max(high[0], p.x);
-	high[1] = max(high[1], p.y);
+	low[0] = min(low[0], (double)p.x);
+	low[1] = min(low[1], (double)p.y);
+	high[0] = max(high[0], (double)p.x);
+	high[1] = max(high[1], (double)p.y);
 }
 
 void box::update(box &b){
@@ -131,17 +118,34 @@ double box::distance(box &t, bool geography){
 }
 
 double box::max_distance(box &target, bool geography){
-	double highx = max(high[0],target.high[0]);
-	double highy = max(high[1],target.high[1]);
-	double lowx = min(low[0], target.low[0]);
-	double lowy = min(low[1], target.low[1]);
-	double dx = highx - lowx;
-	double dy = highy - lowy;
-	if(geography){
-		dy = dy/degree_per_kilometer_latitude;
-		dx = dx/degree_per_kilometer_longitude(low[1]);
+	Point vertices1[4] = {
+		Point(low[0], low[1]),
+		Point(low[0], high[1]),  
+		Point(high[0], low[1]),  
+		Point(high[0], high[1])	 
+	};
+
+	Point vertices2[4] = {
+		Point(target.low[0], target.low[1]), 
+		Point(target.low[0], target.high[1]), 
+		Point(target.high[0], target.low[1]), 
+		Point(target.high[0], target.high[1])
+	};
+	double max_dist = 0.0;
+	for (int i = 0; i < 4; i ++){
+		for (int j = 0; j < 4; j ++){
+			double dx = vertices1[i].x - vertices2[j].x;
+			double dy = vertices1[i].y - vertices2[j].y;
+			if (geography)
+			{
+				dy = dy / degree_per_kilometer_latitude;
+				dx = dx / degree_per_kilometer_longitude(low[1]);
+			}
+			max_dist = max(max_dist, sqrt(dx * dx + dy * dy));
+		}
 	}
-	return sqrt(dx * dx + dy * dy);
+
+	return max_dist;
 }
 
 // point to box

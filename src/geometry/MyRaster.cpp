@@ -1,4 +1,5 @@
-#include "../include/MyRaster.h"
+#include "MyRaster.h"
+#include "UniversalGrid.h"
 
 MyRaster::~MyRaster(){
 	if(status) delete []status;
@@ -29,9 +30,6 @@ void MyRaster::init_raster(int num_pixels){
 		step_y = 0.00001;
 		dimy = (mbr->high[1]-mbr->low[1])/step_y+1;
 	}
-
-	status = new uint8_t[(dimx+1)*(dimy+1) / 4 + 1];
-    memset(status, 0, ((dimx+1)*(dimy+1) / 4 + 1) * sizeof(uint8_t));
 }
 
 void MyRaster::init_raster(int dx, int dy){
@@ -49,9 +47,6 @@ void MyRaster::init_raster(int dx, int dy){
 		step_y = 0.00001;
 		dimy = (mbr->high[1]-mbr->low[1])/step_y+1;
 	}
-
-	status = new uint8_t[(dimx+1)*(dimy+1) / 4 + 1];
-    memset(status, 0, ((dimx+1)*(dimy+1) / 4 + 1) * sizeof(uint8_t));
 }
 
 void MyRaster::print(){
@@ -59,8 +54,8 @@ void MyRaster::print(){
 	MyMultiPolygon *borderpolys = new MyMultiPolygon();
 	MyMultiPolygon *outpolys = new MyMultiPolygon();
 
-	for(int i=0;i<=dimx;i++){
-		for(int j=0;j<=dimy;j++){
+	for(int i=0;i<dimx;i++){
+		for(int j=0;j<dimy;j++){
 			box bx = get_pixel_box(i, j);
 			MyPolygon *m = MyPolygon::gen_box(bx);
 			if(show_status(get_id(i, j)) == BORDER){
@@ -173,20 +168,20 @@ box *MyRaster::extractMER(int starter){
 }
 
 int MyRaster::get_id(int x, int y){
-	assert(x>=0&&x<=dimx);
-	assert(y>=0&&y<=dimy);
-	return y * (dimx+1) + x;
+	assert(x>=0&&x<dimx);
+	assert(y>=0&&y<dimy);
+	return y * dimx + x;
 }
 
 // from id to pixel x
 int MyRaster::get_x(int id){
-	return id % (dimx+1);
+	return id % dimx;
 }
 
 // from id to pixel y
 int MyRaster::get_y(int id){
-	assert((id / (dimx+1)) <= dimy);
-	return id / (dimx+1);
+	assert((id / dimx) < dimy);
+	return id / dimx;
 }
 
 // the range must be [0, dimx]
@@ -194,36 +189,58 @@ int MyRaster::get_offset_x(double xval){
 	assert(mbr);
 	assert(step_x>0.000000000001 && "the width per pixel must not be 0");
 	int x = double_to_int((xval-mbr->low[0])/step_x);
-	return min(max(x, 0), dimx);
+	return min(max(x, 0), dimx - 1);
 }
 // the range must be [0, dimy]
 int MyRaster::get_offset_y(double yval){
 	assert(mbr);
 	assert(step_y>0.000000000001 && "the hight per pixel must not be 0");
 	int y = double_to_int((yval-mbr->low[1])/step_y);
-	return min(max(y, 0), dimy);
+	return min(max(y, 0), dimy - 1);
 }
 
-void MyRaster::set_status(int id, PartitionStatus state){
-	int pos = id % 4 * 2;   // The multiplication by 2 is because each status occupies 2 bits.
-	if(state == OUT){
-		status[id / 4] &= ~((uint8_t)3 << pos);
-	}else if(state == IN){
-		status[id / 4] |= ((uint8_t)3 << pos);
-	}else{
-		status[id / 4] &= ~((uint8_t)1 << pos);
-		status[id / 4] |= ((uint8_t)1 << (pos + 1));
-	}
+// void MyRaster::set_status(int id, PartitionStatus state){
+// 	int pos = id % 4 * 2;   // The multiplication by 2 is because each status occupies 2 bits.
+// 	if(state == OUT){
+// 		status[id / 4] &= ~((uint8_t)3 << pos);
+// 	}else if(state == IN){
+// 		status[id / 4] |= ((uint8_t)3 << pos);
+// 	}else{
+// 		status[id / 4] &= ~((uint8_t)1 << pos);
+// 		status[id / 4] |= ((uint8_t)1 << (pos + 1));
+// 	}
+// }
+
+void MyRaster::set_status(int id, uint8_t state){   // The multiplication by 2 is because each status occupies 2 bits.
+	status[id] = state;
 }
+
+// PartitionStatus MyRaster::show_status(int id){
+// 	uint8_t st = status[id / 4];
+// 	int pos = id % 4 * 2;   // The multiplication by 2 is because each status occupies 2 bits.	
+// 	st &= ((uint8_t)3 << pos);
+// 	st >>= pos;
+// 	if(st == 0) return OUT;
+// 	if(st == 3) return IN;
+// 	return BORDER;
+// }
 
 PartitionStatus MyRaster::show_status(int id){
-	uint8_t st = status[id / 4];
-	int pos = id % 4 * 2;   // The multiplication by 2 is because each status occupies 2 bits.	
-	st &= ((uint8_t)3 << pos);
-	st >>= pos;
-	if(st == 0) return OUT;
-	if(st == 3) return IN;
-	return BORDER;
+	// if(id >= get_num_pixels()){
+	// 	log("id = %d num_pixels = %d\n", id, get_num_pixels());
+	// }
+	// assert(id < get_num_pixels());
+	if (status[id] == 0)
+		return OUT;
+	else if (status[id] == category_count - 1)
+		return IN;
+	else
+		return BORDER;
+}
+
+void MyRaster::set_status_size()
+{
+	status_size = dimx * dimy;
 }
 
 vector<int> MyRaster::get_intersect_pixels(box *b){
@@ -307,17 +324,17 @@ box MyRaster::get_pixel_box(int x, int y){
 int MyRaster::get_pixel_id(Point &p){
 	int xoff = get_offset_x(p.x);
 	int yoff = get_offset_y(p.y);
-	assert(xoff <= dimx);
-	assert(yoff <= dimy);
+	assert(xoff < dimx);
+	assert(yoff < dimy);
 	return get_id(xoff, yoff);
 }
 
 vector<int> MyRaster::retrieve_pixels(box *target){
 	vector<int> ret;
-	int start_x = get_offset_x(target->low[0]);
-	int start_y = get_offset_y(target->low[1]);
-	int end_x = get_offset_x(target->high[0]);
-	int end_y = get_offset_y(target->high[1]);
+	int start_x = get_offset_x(target->low[0] + 1e-6);
+	int start_y = get_offset_y(target->low[1] + 1e-6);
+	int end_x = get_offset_x(target->high[0] - 1e-6);
+	int end_y = get_offset_y(target->high[1] - 1e-6);
 
 	//log("%d %d %d %d %d %d",dimx,dimy,start_x,end_x,start_y,end_y);
 	for(int i=start_x;i<=end_x;i++){
@@ -411,7 +428,7 @@ vector<int> MyRaster::expand_radius(int center, int step){
 }
 
 size_t MyRaster::get_num_pixels(){
-	return (dimx+1)*(dimy+1);
+	return dimx * dimy;
 }
 
 size_t MyRaster::get_num_pixels(PartitionStatus status){
@@ -422,4 +439,53 @@ size_t MyRaster::get_num_pixels(PartitionStatus status){
 		}
 	}
 	return num;	
+}
+
+void MyRaster::grid_align(){
+	UniversalGrid &space = UniversalGrid::getInstance();
+	bool flag1 = false, flag2 = false;
+	auto x = space.get_step_x();
+	auto y = space.get_step_y();
+	if (step_x <= x)
+		step_x = x, flag1 = true;
+	if (step_y <= y)
+		step_y = y, flag2 = true;
+
+	for (int i = space.get_max_layers(); i > 0; i--){
+		if (!flag1 && step_x > x && step_x < x * 2){
+			flag1 = true;
+			step_x = abs(step_x - x) < abs(step_x - x * 2) ? x : x * 2;
+		}
+		if (!flag2 && step_y > y && step_y < y * 2){
+			flag2 = true;
+			step_y = abs(step_y - y) < abs(step_y - y * 2) ? y : y * 2;
+		}
+		if (flag1 && flag2)
+			break;
+		x *= 2;
+		y *= 2;
+	}
+	if(!flag1 || !flag2){
+		// printf("%lf %lf %lf %lf\n", x, y ,step_x, step_y);
+		cout << flag1 << " " << flag2 << endl;
+		cout << x << " " << y << " " << step_x << " " << step_y << endl;
+	}
+	assert(flag1 && flag2);
+
+	step_x = min(step_x, step_y);
+	step_y = step_x;
+
+	mbr->low[0] = floor(mbr->low[0] / step_x) * step_x;
+	mbr->low[1] = floor(mbr->low[1] / step_y) * step_y;
+	mbr->high[0] = ceil(mbr->high[0] / step_x) * step_x;
+	mbr->high[1] = ceil(mbr->high[1] / step_y) * step_y;
+
+	dimx = static_cast<int>(round((mbr->high[0] - mbr->low[0]) / step_x));
+	dimy = static_cast<int>(round((mbr->high[1] - mbr->low[1]) / step_y));
+
+
+	// printf("dimx = %d, dimy = %d\n", dimx, dimy);
+	// printf("step_x = %lf, step_y = %lf\n", step_x, step_y);
+	// printf("MBR:\n");
+	// printf("POLYGON((%lf %lf, %lf %lf, %lf %lf, %lf %lf, %lf %lf))\n", mbr->low[0], mbr->low[1], mbr->low[0], mbr->high[1], mbr->high[0], mbr->high[1], mbr->high[0], mbr->low[1], mbr->low[0], mbr->low[1]);
 }

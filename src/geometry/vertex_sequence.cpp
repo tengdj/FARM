@@ -105,11 +105,15 @@ void VertexSequence::print(bool complete_ring){
 }
 
 double VertexSequence::area(){
-	double sum = 0;
-	for(int i=0;i<num_vertices;i++){
-		sum += (p[i].x-p[(i+1)%num_vertices].x)*(p[(i+1)%num_vertices].y+p[i].y);
+	double a = 0.0f;
+	double b = 0.0f;
+
+	for(int i = 0; i < num_vertices - 1; i ++){
+		int j = i + 1;
+        a += p[i].x * p[j].y;
+        b += p[i].y * p[j].x;
 	}
-	return sum/2;
+	return abs(a - b) / 2.0;
 }
 
 bool VertexSequence::clockwise(){
@@ -153,13 +157,18 @@ vector<Vertex *> VertexSequence::pack_to_polyline(){
 
 box *VertexSequence::getMBR(){
 	box *mbr = new box();
-	double bias = 0.00001;
+	float bias = 1e-9;
 	for(int i=0;i<num_vertices;i++){
-		mbr->low[0] = min(mbr->low[0], p[i].x) - bias;
-		mbr->high[0] = max(mbr->high[0], p[i].x) + bias;
-		mbr->low[1] = min(mbr->low[1], p[i].y) - bias;
-		mbr->high[1] = max(mbr->high[1], p[i].y) + bias;
+		mbr->low[0] = min(mbr->low[0], (double)p[i].x);
+		mbr->high[0] = max(mbr->high[0], (double)p[i].x);
+		mbr->low[1] = min(mbr->low[1], (double)p[i].y);
+		mbr->high[1] = max(mbr->high[1], (double)p[i].y);
 	}
+	mbr->low[0] -= bias;
+	mbr->high[0] += bias;
+	mbr->low[1] -= bias;
+	mbr->high[1] += bias;
+
 	return mbr;
 }
 
@@ -204,10 +213,13 @@ size_t VertexSequence::decode(char *source){
 	size_t decoded = 0;
 	num_vertices = ((size_t *)source)[0];
 	assert(num_vertices>0);
-	p = new Point[num_vertices];
+	p = new Point[num_vertices + 1];
 	decoded += sizeof(size_t);
 	memcpy((char *)p,source+decoded,num_vertices*sizeof(Point));
 	decoded += num_vertices*sizeof(Point);
+	num_vertices ++;
+	p[num_vertices - 1] = p[0]; 
+	assert(p[0] == p[num_vertices - 1]);
 	return decoded;
 }
 

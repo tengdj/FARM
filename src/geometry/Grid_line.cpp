@@ -2,8 +2,8 @@
 
 Grid_line::Grid_line(int size){
     num_grid_lines = size + 2;
-    offset = new uint16_t[size + 2];
-    memset(offset, 0, sizeof(uint16_t) * (size+2));
+    offset = new uint32_t[size + 2];
+    memset(offset, 0, sizeof(uint32_t) * (size+2));
 }
 
 Grid_line::~Grid_line(){

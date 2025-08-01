@@ -224,36 +224,6 @@ void MyPolygon::triangulate(){
 	polyline.clear();
 }
 
-void MyPolygon::build_rtree(){
-	triangulate();
-
-	assert(triangles && triangle_num>0);
-	if(rtree){
-		return;
-	}
-
-	RTree<Point *, double, 2, double> *rtree_tmp = new RTree<Point *, double, 2, double>();
-
-	for(int i=0;i<triangle_num;i++){
-		box pix;
-		Point *ps = triangles+3*i;
-		for(int i=0;i<3;i++){
-			pix.update(ps[i]);
-		}
-		rtree_tmp->Insert(pix.low, pix.high, ps);
-	}
-	mbr = getMBB();
-	rtree = new RTNode();
-	rtree->low[0] = mbr->low[0];
-	rtree->low[1] = mbr->low[1];
-	rtree->high[0] = mbr->high[0];
-	rtree->high[1] = mbr->high[1];
-
-	rtree_tmp->construct_pixel(rtree);
-	assert(rtree->validate());
-	delete rtree_tmp;
-}
-
 VertexSequence *MyPolygon::read_vertices(const char *wkt, size_t &offset, bool clockwise){
 	// read until the left parenthesis
 	skip_space(wkt, offset);
@@ -304,7 +274,6 @@ MyPolygon *MyPolygon::read_polygon(const char *wkt, size_t &offset){
 	if(polygon->boundary->clockwise()){
 		polygon->boundary->reverse();
 	}
-	polygon->boundary->fix();
 	skip_space(wkt, offset);
 	//polygons as the holes of the boundary polygon
 	while(wkt[offset]==','){
@@ -313,7 +282,6 @@ MyPolygon *MyPolygon::read_polygon(const char *wkt, size_t &offset){
 		if(!vc->clockwise()){
 			vc->reverse();
 		}
-		vc->fix();
 		polygon->holes.push_back(vc);
 
 		skip_space(wkt, offset);
@@ -587,7 +555,7 @@ bool MyPolygon::contain(MyPolygon *target, query_context *ctx){
 		}
 		ctx->border_checked.counter++;
 		// otherwise, checking all the edges to make sure no intersection
-		if(segment_intersect_batch(boundary->p, target->boundary->p, boundary->num_vertices, target->boundary->num_vertices, ctx->edge_checked.counter)){
+		if(segment_intersect_batch(boundary->p, target->boundary->p, boundary->num_vertices, target->boundary->num_vertices)){
 			return false;
 		}
 	}
@@ -603,7 +571,7 @@ bool MyPolygon::contain(MyPolygon *target, query_context *ctx){
 		if(target->convex_hull){
 			Point mer_vertices[5];
 			mer->to_array(mer_vertices);
-			if(!segment_intersect_batch(mer_vertices, target->convex_hull->p, 5, target->convex_hull->num_vertices, ctx->edge_checked.counter)){
+			if(!segment_intersect_batch(mer_vertices, target->convex_hull->p, 5, target->convex_hull->num_vertices)){
 				if(mer->contain(convex_hull->p[0])){
 					return true;
 				}
@@ -613,7 +581,7 @@ bool MyPolygon::contain(MyPolygon *target, query_context *ctx){
 		Point mbb_vertices[5];
 		target->mbr->to_array(mbb_vertices);
 		// no intersection between this polygon and the mbr of the target polygon
-		if(!segment_intersect_batch(boundary->p, mbb_vertices, boundary->num_vertices, 5, ctx->edge_checked.counter)){
+		if(!segment_intersect_batch(boundary->p, mbb_vertices, boundary->num_vertices, 5)){
 			// the target must be the one which is contained (not contain) as its mbr is contained
 			if(contain(mbb_vertices[0], ctx)){
 				return true;
@@ -632,7 +600,7 @@ bool MyPolygon::contain(MyPolygon *target, query_context *ctx){
 			return true;
 		}else{
 			// otherwise, checking all the edges to make sure no intersection
-			if(segment_intersect_batch(boundary->p, target->boundary->p, boundary->num_vertices, target->boundary->num_vertices, ctx->edge_checked.counter)){
+			if(segment_intersect_batch(boundary->p, target->boundary->p, boundary->num_vertices, target->boundary->num_vertices)){
 				return false;
 			}
 		}
@@ -749,10 +717,10 @@ void MyPolygon::print_without_head(bool print_hole, bool complete_ring){
 }
 
 void MyPolygon::print(bool print_id, bool print_hole){
-	if(print_id){
-		cout<<"id:\t"<<this->id<<endl;
-	}
-	cout<<"POLYGON";
+	// if(print_id){
+	// 	cout<<"id:\t"<<this->id<<endl;
+	// }
+	cout<<"POLYGON ";
 	print_without_head(print_hole);
 	cout<<endl;
 }

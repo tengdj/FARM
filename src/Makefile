@@ -5,11 +5,14 @@ NVCC = nvcc
 SRCS := $(wildcard */*.cpp)
 OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 
-INCLUDES	= -I /usr/include -I include -I /usr/local/include
+INCLUDES	= -I /usr/include -I ./include -I /usr/local/include -I /usr/local/cuda-12.2/targets/x86_64-linux/include  -I /home/qmh/optix/include
 #-lgeos_c  
-LIBS		= -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -lboost_program_options -lpthread -fopenmp -lgeos  
-CPPFLAGS	= -g -O3 -std=c++14 -Wno-cpp -fopenmp
-NVCCFLAGS	= -g -std=c++14 -DUSE_GPU
+LIBS		= -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -lboost_program_options -lgeos -lpthread
+CPPFLAGS	= -O2 -std=c++17 -Wno-cpp
+
+NVCCFLAGS   = -O2 -arch=sm_89 -std=c++17 -DCUB_IGNORE_DEPRECATED_CPP_DIALECT --expt-extended-lambda --expt-relaxed-constexpr --use_fast_math
+CUDALIBS    = -L/usr/local/cuda-12.2/lib64/stubs -lcuda -L/usr/local/cuda-12.2/lib64/ -lcudart
+
 
 GEOMETRY_SRCS := $(wildcard geometry/*.cpp)
 GEOMETRY_SRCS += $(wildcard geometry/triangulate/*.cpp)
@@ -25,10 +28,9 @@ CU_OBJS := $(patsubst %.cu,%_cu.o,$(CU_SRCS))
 
 ifdef USE_GPU
 	CPPFLAGS += -DUSE_GPU
-	LIBS  += -L/usr/local/cuda/lib64 -lcuda -lcudart
+	LIBS  += ${CUDALIBS}
 	GEOMETRY_OBJS += ${CU_OBJS}
 endif
-
 
 %_cu.o: %.cu
 	$(NVCC) -c $(NVCCFLAGS) $(INCLUDES) -o $@ $<	
@@ -39,88 +41,41 @@ endif
 all:	contain_polygon within_polygon
 
 
-# for macro queries
+intersect:	query/intersect.o $(GEOMETRY_OBJS)
+	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
 
-contain_polygon:	query/contain_polygon.o $(GEOMETRY_OBJS)
-	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
+intersect_cpu:	query/intersect_cpu.o $(GEOMETRY_OBJS)
+	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
 	
 within_polygon:	query/within_polygon.o $(GEOMETRY_OBJS)
-	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
-	
-within:	query/within.o $(GEOMETRY_OBJS)
-	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
-	
-contain:	query/contain.o $(GEOMETRY_OBJS)
-	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
+	$(CXX) -O2 -o ../build/$@ $^ $(LIBS) 
+
+within_polygon_cpu:	query/within_polygon_cpu.o $(GEOMETRY_OBJS)
+	$(CXX) -O2 -o ../build/$@ $^ $(LIBS) 
+
+intersection:	query/intersection.o $(GEOMETRY_OBJS)
+	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
+
+intersection_cpu:	query/intersection_cpu.o $(GEOMETRY_OBJS)
+	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
 	
 print_raster:	test/print_raster.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
-
-# utility
-
-distance:	test/distance.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS)
-	
-lookup:	test/lookup.o $(GEOMETRY_OBJS) 
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-	
-debug_distance:	test/debug_distance.o $(GEOMETRY_OBJS) 
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-	
-debug_contain:	test/debug_contain.o $(GEOMETRY_OBJS) 
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-
-test:	test/test.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 	
-	
-# micro tests
-#partition:	stats/partition.o $(GEOMETRY_OBJS) $(TRIANGULATE_OBJS) 
-#	$(CXX) -o ../build/$@ $^ $(LIBS) 
-	
-flatness:	stats/flatness.o $(GEOMETRY_OBJS) 
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-
-pixeldensity:	stats/pixeldensity.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-	
-
-# for data extraction
-load:	datagen/loadwkt.o $(GEOMETRY_OBJS) 
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-
-loadpoint:	datagen/loadwkt_point.o $(GEOMETRY_OBJS) 
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-
-loadpais:	datagen/loadwkt_pais.o $(GEOMETRY_OBJS) 
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
 		
-geninsert:	datagen/geninsert.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-	
-geninsert_point:	datagen/geninsert_point.o $(GEOMETRY_OBJS)
+print_layers:	test/print_layers.o $(GEOMETRY_OBJS)
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
+
+dump_points:	datagen/dump_points.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
 
-# for data partitioning
-
-partition_analysis:	test/partition_analysis.o $(GEOMETRY_OBJS) $(PARTITION_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-	
-genschema:	test/generate_partition.o $(GEOMETRY_OBJS) $(PARTITION_OBJS)
+dump_polygons:	datagen/dump_polygons.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
 
-print:	test/print.o $(GEOMETRY_OBJS) $(PARTITION_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-	
-printspace:	test/print_spaces.o $(GEOMETRY_OBJS) $(PARTITION_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-	
-sample:	test/sample.o $(GEOMETRY_OBJS) $(PARTITION_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
+random_distribution:	datagen/random_distribution.o $(GEOMETRY_OBJS)
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 
-subset:	test/subset.o $(GEOMETRY_OBJS) $(PARTITION_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-partition_stats:	test/partition_stats.o $(GEOMETRY_OBJS) $(PARTITION_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
+filter_polygons:	datagen/filter_polygons.o $(GEOMETRY_OBJS)
+	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 
 clean:
 	rm -fr ../build/* $(OBJS) $(CU_OBJS)

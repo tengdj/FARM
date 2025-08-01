@@ -11,10 +11,22 @@ public:
 	double low[2] = {BOX_GLOBAL_MIN,BOX_GLOBAL_MIN};
 	double high[2] = {BOX_GLOBAL_MAX,BOX_GLOBAL_MAX};
 
-	box(){}
+	CUDA_HOSTDEV box(){}
 
-	box(box *b);
-	box (double lowx, double lowy, double highx, double highy);
+	CUDA_HOSTDEV box(box *b){
+		low[0] = b->low[0];
+		high[0] = b->high[0];
+		low[1] = b->low[1];
+		high[1] = b->high[1];
+	}
+	
+	CUDA_HOSTDEV box (double lowx, double lowy, double highx, double highy){
+		low[0] = lowx;
+		low[1] = lowy;
+		high[0] = highx;
+		high[1] = highy;
+	}
+
 	bool valid();
 
 	box get_union(box &b);
