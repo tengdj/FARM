@@ -91,17 +91,8 @@ int main(int argc, char** argv) {
         auto batch_start = std::chrono::high_resolution_clock::now();
 		global_ctx.index = i;
 		global_ctx.index_end = min(i + global_ctx.batch_size, global_ctx.num_pairs);
-
 		ResetDevice(&global_ctx);
-
-	    auto gpu_start = std::chrono::high_resolution_clock::now();
-
 		cuda_intersection(&global_ctx);
-
-        auto gpu_end = std::chrono::high_resolution_clock::now();
-        auto gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(gpu_end - gpu_start);
-        std::cout << "total gpu time: " << gpu_duration.count() << " ms" << std::endl;
-
 		auto batch_end = std::chrono::high_resolution_clock::now();
 		auto batch_duration = std::chrono::duration_cast<std::chrono::milliseconds>(batch_end - batch_start);
 		std::cout << "batch time: " << batch_duration.count() << " ms" << std::endl;

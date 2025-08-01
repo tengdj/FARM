@@ -13,12 +13,6 @@ bool MySearchCallback(Ideal *ideal, void *arg)
 	Ideal *target = (Ideal *)ctx->target;
 	if (ideal->id == target->id)
 		return true;
-	// if(ideal->getMBB()->intersect(*target->getMBB()))
-	// 	return true;
-	// if(ideal->getMBB()->contain(*target->getMBB()))
-	// 	return true;
-	// if(target->getMBB()->contain(*ideal->getMBB()))
-	// 	return true;
 	ctx->object_pairs.push_back(make_pair(ideal->id, target->id));
 	return true;
 }
@@ -55,16 +49,11 @@ void *query(void *args){
             auto targetIdx = pair.second;
             Ideal *source = gctx->source_ideals[sourceIdx];
             Ideal *target = gctx->source_ideals[targetIdx];
-			if(source->contain(target, ctx->global_ctx)) continue;
-			if(target->contain(source, ctx->global_ctx)) continue;
-			if(source->intersect(target, ctx->global_ctx)) continue;
-			if(target->intersect(source, ctx->global_ctx)) continue;
-
             ctx->found += source->within(target, ctx);
 			ctx->report_progress();
 		}
 	}
-	// ctx->merge_global();
+
 	gctx->lock();
 	gctx->found += ctx->found;
 	gctx->unlock();

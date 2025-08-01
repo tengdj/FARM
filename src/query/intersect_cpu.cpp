@@ -99,7 +99,6 @@ int main(int argc, char** argv) {
 
 	global_ctx.index = 0;
 	global_ctx.target_num = global_ctx.object_pairs.size();    
-	global_ctx.num_threads = 128;
 	auto preprocess_start = std::chrono::high_resolution_clock::now();
 	preprocess(&global_ctx);
 	auto preprocess_end = std::chrono::high_resolution_clock::now();
@@ -107,7 +106,7 @@ int main(int argc, char** argv) {
 	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
  
 	printf("%d\n", global_ctx.object_pairs.size());
-	global_ctx.num_threads = 1;
+
 	auto gpu_start = std::chrono::high_resolution_clock::now();
 	pthread_t threads2[global_ctx.num_threads];
 	query_context ctx2[global_ctx.num_threads];

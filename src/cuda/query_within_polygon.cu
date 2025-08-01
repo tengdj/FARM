@@ -41,6 +41,10 @@ struct PixelDist
     float apxDist;
     float minDist;
     float maxDist;
+
+    void print() const {
+        printf("%d %d %d %f %f\n", sourcePixelId, targetPixelId, pairId, minDist, maxDist);
+    }
 };
 
 __device__ bool d_flag = false;
@@ -442,7 +446,96 @@ __global__ void preprocess_suffixmin(PixelDist *pixpairs, int *pixelpairidx, uin
     }
 }
 
-__global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelpairsize, float *suffix_min, uint pairsize, PixPair* buffer, uint *buffer_size, float *max_box_dist, float *mean, float *stddev, float threshold)
+// __global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelpairsize, float *suffix_min, uint pairsize, PixPair* buffer, uint *buffer_size, float *max_box_dist, float *mean, float *stddev, float threshold, int *times)
+// {
+//     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+//     if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0)
+//     {
+//         int start = pixelpairidx[tid];
+//         int end = pixelpairsize[tid + 1];
+//         int pairId = pixpairs[start].pairId;
+
+//         float prob = 1.0;
+//         float d = suffix_min[start];
+
+//         if(max_box_dist[pairId] < 0 || max_box_dist[pairId] <= d){
+//             pixelpairidx[tid] = end;
+//             return;
+//         }
+
+//         times[tid] ++;
+
+//         for(int i = start; i < end; i ++){
+//             int idx = atomicAdd(buffer_size, 1);
+//             buffer[idx] = {pixpairs[i].sourcePixelId, pixpairs[i].targetPixelId, pixpairs[i].pairId};
+//             uint8_t pf = pixpairs[i].pf;
+
+//             d = i < end - 1 ? suffix_min[i + 1] : suffix_min[i];
+
+//             float minDist = pixpairs[i].minDist;
+//             float maxDist = pixpairs[i].maxDist;
+//             float ratio = (d - minDist) / (maxDist - minDist);
+//             assert(ratio < 1);
+//             prob = prob * (1 - (1 + erf((ratio - mean[pf]) / (stddev[pf] * sqrt(2)))) / 2);
+//             // printf("%lf, %d\n", prob, pairId);
+
+//             if(1 - prob >= threshold) {
+//                 pixelpairidx[tid] = i + 1;
+//                 return;
+//             } 
+//         }
+
+//         pixelpairidx[tid] = end;
+//     }
+// }
+
+// __global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelpairsize, float *suffix_min, uint pairsize, PixPair* buffer, uint *buffer_size, float *max_box_dist, float *mean, float *stddev, float threshold, int *times)
+// {
+//     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+//     if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0)
+//     {
+//         int start = pixelpairidx[tid];
+//         int end = pixelpairsize[tid + 1];
+//         int pairId = pixpairs[start].pairId;
+
+//         float prob = 1.0;
+//         float d = suffix_min[start];
+//         uint tsize = 1;
+
+//         if(max_box_dist[pairId] < 0 || max_box_dist[pairId] <= d){
+//             pixelpairidx[tid] = end;
+//             return;
+//         }
+
+//         for(int i = start; i < end; ){
+//             int idx = atomicAdd(buffer_size, tsize);
+//             for(int j = 0; j < tsize; j ++){
+//                 assert(i + j < end);
+//                 buffer[idx + j] = {pixpairs[i + j].sourcePixelId, pixpairs[i + j].targetPixelId, pixpairs[i + j].pairId};
+//             }
+//             uint8_t pf = pixpairs[i].pf;
+//             prob = 1.0;
+//             d = i < end - 1 ? suffix_min[i + 1] : suffix_min[i];
+//             for(int j = start; j <= i; j ++){
+//                 float minDist = pixpairs[j].minDist;
+//                 float maxDist = pixpairs[j].maxDist;
+//                 float ratio = (d - minDist) / (maxDist - minDist);
+//                 assert(ratio < 1);
+//                 prob = prob * (1 - (1 + erf((ratio - mean[pf]) / (stddev[pf] * sqrt(2)))) / 2);
+//             }
+//             // printf("%lf, %d\n", 1 - prob, pairId);
+//             if(1 - prob >= threshold) {
+//                 pixelpairidx[tid] = i + 1;
+//                 return;
+//             } 
+//             i += tsize;
+//             tsize = min((uint)(ceil(threshold - (1 - prob)) / ((1 - prob) / (i - start))), end - i);
+//         }
+//         pixelpairidx[tid] = end;
+//     }
+// }
+
+__global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelpairsize, float *suffix_min, uint pairsize, PixPair* buffer, uint *buffer_size, float *max_box_dist, float *mean, float *stddev, float threshold, int *times)
 {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0)
@@ -450,31 +543,47 @@ __global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelp
         int start = pixelpairidx[tid];
         int end = pixelpairsize[tid + 1];
         int pairId = pixpairs[start].pairId;
+        int num_pix_pairs = pixelpairsize[tid + 1] - pixelpairsize[tid];
 
         float prob = 1.0;
         float d = suffix_min[start];
+        float delta = 0.01;
+        uint step = delta * num_pix_pairs;
 
         if(max_box_dist[pairId] < 0 || max_box_dist[pairId] <= d){
             pixelpairidx[tid] = end;
             return;
         }
 
-        for(int i = start; i < end; i ++){
+        for(int i = start; i < end; ){
+            if(i + step == num_pix_pairs){
+                pixelpairidx[tid] = end;
+                return;
+            }
+            int idx = atomicAdd(buffer_size, step);
+            for(int j = 0; j < step; j ++){
+                assert(i + j < end);
+                buffer[idx + j] = {pixpairs[i + j].sourcePixelId, pixpairs[i + j].targetPixelId, pixpairs[i + j].pairId};
+            }
+
             uint8_t pf = pixpairs[i].pf;
+            prob = 1.0;
             d = i < end - 1 ? suffix_min[i + 1] : suffix_min[i];
-            float minDist = pixpairs[i].minDist;
-            float maxDist = pixpairs[i].maxDist;
-            float ratio = (d - minDist) / (maxDist - minDist);
-            assert(ratio < 1);
-            prob = prob * (1 - (1 + erf((ratio - mean[pf]) / (stddev[pf] * sqrt(2)))) / 2);
-            int idx = atomicAdd(buffer_size, 1);
-            buffer[idx] = {pixpairs[i].sourcePixelId, pixpairs[i].targetPixelId, pixpairs[i].pairId};
+            for(int j = start; j <= i; j ++){
+                float minDist = pixpairs[j].minDist;
+                float maxDist = pixpairs[j].maxDist;
+                float ratio = (d - minDist) / (maxDist - minDist);
+                assert(ratio < 1);
+                prob = prob * (1 - (1 + erf((ratio - mean[pf]) / (stddev[pf] * sqrt(2)))) / 2);
+            }
+            // printf("%lf, %d\n", 1 - prob, pairId);
             if(1 - prob >= threshold) {
                 pixelpairidx[tid] = i + 1;
                 return;
             } 
+            i += step;
+            step = min(step, end - i);
         }
-
         pixelpairidx[tid] = end;
     }
 }
@@ -661,10 +770,11 @@ __global__ void kernel_refine_within_polygon(Task *tasks, Point *vertices, uint 
     }
 }
 
-__global__ void statistic_result_polygon(float *max_box_dist, uint size, uint *result){
+__global__ void statistic_result_polygon(float *max_box_dist, uint size, uint *result, bool *res){
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     if (x < size && max_box_dist[x] < WITHIN_DISTANCE)
     {
+        res[x] = true;
         atomicAdd(result, 1);
     }
 }
@@ -688,8 +798,8 @@ void cuda_within_polygon(query_context *gctx)
 
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
 
-    printf("h_bufferinput_size = %d\n", h_bufferinput_size);
-
+    printf("h_bufferinput_size = %d\n", h_bufferinput_size);    
+    auto iterative_filter_start = std::chrono::high_resolution_clock::now();
     int round = 0;
     bool h_flag;
     while(true){
@@ -735,7 +845,9 @@ void cuda_within_polygon(query_context *gctx)
         if(h_bufferinput_size == 0) return;
     }
 
-    // return;
+    auto iterative_filter_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> iterative_filter_duration =iterative_filter_end - iterative_filter_start;
+    gctx->raster_filter_time += iterative_filter_duration.count();
 
     assert(h_bufferinput_size > 0);
 
@@ -754,6 +866,7 @@ void cuda_within_polygon(query_context *gctx)
     thrust::sort(thrust::device, begin, end, CompareKeyValuePairs());
 
     // PrintBuffer((PixelDist*)gctx->d_BufferInput, h_bufferinput_size);
+    // return;
 
     thrust::device_vector<int> d_indices(num_pixel_pairs);
     thrust::sequence(d_indices.begin(), d_indices.end());
@@ -798,6 +911,10 @@ void cuda_within_polygon(query_context *gctx)
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_pixpairs, h_bufferinput_size * sizeof(PixelDist)));
     CUDA_SAFE_CALL(cudaMemcpy(d_pixpairs, gctx->d_BufferInput, h_bufferinput_size * sizeof(PixelDist), cudaMemcpyDeviceToDevice));
 
+    int *d_times = nullptr; 
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_times, num_groups * sizeof(int)));
+    CUDA_SAFE_CALL(cudaMemset(d_times, 0, num_groups * sizeof(int)));
+
     int *d_end_ptr = nullptr; 
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_end_ptr, (num_groups + 1) * sizeof(int)));
     CUDA_SAFE_CALL(cudaMemcpy(d_end_ptr, d_start_ptr, (num_groups + 1) * sizeof(int), cudaMemcpyDeviceToDevice));
@@ -810,7 +927,7 @@ void cuda_within_polygon(query_context *gctx)
     cudaDeviceSynchronize();
     check_execution("preprocess_suffixmin"); 
 
-    auto iterative_refine_start = std::chrono::high_resolution_clock::now();
+    // auto iterative_refine_start = std::chrono::high_resolution_clock::now();
     int round_refine = 0;
     while(true){
         round_refine ++;
@@ -818,14 +935,14 @@ void cuda_within_polygon(query_context *gctx)
 
         grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
         auto merge_start = std::chrono::high_resolution_clock::now();
-        kernel_merge<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, d_end_ptr, d_suffix_min, num_groups, (PixPair *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_max_box_dist, gctx->d_mean, gctx->d_stddev, gctx->merge_threshold);
+        kernel_merge<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, d_end_ptr, d_suffix_min, num_groups, (PixPair *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_max_box_dist, gctx->d_mean, gctx->d_stddev, gctx->merge_threshold, d_times);
         cudaDeviceSynchronize();
         check_execution("kernel_merge"); 
 
         auto merge_end = std::chrono::high_resolution_clock::now();
         auto merge_duration = std::chrono::duration_cast<std::chrono::milliseconds>(merge_end - merge_start);
 
-        std::cout << "merge运行时间: " << merge_duration.count() << " 毫秒" << std::endl;
+        // std::cout << "merge运行时间: " << merge_duration.count() << " 毫秒" << std::endl;
 
         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
         printf("h_bufferoutput_size = %d\n", h_bufferoutput_size);
@@ -842,7 +959,7 @@ void cuda_within_polygon(query_context *gctx)
         auto unroll_end = std::chrono::high_resolution_clock::now();
         auto unroll_duration = std::chrono::duration_cast<std::chrono::milliseconds>(unroll_end - unroll_start);
 
-        std::cout << "unroll运行时间: " << unroll_duration.count() << " 毫秒" << std::endl;
+        // std::cout << "unroll运行时间: " << unroll_duration.count() << " 毫秒" << std::endl;
    
         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
         printf("h_bufferoutput_size = %d\n", h_bufferoutput_size);
@@ -855,23 +972,35 @@ void cuda_within_polygon(query_context *gctx)
         cudaDeviceSynchronize();
         check_execution("kernel_refine_within_polygon");
         auto refine_end = std::chrono::high_resolution_clock::now();
-        auto refine_duration = std::chrono::duration_cast<std::chrono::milliseconds>(refine_end - refine_start);
+        std::chrono::duration<double, std::milli> refine_duration = refine_end - refine_start;
 
-        std::cout << "refine运行时间: " << refine_duration.count() << " 毫秒" << std::endl;
-
+        // std::cout << "refine运行时间: " << refine_duration.count() << " 毫秒" << std::endl;
+        gctx->refine_time += refine_duration.count();
     }
 
-    auto iterative_refine_end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> iterative_refine_duration =iterative_refine_end - iterative_refine_start;
-    gctx->refine_time += iterative_refine_duration.count();
-    printf("round_refine = %d\n", round_refine);
+    // auto iterative_refine_end = std::chrono::high_resolution_clock::now();
+    // std::chrono::duration<double, std::milli> iterative_refine_duration =iterative_refine_end - iterative_refine_start;
+    // gctx->refine_time += iterative_refine_duration.count();
+    // printf("round_refine = %d\n", round_refine);
+
+    bool* d_res = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_res, batch_size * sizeof(bool)));
+    CUDA_SAFE_CALL(cudaMemset(d_res, 0, batch_size * sizeof(bool)));
+
     grid_size = (batch_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    statistic_result_polygon<<<grid_size, block_size>>>(d_max_box_dist, batch_size, gctx->d_result);
+    statistic_result_polygon<<<grid_size, block_size>>>(d_max_box_dist, batch_size, gctx->d_result, d_res);
     cudaDeviceSynchronize();
     check_execution("statistic_result");
 
-    // PrintBuffer((float*)d_max_box_dist, batch_size);
+    // bool *h_res = new bool[batch_size];
+    // CUDA_SAFE_CALL(cudaMemcpy(h_res, d_res, batch_size * sizeof(bool), cudaMemcpyDeviceToHost));
+
+    // std::string filename = "real_within.txt";
+	// std::ofstream outfile(filename, std::ios::app);
+    // for(int i = 0; i < batch_size; i ++){
+	//     outfile << h_res[i] << endl;
+    // }
 
     uint h_result;
     CUDA_SAFE_CALL(cudaMemcpy(&h_result, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));

@@ -40,7 +40,6 @@ int main(int argc, char** argv) {
 	query_context global_ctx;
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::intersect;
-	global_ctx.num_threads = 1;
 
     global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
     for (Ideal *p : global_ctx.source_ideals)
@@ -70,58 +69,12 @@ int main(int argc, char** argv) {
 
 	global_ctx.index = 0;
 	global_ctx.target_num = global_ctx.object_pairs.size();    
-	global_ctx.num_threads = 128;
 
 	auto preprocess_start = std::chrono::high_resolution_clock::now();
 	preprocess(&global_ctx);
 	auto preprocess_end = std::chrono::high_resolution_clock::now();
 	auto preprocess_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start);
 	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
-
-	// int id1 = global_ctx.object_pairs[466776].first;
-	// int id2 = global_ctx.object_pairs[466776].second - global_ctx.source_ideals.size();
-	// printf("dimx = %d, dimy = %d\n", global_ctx.source_ideals[id1]->get_dimx(), global_ctx.source_ideals[id1]->get_dimy());
-	// global_ctx.source_ideals[id1]->MyPolygon::print();
-	// global_ctx.source_ideals[id1]->MyRaster::print();
-	// printf("dimx = %d, dimy = %d\n", global_ctx.target_ideals[id2]->get_dimx(), global_ctx.target_ideals[id2]->get_dimy());
-	// global_ctx.target_ideals[id2]->MyPolygon::print();
-	// global_ctx.target_ideals[id2]->MyRaster::print();
-
-	// return 0;
-
-	// id1 = global_ctx.object_pairs[560892].first;
-	// id2 = global_ctx.object_pairs[560892].second - global_ctx.source_ideals.size();
-	// global_ctx.source_ideals[id1]->MyPolygon::print();
-	// global_ctx.source_ideals[id1]->MyRaster::print();
-	// global_ctx.target_ideals[id2]->MyPolygon::print();
-	// global_ctx.target_ideals[id2]->MyRaster::print();
-
-	// id1 = global_ctx.object_pairs[980437].first;
-	// id2 = global_ctx.object_pairs[980437].second - global_ctx.source_ideals.size();
-	// global_ctx.source_ideals[id1]->MyPolygon::print();
-	// global_ctx.source_ideals[id1]->MyRaster::print();
-	// global_ctx.target_ideals[id2]->MyPolygon::print();
-	// global_ctx.target_ideals[id2]->MyRaster::print();
-
-	// id1 = global_ctx.object_pairs[980444].first;
-	// id2 = global_ctx.object_pairs[980444].second - global_ctx.source_ideals.size();
-	// global_ctx.source_ideals[id1]->MyPolygon::print();
-	// global_ctx.source_ideals[id1]->MyRaster::print();
-	// global_ctx.target_ideals[id2]->MyPolygon::print();
-	// global_ctx.target_ideals[id2]->MyRaster::print();
-
-	// for(auto p : global_ctx.object_pairs){
-	// 	int id1 = p.first;
-	// 	int id2 = p.second - global_ctx.source_ideals.size();
-	// 	global_ctx.source_ideals[id1]->MyPolygon::print();
-	// 	global_ctx.target_ideals[id2]->MyPolygon::print();
-	// }
-
-	// for(auto p : global_ctx.target_ideals){
-	// 	p->MyPolygon::print();
-	// }
-
-	// return 0;
 
 	auto preprocess_gpu_start = std::chrono::high_resolution_clock::now();
 	preprocess_for_gpu(&global_ctx);

@@ -48,21 +48,12 @@ void *query(void *args){
 			auto targetIdx = pair.second;
 			Ideal *source = gctx->source_ideals[sourceIdx];
 			Ideal *target = gctx->target_ideals[targetIdx];
-			// if(ctx->thread_id == 0){
-			// 	source->MyPolygon::print();
-			// 	target->MyPolygon::print();
-			// }
 			source->intersection(target, ctx);
 				
 			ctx->report_progress();
 		}
 	}
-	// if(ctx->thread_id == 0){
-	// 	printf("--------------------------------\n");
-	// 	for(auto p : ctx->intersection_polygons){
-	// 		p->MyPolygon::print();
-	// 	}
-	// }
+
 	gctx->lock();
 	gctx->found += ctx->found;
 	gctx->intersection_polygons.insert(gctx->intersection_polygons.end(), ctx->intersection_polygons.begin(), ctx->intersection_polygons.end());
@@ -127,15 +118,7 @@ int main(int argc, char** argv) {
 		pthread_join(threads2[i], &status);
 	}
 
-    // for(auto p : global_ctx.intersection_polygons){
-    //     p->MyPolygon::print();
-	// 	global_ctx.area += p->area();
-    // }
-
-	printf("AREA: %lf\n", global_ctx.area);
-
 	printf("FOUND: %d\n", global_ctx.intersection_polygons.size());
-	// printf("intersec duration = %lf\n", global_ctx.test_duration);
 
 	cout << endl;
 	global_ctx.print_stats();

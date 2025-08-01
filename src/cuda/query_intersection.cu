@@ -345,7 +345,7 @@ __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segmen
 			const Point v2 = (vertices + vertices_start)[r.start + j + 1];
 			if(p == v1 || p == v2){
 				flags[seg_id] = 1;
-				return;  // p在边界上
+				return; 
 			}
 			if ((v1.y >= p.y) != (v2.y >= p.y))
 			{
@@ -359,7 +359,7 @@ __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segmen
 					const double int_x = dx * py_diff / dy + v1.x;
 					if(fabs(p.x - int_x) < 1e-9) {
 						flags[seg_id] = 1;
-						return;  // p在边界上
+						return; 
 					}
 					if (p.x < int_x && int_x <= bx.high[0])
 					{
@@ -368,7 +368,7 @@ __global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segmen
 				}
 			}else if (v1.y == p.y && v2.y == p.y && (v1.x >= p.x) != (v2.x >= p.x)){
                 flags[seg_id] = 1;
-                return;   // p在边界上
+                return; 
             }
 		}
 	}
@@ -413,7 +413,6 @@ __global__ void rebuild_polygons(Segment* segments, uint8_t* status, size_t size
             }
 
 			Segment seg = segments[i];
-			// 当前segment和端点
 			size_t currentSegIdx = i;
 			Point currentPoint = seg.start;
 			Point lastPoint = currentPoint;
@@ -455,10 +454,8 @@ __global__ void rebuild_polygons(Segment* segments, uint8_t* status, size_t size
 					}
 				}
 
-				// 确定segment的另一个端点
             	Point nextPoint = currentPoint == seg.start ? seg.end : seg.start;
 
-				// 如果回到起点，我们找到了一个闭合的多边形
 				if (nextPoint == startPoint) {
 					// printf("lastPoint: POINT(%lf %lf) startPoint: POINT(%lf %lf)\n", lastPoint.x, lastPoint.y, startPoint.x, startPoint.y);
 					a += lastPoint.x * startPoint.y;
@@ -468,7 +465,6 @@ __global__ void rebuild_polygons(Segment* segments, uint8_t* status, size_t size
 					break;
 				}
 
-				// 寻找连接到nextPoint的未使用segment
 				bool foundNext = false;
 
 				int idx = binary_search(segments, start_idx, end_idx - 1, nextPoint);
@@ -483,7 +479,6 @@ __global__ void rebuild_polygons(Segment* segments, uint8_t* status, size_t size
                     foundNext = true;
 				}
 
-				// // 如果回到起点，我们找到了一个闭合的多边形
 				// if (!foundNext && nextPoint == startPoint) {
 				// 	lastPoint = currentPoint;
 				// 	a += lastPoint.x * startPoint.y;
@@ -573,7 +568,6 @@ void cuda_intersection(query_context *gctx)
     thrust::device_ptr<Intersection> begin = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput);
     thrust::device_ptr<Intersection> end = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput + h_bufferinput_size);
 
-	// 排序并去重
 	thrust::sort(thrust::device, begin, end, 
     [] __device__(const Intersection &a, const Intersection &b) {
 		if (a.pair_id != b.pair_id) {
@@ -594,7 +588,6 @@ void cuda_intersection(query_context *gctx)
 
 	auto &num_intersections = h_bufferinput_size;
 
-	// 更新设备内存
 	CUDA_SAFE_CALL(cudaMemcpy(gctx->d_bufferinput_size, &h_bufferinput_size, 
 							sizeof(uint), cudaMemcpyHostToDevice));
 
@@ -659,26 +652,22 @@ void cuda_intersection(query_context *gctx)
 	// PrintBuffer((Segment *)gctx->d_BufferInput, num_segments);
     // return;
 
-	// 生成索引 [0, 1, 2, ..., n-1]
+
     thrust::device_vector<int> d_indices(num_segments);
     thrust::sequence(d_indices.begin(), d_indices.end());
 
-	// 提取pair_id
+
 	thrust::device_vector<int> pair_ids(num_segments);
 	thrust::transform(seg_begin, seg_end, pair_ids.begin(), ExtractPairId());
 
-	// 创建布尔掩码：每个不同值的起点为 true
     thrust::device_vector<int> d_flags(num_segments);
     thrust::adjacent_difference(thrust::device, pair_ids.begin(), pair_ids.end(), d_flags.begin());
 
-    // 把非零变成1（表示新组开始）
     thrust::transform(d_flags.begin(), d_flags.end(), d_flags.begin(),
         [] __device__(int x){ return x != 0 ? 1 : 0; });
 
-	// 修复第一个元素（应始终为true）
     d_flags[0] = 1;	
 
-	// 拷贝新组的索引和对应值
     int num_groups = thrust::count(d_flags.begin(), d_flags.end(), 1);
 
 	thrust::device_vector<int> d_starts(num_groups + 1, num_segments);
