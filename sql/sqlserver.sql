@@ -16,8 +16,8 @@ CREATE SPATIAL INDEX grid_index ON polygon_small(geog) USING GEOGRAPHY_GRID WITH
 CREATE SPATIAL INDEX polygon_grid ON polygon(geog) USING GEOGRAPHY_GRID WITH ( BOUNDING_BOX = ( xmin=-180, ymin=-90, xmax=180, ymax=90), GRIDS = (MEDIUM, LOW, MEDIUM, HIGH ), CELLS_PER_OBJECT = 8192, PAD_INDEX  = ON );  
 
 
-time sqlcmd -S localhost -U SA -P 'passwd' -d mydb -I -Q "select count(*) from point t1, polygon_small t2 where t2.geog.STContains(t1.geog)=1;"
-sqlcmd -S localhost -U SA -P 'passwd' -d mydb -I -i polygon.small.sql
+time sqlcmd -S localhost -U SA -P 'passwd' -d spatialdb -I -Q "select count(*) from point t1, polygon_small t2 where t2.geog.STContains(t1.geog)=1;"
+sqlcmd -S localhost -U SA -P 'passwd' -d spatialdb -I -i polygon.small.sql
 
 BULK INSERT polygon_parent FROM '/home/git/src/mssql.parent.csv' WITH (FIELDTERMINATOR = '|', ROWTERMINATOR = '\n');
 
