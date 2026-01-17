@@ -19,7 +19,7 @@ CREATE SPATIAL INDEX polygon_grid ON polygon(geog) USING GEOGRAPHY_GRID WITH ( B
 time sqlcmd -S localhost -U SA -P 'passwd' -d tengdb -I -Q "select count(*) from point t1, polygon_small t2 where t2.geog.STContains(t1.geog)=1;"
 sqlcmd -S localhost -U SA -P 'passwd' -d tengdb -I -i polygon.small.sql
 
-BULK INSERT polygon_parent FROM '/home/git/IDEAL/src/mssql.parent.csv' WITH (FIELDTERMINATOR = '|', ROWTERMINATOR = '\n');
+BULK INSERT polygon_parent FROM '/home/git/src/mssql.parent.csv' WITH (FIELDTERMINATOR = '|', ROWTERMINATOR = '\n');
 
 select t1.id from point t1, polygon t2
 
