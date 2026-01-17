@@ -13,7 +13,7 @@ cd src
 make
 ```
 
-**Prerequisites: **
+**Prerequisites：**
 
 Operating System: Linux (tested on Ubuntu 23.10).
 
