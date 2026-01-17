@@ -3,9 +3,9 @@ FARM is a spatial database management system that supports efficient querying of
 
 ### Installation
 
-The project source code is located in the `src` directory. Please use the `make` command to compile it. Set the environment variable `USE_GPU=1` to enable GPU acceleration support.
+The project source code is located in the `src` directory. Please use the `make` command to compile the project. Set the environment variable `USE_GPU=1` before compilation to enable GPU acceleration support.
 
-install FARM:
+Install FARM:
 
 ```bash
 export USE_GPU=1
@@ -23,21 +23,21 @@ CUDA Toolkit: Version 12.8 or later.
 
 ### Data Preparation
 
-FARM requires the geometric input data to be in binary format. You can generate datasets from WKT format with the following instruction:
+FARM requires the geometric input data to be in a specific format. We developed a dedicated tool to convert WKT format into such specific datasets. You can use it following the below instructions:
 
 ```bash
-./dump_polygons <input_file> <output_file>
+./dump_polygons <input_wkt_file> <output_wkt_file>
 ```
 
 **Examples**
 
 ```bash
-./dump_polygons complex.wkt complex.idl
+./dump_polygons complex.wkt complex.dt
 ```
 
 ### Execution
 
-To run the program, use the following format:
+To run the program, use the following commands:
 
 ```bash
 # intersect query
@@ -70,21 +70,21 @@ Run intersect query (use the default parameter values)
 
 ``` bash
 # gpu version
-./intersect -s complex.idl -t lakes.idl -r -g
+./intersect -s complex.dt -t lakes.dt -r -g
 # cpu version
-./intersect_cpu -s complex.idl -t lakes.idl -r
+./intersect_cpu -s complex.dt -t lakes.dt -r
 # approximate query
-./intersect -s complex.idl -t lakes.idl -r -g -a
+./intersect -s complex.dt -t lakes.dt -r -g -a
 ```
 
-Run within distance query (use the default parameter values)
+Run within distance query (use the default parameter values, within-distance threshold = 10KM)
 
 ```bash
 # gpu version
-./within_polygon -s lakes.idl -r -g
+./within_polygon -s lakes.dt -r -g
 # cpu version
-./within_polygon_cpu -s lakes.idl -r
+./within_polygon_cpu -s lakes.dt -r
 # approximate query
-./within_polygon -s lakes.idl -r -g -a
+./within_polygon -s lakes.dt -r -g -a
 ```
 
