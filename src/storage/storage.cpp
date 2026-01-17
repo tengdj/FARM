@@ -1,10 +1,3 @@
-/*
- * storage.cpp
- *
- *  Created on: Jun 27, 2022
- *      Author: teng
- */
-
 #include "Ideal.h"
 
 std::mutex polygon_mtx;

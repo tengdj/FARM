@@ -36,11 +36,10 @@ void process_rasterization(query_context *gctx){
 	size_t former = gctx->target_num;
 	gctx->target_num = ideals.size();
 
-	struct timeval start = get_cur_time();
+	// struct timeval start = get_cur_time();
 	pthread_t threads[gctx->num_threads];
 	query_context ctx[gctx->num_threads];
 	for(int i=0;i<gctx->num_threads;i++){
-		ctx[i] = *gctx;
 		ctx[i].thread_id = i;
 		ctx[i].global_ctx = gctx;
 	}
@@ -61,6 +60,14 @@ void process_rasterization(query_context *gctx){
 
 void preprocess(query_context *gctx){
 	vector<Ideal *> target_ideals;
+	// auto pairs = gctx->object_pairs;
+	// for(auto &p:pairs){
+	// 	target_ideals.push_back(gctx->source_ideals[p.first]);
+	// 	target_ideals.push_back(gctx->target_ideals[p.second]);
+	// }
+	// sort(target_ideals.begin(), target_ideals.end());
+	// target_ideals.erase(unique(target_ideals.begin(), target_ideals.end()), target_ideals.end());
+	// gctx->target = (void *)&target_ideals;
 	target_ideals.insert(target_ideals.end(), gctx->source_ideals.begin(), gctx->source_ideals.end());
 	target_ideals.insert(target_ideals.end(), gctx->target_ideals.begin(), gctx->target_ideals.end());
 	gctx->target = (void *)&target_ideals;
@@ -68,7 +75,7 @@ void preprocess(query_context *gctx){
 	if(gctx->use_hierachy){
 		UniversalGrid::getInstance().configure(gctx->max_layers);
 	}
-
+	
 	process_rasterization(gctx);
 
 #ifdef USE_GPU

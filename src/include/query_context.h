@@ -7,10 +7,6 @@
 #include <boost/program_options.hpp>
 #include <cfloat>
 
-#ifdef USE_GPU
-#include <../cuda/mygpu.h>
-#endif
-
 #include "Point.h"
 #include "Box.h"
 
@@ -101,6 +97,7 @@ public:
 	bool use_qtree = false;
 	bool use_gpu = false;
 	bool use_hierachy = false;
+	bool use_approximation = false;
 
 	int mer_sample_round = 20;
 	bool perform_refine = true;
@@ -108,7 +105,7 @@ public:
 	float sample_rate = 1.0;
 	double load_factor = 1.0;
 	size_t batch_size = 0;
-	int category_count = 20;
+	int category_count = 16;
 	float merge_threshold = 0.9;
 	int NLow = 1;
 	int unroll_size = 16;
@@ -202,9 +199,6 @@ public:
 	size_t num_vertices = 0;
 	size_t num_gridline_offset = 0;
 	size_t num_gridline_nodes = 0;
-
-	float *d_mean = nullptr;
-	float *d_stddev = nullptr;
 
 	float *d_degree_degree_per_kilometer_latitude = nullptr;
 	float *d_degree_per_kilometer_longitude_arr = nullptr;

@@ -1,10 +1,3 @@
-/*
- * MyPolygon.h
- *
- *  Created on: May 9, 2020
- *      Author: teng
- */
-
 #ifndef SRC_MYPOLYGON_H_
 #define SRC_MYPOLYGON_H_
 

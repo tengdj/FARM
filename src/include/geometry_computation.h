@@ -1,10 +1,3 @@
-/*
- * geometry_computation.h
- *
- *  Created on: Apr 28, 2022
- *      Author: teng
- */
-
 #ifndef SRC_GEOMETRY_GEOMETRY_COMPUTATION_H_
 #define SRC_GEOMETRY_GEOMETRY_COMPUTATION_H_
 

@@ -1439,6 +1439,8 @@ inline int binary_search(vector<Segment> &sorted_array, int left, int right, Poi
 
 void Ideal::intersection(Ideal *target, query_context *ctx)
 {
+	auto start = std::chrono::high_resolution_clock::now();
+
 	vector<int> pxs = retrieve_pixels(target->getMBB());
 	int etn = 0;
 	int itn = 0;
@@ -1455,8 +1457,13 @@ void Ideal::intersection(Ideal *target, query_context *ctx)
 	}
 	if (etn == pxs.size() || itn == pxs.size())
 	{
+			auto end = std::chrono::high_resolution_clock::now();
+				std::chrono::duration<double, std::milli> duration = end - start;
+				ctx->raster_filter_time += duration.count();
 		return;
 	}
+
+
 
 	vector<int> tpxs;
 	vector<Intersection> inters;
@@ -1484,6 +1491,10 @@ void Ideal::intersection(Ideal *target, query_context *ctx)
 		tpxs.clear();
 	}
 	pxs.clear();
+
+		auto end = std::chrono::high_resolution_clock::now();
+				std::chrono::duration<double, std::milli> duration = end - start;
+				ctx->raster_filter_time += duration.count();
 
 	std::sort(inters.begin(), inters.end(),
 			  [](const Intersection &a, const Intersection &b)
@@ -2463,33 +2474,7 @@ void RasterizePolygon(MyPolygon *mappedPol, Ideal *ideal, vector<vector<Point>> 
 
 bool Ideal::within(Ideal *target, query_context *ctx)
 {
-	vector<vector<Point>> sourceClippedPolygons(get_num_pixels());
-	vector<vector<Point>> targetClippedPolygons(target->get_num_pixels());
-	RasterizePolygon(this, this, sourceClippedPolygons);
-	RasterizePolygon(target, target, targetClippedPolygons);
-	
-	// MyPolygon::print();
-	// MyRaster::print();
-
-	// for (int i = 0; i <= num_layers; i++)
-	// {
-	// 	printf("level %d:\n", i);
-	// 	printf("dimx=%d, dimy=%d, step_x = %lf, step_y = %lf\n", layers[i].get_dimx(), layers[i].get_dimy(), layers[i].get_step_x(), layers[i].get_step_y());
-	// 	layers[i].mbr->print();
-	// 	layers[i].print();
-	// }
-	
-	// target->MyPolygon::print();
-	// target->MyRaster::print();
-
-	// for (int i = 0; i <= target->get_num_layers(); i++)
-	// {
-	// 	printf("level %d:\n", i);
-	// 	printf("dimx=%d, dimy=%d, step_x = %lf, step_y = %lf\n", target->get_layers()[i].get_dimx(), target->get_layers()[i].get_dimy(), target->get_layers()[i].get_step_x(), target->get_layers()[i].get_step_y());
-	// 	target->get_layers()[i].mbr->print();
-	// 	target->get_layers()[i].print();
-	// }
-
+	auto start = std::chrono::high_resolution_clock::now();
 	uint s_level = num_layers - 1;
 	uint t_level = target->get_num_layers() - 1;
 	box source_pixel_box, target_pixel_box;
@@ -2504,7 +2489,7 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 	int i = 0, j = 0;
 	int level = 0;
 	while(true){
-		cout << "level: " << ++ level << endl;
+		// cout << "level: " << ++ level << endl;
 		unordered_set<int> s_pxs, t_pxs;
 		bool s_next_layer = false, t_next_layer = false;
 		double s_step = layers[i].get_step_x(), t_step = target->get_layers()[j].get_step_x();
@@ -2620,117 +2605,13 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 		candidate_pairs.push_back({dist_apx, dist_low, dist_high, id1, id2});
 	}
 
-	std::map<int, std::ofstream> outputFiles;
-
-	for(int _i = 0; _i < candidate_pairs.size(); _i ++){
-		auto id1 = get<3>(candidate_pairs[_i]);
-		auto id2 = get<4>(candidate_pairs[_i]);
-		auto s_fullness = get_fullness(id1), t_fullness = target->get_fullness(id2);
-		auto s_p_apx = (decodePixelArea(id1, true) + decodePixelArea(id1, false)) / 2;
-		auto t_p_apx = (target->decodePixelArea(id2, true) + target->decodePixelArea(id2, false)) / 2;
-		// auto pf = classifyPixel(s_p_apx, get_pixel_area(), t_p_apx, target->get_pixel_area(), 20);
-		// auto pf = classifyPixel(get_areas(id1) , get_pixel_area(), target->get_areas(id2), target->get_pixel_area(), 20);
-		// auto pf = classifyPixel(s_p_apx + t_p_apx, get_pixel_area() + target->get_pixel_area(), 20);
-		auto pf = classifyPixel(get_areas(id1) + target->get_areas(id2), get_pixel_area() + target->get_pixel_area(), 20);
-
-		auto box1 = get_pixel_box(get_x(id1), get_y(id1));
-		auto box2 = target->get_pixel_box(target->get_x(id2), target->get_y(id2));
-		if(box1.intersect(box2)) continue;
-		if(box1.contain(box2)) continue;
-		if(box2.contain(box1)) continue;
-		double dist_low = box1.distance(box2, false);
-		double dist_high = box1.max_distance(box2, false);
-
-		// double min_dist = 100000.0;
-		// for(int i = 0; i < get_num_sequences(id1); i ++){
-		// 	auto er1 = get_edge_sequence(get_offset(id1) + i);
-		// 	for(int j = 0; j < target->get_num_sequences(id2); j ++){
-		// 		auto er2 = target->get_edge_sequence(target->get_offset(id2) + j);
-		// 		if(er1.second < 2 || er2.second < 2) continue;
-		// 		double dist = segment_to_segment_within_batch(target->boundary->p+er2.first,
-		// 														boundary->p+er1.first, er2.second, er1.second,
-		// 														ctx->within_distance, ctx->geography);
-		// 		min_dist = min(dist, min_dist);
-		// 	}
-		// }
-
-		double min_dist = DBL_MAX;
-		auto poly1 = sourceClippedPolygons[id1];
-		auto poly2 = targetClippedPolygons[id2];
-		// 检查poly1的每个点到poly2的所有边的最短距离
-		for (const auto& p1 : poly1) {
-			for (size_t i = 0; i < poly2.size(); ++i) {
-				Point a = poly2[i];
-				Point b = poly2[(i + 1) % poly2.size()];
-				min_dist = std::min(min_dist, point_to_segment_distance(p1, a, b, false));
-			}
-		}
-		
-		// 检查poly2的每个点到poly1的所有边的最短距离
-		for (const auto& p2 : poly2) {
-			for (size_t i = 0; i < poly1.size(); ++i) {
-				Point a = poly1[i];
-				Point b = poly1[(i + 1) % poly1.size()];
-				min_dist = std::min(min_dist, point_to_segment_distance(p2, a, b, false));
-			}
-		}
-
-		if(min_dist == 100000){
-			continue;
-			// printf("id = %d, dimx = %d, dimy = %d\n", id, get_dimx(), get_dimy());
-			// MyPolygon::print();
-			// MyRaster::print();
-			// printf("id = %d, dimx = %d, dimy = %d\n", target->id, target->get_dimx(), target->get_dimy());
-			// target->MyPolygon::print();
-			// target->MyRaster::print();
-			// printf("id1 = %d %d id2 = %d %d dist = %lf dist_low = %lf dist_high = %lf\n", id1, get_fullness(id1), id2, target->get_fullness(id2), min_dist, dist_low, dist_high);
-			// printf("%d %d\n", get_num_sequences(id1), target->get_num_sequences(id2));
-		}
-
-		double ratio = (min_dist - dist_low) / (dist_high - dist_low);
-
-		// if(pf == 1 && ratio < 0){
-		// 	printf("id = %d, dimx = %d, dimy = %d\n", id, get_dimx(), get_dimy());
-		// 	MyPolygon::print();
-		// 	MyRaster::print();
-		// 	printf("id = %d, dimx = %d, dimy = %d\n", target->id, target->get_dimx(), target->get_dimy());
-		// 	target->MyPolygon::print();
-		// 	target->MyRaster::print();
-		// 	printf("id1 = %d %d id2 = %d %d dist = %lf dist_low = %lf dist_high = %lf\n", id1, get_fullness(id1), id2, target->get_fullness(id2), min_dist, dist_low, dist_high);
-		// 	// printf("source\n");
-		// 	// for(auto p : sourceClippedPolygons[id1]){
-		// 	// 	p.print();
-		// 	// }
-		// 	// printf("target\n");
-		// 	// for(auto p : targetClippedPolygons[id2]){
-		// 	// 	p.print();
-		// 	// }
-		// }
-
-
-		// if (outputFiles.find(pf) == outputFiles.end())
-		// {
-		// 	std::string filename = "class_" + std::to_string(pf) + ".txt";
-		// 	outputFiles[pf].open(filename);
-		// 	if (!outputFiles[pf])
-		// 	{
-		// 		std::cerr << "无法创建文件: " << filename << std::endl;
-		// 		return 1;
-		// 	}
-		// }
-
-		std::string filename = "class_" + std::to_string(pf) + ".txt";
-		std::ofstream outfile(filename, std::ios::app);
-
-        outfile << std::fixed << std::setprecision(6) << ratio << endl;
-
-
-	}
-
-	return 0;
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double, std::milli> duration = end - start;
+	ctx->raster_filter_time += duration.count();
 
 	sort(candidate_pairs.begin(), candidate_pairs.end());
-	
+	// if(candidate_pairs.size() > 0) printf("%f\n", get<0>(candidate_pairs[0]));
+
 	double min_dist = 100000.0;
 	for(int pair_id = 0; pair_id < candidate_pairs.size(); pair_id ++){
 		double reference_dist = 100000;
@@ -2839,3 +2720,4 @@ bool Ideal::within(Ideal *target, query_context *ctx)
 
 // 	return segment_intersect_batch(this->boundary->p, target->boundary->p, this->boundary->num_vertices, target->boundary->num_vertices);
 // }
+

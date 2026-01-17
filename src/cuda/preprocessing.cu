@@ -242,14 +242,6 @@ void preprocess_for_gpu(query_context *gctx)
         CUDA_SAFE_CALL(cudaMemcpy(gctx->d_layer_offset, gctx->h_layer_offset, gctx->num_layers * sizeof(uint32_t), cudaMemcpyHostToDevice));
     }
 
-    float h_mean[20] = {0.0, 0.7, 0.62, 0.55, 0.52, 0.45, 0.42, 0.4, 0.38, 0.34, 0.31, 0.28, 0.25, 0.22, 0.18, 0.15, 0.1, 0.05, 0.0 ,0.0};
-	float h_stddev[20] = {0.0, 0.2, 0.19, 0.18, 0.17, 0.16, 0.16, 0.15, 0.15, 0.14, 0.13, 0.13, 0.12, 0.12, 0.11, 0.11, 0.1, 0.09, 0.08, 0.0};
-
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_mean, sizeof(h_mean)));
-    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_mean, h_mean, sizeof(h_mean), cudaMemcpyHostToDevice));
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_stddev, sizeof(h_stddev)));
-    CUDA_SAFE_CALL(cudaMemcpy(gctx->d_stddev, h_stddev, sizeof(h_stddev), cudaMemcpyHostToDevice));
-
     float h_degree_per_kilometer_latitude = 360.0/40076.0;
     float h_degree_per_kilometer_longitude_arr[] = {
             0.008983,0.008983,0.008983,0.008983,0.008983,0.008983,0.008983,0.008984,0.008984,0.008984
@@ -350,14 +342,13 @@ void preprocess_for_gpu(query_context *gctx)
     CUDA_SAFE_CALL(cudaMemcpy(gctx->d_degree_per_kilometer_longitude_arr, h_degree_per_kilometer_longitude_arr, sizeof(h_degree_per_kilometer_longitude_arr), cudaMemcpyHostToDevice));
 
     // GPU Buffer
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 8UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferInput, 10UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferinput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 8UL * 1024 * 1024 * 1024));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_BufferOutput, 10UL * 1024 * 1024 * 1024));
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_bufferoutput_size, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
 
-    // 临时的batch size
     CUDA_SAFE_CALL(cudaMalloc((void **)&gctx->d_result, sizeof(uint)));
     CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
 

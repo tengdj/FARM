@@ -56,6 +56,8 @@ void *query(void *args){
 	gctx->found += ctx->found;
 	gctx->raster_filter_time += ctx->raster_filter_time;
 	gctx->refine_time += ctx->refine_time;
+	printf("thread %d finished: found %d, raster time %lf ms, refine time %lf ms\n",
+		ctx->thread_id, ctx->found, ctx->raster_filter_time, ctx->refine_time);
 	gctx->unlock();
 	return NULL;
 }
@@ -64,7 +66,6 @@ int main(int argc, char** argv) {
 	query_context global_ctx;
 	global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::intersect;
-	global_ctx.num_threads = 1;
 
     global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
     for (Ideal *p : global_ctx.source_ideals)
@@ -74,7 +75,7 @@ int main(int argc, char** argv) {
 	global_ctx.target_ideals = load_binary_file(global_ctx.target_path.c_str(),global_ctx);
     global_ctx.target_num = global_ctx.target_ideals.size();
 
-	auto rtree_start = std::chrono::high_resolution_clock::now();
+	timeval start = get_cur_time();
 	pthread_t threads[global_ctx.num_threads];
 	query_context ctx[global_ctx.num_threads];
 	for (int i = 0; i < global_ctx.num_threads; i++)
@@ -93,21 +94,15 @@ int main(int argc, char** argv) {
 		pthread_join(threads[i], &status);
 	}
 
-	auto rtree_end = std::chrono::high_resolution_clock::now();
-	auto rtree_duration = std::chrono::duration_cast<std::chrono::milliseconds>(rtree_end - rtree_start);
-	std::cout << "rtree filter time: " << rtree_duration.count() << " ms" << std::endl;
+	logt("rtree query finished", start);
 
 	global_ctx.index = 0;
 	global_ctx.target_num = global_ctx.object_pairs.size();    
-	auto preprocess_start = std::chrono::high_resolution_clock::now();
+	start = get_cur_time();
 	preprocess(&global_ctx);
-	auto preprocess_end = std::chrono::high_resolution_clock::now();
-	auto preprocess_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start);
-	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
- 
-	printf("%d\n", global_ctx.object_pairs.size());
+	logt("preprocess finished", start);
 
-	auto gpu_start = std::chrono::high_resolution_clock::now();
+	start = get_cur_time();
 	pthread_t threads2[global_ctx.num_threads];
 	query_context ctx2[global_ctx.num_threads];
 	for(int i=0;i<global_ctx.num_threads;i++){
@@ -123,14 +118,8 @@ int main(int argc, char** argv) {
 		pthread_join(threads2[i], &status);
 	}
 
-	auto gpu_end = std::chrono::high_resolution_clock::now();
-	auto gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(gpu_end - gpu_start);
-	std::cout << "gpu time: " << gpu_duration.count() << " ms" << std::endl;
-
-	printf("FOUND: %d\n", global_ctx.found);
-	printf("rater filter time: %lf ms\n", global_ctx.raster_filter_time);
-	printf("refine time: %lf ms\n", global_ctx.refine_time);
-	// printf("intersec duration = %lf\n", global_ctx.test_duration);
+	global_ctx.print_stats();
+	logt("query finished", start);
 
 	cout << endl;
 	return 0;

@@ -1,10 +1,3 @@
-/*
- * cuda_util.h
- *
- *  Created on: Jun 1, 2020
- *      Author: teng
- */
-
 #ifndef CUDA_UTIL_H_
 #define CUDA_UTIL_H_
 

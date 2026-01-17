@@ -1,9 +1,3 @@
-/*
- * vertex_sequence.cpp
- *
- *  Created on: Apr 25, 2023
- *      Author: teng
- */
 #include "../include/MyPolygon.h"
 
 // To find orientation of ordered triplet (p, q, r).

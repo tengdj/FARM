@@ -1,10 +1,3 @@
-/*
- * Point.h
- *
- *  Created on: Jan 1, 2021
- *      Author: teng
- */
-
 #ifndef SRC_GEOMETRY_POINT_H_
 #define SRC_GEOMETRY_POINT_H_
 #include "util.h"

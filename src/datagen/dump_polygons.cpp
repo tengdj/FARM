@@ -2,16 +2,15 @@
 #include "../include/query_context.h"
 
 int main(int argc, char** argv) {
-    query_context global_ctx;
-	global_ctx.num_threads = 1;
-	// vector<Ideal *> polygons = load_polygon_wkt("/home/qmh/IDEAL/src/input.txt");
-	vector<Ideal *> polygons = load_polygon_wkt("/home/qmh/data/wkt/oligo2_prj_div.wkt");
+	if (argc < 3) {
+        std::cerr << "Usage: " << argv[0] << " <input> <output>\n";
+        return 1;
+    }
 
-    // for(auto poly : polygons){
-    //     poly->MyPolygon::print();
-    // }
-
-    // dump_polygons_to_file(polygons, "/home/qmh/IDEAL/src/random.idl");
-    dump_polygons_to_file(polygons, "/home/qmh/data/exp/oligo2_div.idl");
+    string input_path = argv[1];;
+    string output_path = argv[2];
+	
+	vector<Ideal *> polygons = load_polygon_wkt(input_path.c_str());
+    dump_polygons_to_file(polygons, output_path.c_str());
     return 0;
 }

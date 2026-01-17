@@ -19,7 +19,6 @@ struct Task
     int pair_id = 0;
 };
 
-// flags: 0(not contain), 1(maybe contain), 2(contain)
 __global__ void kernel_filter_intersection(pair<uint32_t,uint32_t>* pairs, IdealOffset *idealoffset,
                                              RasterInfo *info, uint8_t *status, uint size, 
                                              PixPair *pixpairs, uint *pp_size, uint8_t category_count)
@@ -502,6 +501,34 @@ __global__ void rebuild_polygons(Segment* segments, uint8_t* status, size_t size
 	}
 }
 
+__global__ void kernel_calculate_area(PixPair *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *info, uint8_t *status, uint *size, uint8_t category_count, double *res){
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if(x < *size){
+        int pa = pixpairs[x].source_pixid;
+        int pb = pixpairs[x].target_pixid;
+        int pair_id = pixpairs[x].pair_id;
+
+        pair<uint32_t, uint32_t> pair = pairs[pair_id];
+        uint32_t src_idx = pair.first;
+        uint32_t tar_idx = pair.second;
+        IdealOffset source = idealoffset[src_idx];
+        IdealOffset target = idealoffset[tar_idx];
+
+        uint8_t pa_fullness = (status + source.status_start)[pa], pb_fullness = (status + target.status_start)[pb];
+        double pa_pixelArea = info[src_idx].step_x * info[src_idx].step_y;
+        double pb_pixelArea = info[tar_idx].step_x * info[tar_idx].step_y;
+        double pa_low = gpu_decode_fullness(pa_fullness, pa_pixelArea, category_count, true);
+        double pa_high = gpu_decode_fullness(pa_fullness, pa_pixelArea, category_count, false);
+        double pa_apx = (pa_low + pa_high) / 2;
+        double pb_low = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, true);
+        double pb_high = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, false);
+        double pb_apx = (pb_low + pb_high) / 2;
+        double int_area_high = std::min(pa_pixelArea, pb_pixelArea);
+
+        atomicAdd(res + pair_id, int_area_high);
+    }
+}
+
 void cuda_intersection(query_context *gctx)
 {
 	size_t batch_size = gctx->index_end - gctx->index;
@@ -513,16 +540,11 @@ void cuda_intersection(query_context *gctx)
     const int block_size = BLOCK_SIZE;
     int grid_size = (batch_size + block_size - 1) / block_size;
 
-	auto filter_start = std::chrono::high_resolution_clock::now();
     kernel_filter_intersection<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, batch_size, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->category_count);
     cudaDeviceSynchronize();
     check_execution("kernel_filter_intersection");
-	auto filter_end = std::chrono::high_resolution_clock::now();
-	auto filter_duration = std::chrono::duration_cast<std::chrono::milliseconds>(filter_end - filter_start);
-	std::cout << "filter time: " << filter_duration.count() << " ms" << std::endl;
 
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-    printf("h_buffer_size = %u\n", h_bufferinput_size);
 
 	if(h_bufferinput_size == 0) return;
 	
@@ -530,16 +552,9 @@ void cuda_intersection(query_context *gctx)
 
     grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-	auto unroll_start = std::chrono::high_resolution_clock::now();
     kernel_unroll_intersection<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_status, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
     cudaDeviceSynchronize();
     check_execution("kernel_unroll_intersection");
-	auto unroll_end = std::chrono::high_resolution_clock::now();
-	auto unroll_duration = std::chrono::duration_cast<std::chrono::milliseconds>(unroll_end - unroll_start);
-	std::cout << "unroll time: " << unroll_duration.count() << " ms" << std::endl;
-
-    CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-    printf("h_buffer_size = %u\n", h_bufferoutput_size);
 
   	CUDA_SWAP_BUFFER();
   
@@ -547,22 +562,13 @@ void cuda_intersection(query_context *gctx)
 
     grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-	auto refine_start = std::chrono::high_resolution_clock::now();
     kernel_refinement_intersection<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_vertices, gctx->d_bufferinput_size, (Intersection *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
     cudaDeviceSynchronize();
     check_execution("kernel_refinement_intersection");
-	auto refine_end = std::chrono::high_resolution_clock::now();
-	auto refine_duration = std::chrono::duration_cast<std::chrono::milliseconds>(refine_end - refine_start);
-	std::cout << "refine time: " << refine_duration.count() << " ms" << std::endl;
-
-	CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-    printf("h_buffer_size = %u\n", h_bufferoutput_size);
 
 	CUDA_SWAP_BUFFER();
 
 	if(h_bufferinput_size == 0) return;
-
-	auto segment_start = std::chrono::high_resolution_clock::now();
 
 	// check source polygon edges 
     thrust::device_ptr<Intersection> begin = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput);
@@ -590,11 +596,6 @@ void cuda_intersection(query_context *gctx)
 
 	CUDA_SAFE_CALL(cudaMemcpy(gctx->d_bufferinput_size, &h_bufferinput_size, 
 							sizeof(uint), cudaMemcpyHostToDevice));
-
-	// end = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput + h_bufferinput_size);
-    // thrust::sort(thrust::device, begin, end, CompareSourceIntersections());
-
-	// PrintBuffer((Intersection *)gctx->d_BufferInput, num_intersections);
 
 	grid_size = (num_intersections + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
@@ -626,8 +627,6 @@ void cuda_intersection(query_context *gctx)
 			
 	uint &num_segments = h_bufferinput_size;
 
-	printf("num_segqments = %d\n", num_segments);
-
 	if(num_segments == 0) return;
 
 	thrust::device_ptr<Segment> seg_begin = thrust::device_pointer_cast((Segment*)gctx->d_BufferInput);
@@ -648,10 +647,6 @@ void cuda_intersection(query_context *gctx)
 				return a.is_source < b.is_source;
 			}
 		});
-
-	// PrintBuffer((Segment *)gctx->d_BufferInput, num_segments);
-    // return;
-
 
     thrust::device_vector<int> d_indices(num_segments);
     thrust::sequence(d_indices.begin(), d_indices.end());
@@ -676,11 +671,6 @@ void cuda_intersection(query_context *gctx)
 					d_indices.begin(), d_indices.end(),
                     d_flags.begin(), d_starts.begin(),
                     thrust::identity<int>());
-
-	// thrust::host_vector<int> h_starts = d_starts;
-	// std::cout << "\nStart positions:\n";
-    // for (int i : h_starts) std::cout << i << " ";
-    // std::cout << std::endl;
 	
 	uint8_t *pip = nullptr;
 	CUDA_SAFE_CALL(cudaMalloc((void **) &pip, num_segments * sizeof(uint8_t)));
@@ -708,10 +698,6 @@ void cuda_intersection(query_context *gctx)
 		pip);
 	cudaDeviceSynchronize();
     check_execution("kernel_refinement_segment_contain");	
-
-	auto segment_end = std::chrono::high_resolution_clock::now();
-	auto segment_duration = std::chrono::duration_cast<std::chrono::milliseconds>(segment_end - segment_start);
-	std::cout << "segment time: " << segment_duration.count() << " ms" << std::endl;
 
 	// printf("---------------------------------------------------------------------------------------------------\n");
 	
@@ -764,5 +750,35 @@ void cuda_intersection(query_context *gctx)
 	CUDA_SAFE_CALL(cudaFree(d_inters_per_pair));
 	CUDA_SAFE_CALL(cudaFree(pip));
 	// CUDA_SAFE_CALL(cudaFree(d_area));
+    return;
+}
+
+void cuda_intersection_a(query_context *gctx)
+{
+	size_t batch_size = gctx->index_end - gctx->index;
+    uint h_bufferinput_size, h_bufferoutput_size;
+	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
+	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
+
+    double *d_res = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_res, batch_size * sizeof(double)));
+    CUDA_SAFE_CALL(cudaMemset(d_res, 0, batch_size * sizeof(double)));
+
+	/*1. Raster Model Filtering*/
+    const int block_size = BLOCK_SIZE;
+    int grid_size = (batch_size + block_size - 1) / block_size;
+
+    kernel_filter_intersection<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, batch_size, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->category_count);
+    cudaDeviceSynchronize();
+    check_execution("kernel_filter_intersection");
+
+    CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
+
+    grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    
+    kernel_calculate_area<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, gctx->d_bufferinput_size, gctx->category_count, d_res);
+    cudaDeviceSynchronize();
+    check_execution("kernel_calculate_area");
+
     return;
 }

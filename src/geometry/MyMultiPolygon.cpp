@@ -1,10 +1,3 @@
-/*
- * MyMultipolygon.cpp
- *
- *  Created on: May 26, 2020
- *      Author: teng
- */
-
 #include "../include/MyPolygon.h"
 
 MyMultiPolygon *MyMultiPolygon::read_multipolygon(){

@@ -20,9 +20,9 @@ int main(int argc, char** argv){
 	// // read all the points
 	// global_ctx.load_points();
 
-	Point* source = load_point_wkt("/home/qmh/selected_points.csv", global_ctx.target_num, &global_ctx);
+	Point* source = load_point_wkt("/home/selected_points.csv", global_ctx.target_num, &global_ctx);
 
-	std::string filename = "/home/qmh/output.csv";
+	std::string filename = "/home/output.csv";
 
 	std::ifstream file(filename);
     if (!file.is_open()) {

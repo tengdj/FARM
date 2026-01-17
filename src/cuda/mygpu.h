@@ -1,10 +1,3 @@
-/*
- * mygpu.h
- *
- *  Created on: Dec 9, 2019
- *      Author: teng
- */
-
 #ifndef MYGPU_H_
 #define MYGPU_H_
 

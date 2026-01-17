@@ -11,8 +11,8 @@ bool MySearchCallback(Ideal *ideal, void *arg)
 	query_context *gctx = ctx->global_ctx;
 
 	Ideal *target = (Ideal *)ctx->target;
-    if(ideal->getMBB()->intersect(*target->getMBB()))
-	    ctx->object_pairs.push_back(make_pair(ideal->id, target->id + gctx->source_ideals.size()));
+    // if(ideal->getMBB()->intersect(*target->getMBB()))
+	ctx->object_pairs.push_back(make_pair(ideal->id, target->id + gctx->source_ideals.size()));
 
 	return true;
 }
@@ -50,6 +50,7 @@ int main(int argc, char** argv) {
 	global_ctx.target_ideals = load_binary_file(global_ctx.target_path.c_str(),global_ctx);
     global_ctx.target_num = global_ctx.target_ideals.size();
 
+	timeval start = get_cur_time();
     pthread_t threads[global_ctx.num_threads];
 	query_context ctx[global_ctx.num_threads];
 	for (int i = 0; i < global_ctx.num_threads; i++)
@@ -66,41 +67,32 @@ int main(int argc, char** argv) {
 		void *status;
 		pthread_join(threads[i], &status);
 	}
+	logt("rtree filtering finished", start);
 
 	global_ctx.index = 0;
 	global_ctx.target_num = global_ctx.object_pairs.size();    
 
-	auto preprocess_start = std::chrono::high_resolution_clock::now();
+	start = get_cur_time();
 	preprocess(&global_ctx);
-	auto preprocess_end = std::chrono::high_resolution_clock::now();
-	auto preprocess_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start);
-	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
+	logt("preprocess finished", start);
 
-	auto preprocess_gpu_start = std::chrono::high_resolution_clock::now();
+	start = get_cur_time();
 	preprocess_for_gpu(&global_ctx);
-	auto preprocess_gpu_end = std::chrono::high_resolution_clock::now();
-	auto preprocess_gpu_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_gpu_end - preprocess_gpu_start);
-	std::cout << "preprocess for gpu time: " << preprocess_gpu_duration.count() << " ms" << std::endl;
-
-	auto total_start = std::chrono::high_resolution_clock::now();
-
-	printf("num_pairs = %d\n", global_ctx.num_pairs);
+	logt("preprocess for gpu finished", start);
 
     if(global_ctx.batch_size == 0) global_ctx.batch_size = global_ctx.num_pairs;
+	start = get_cur_time();
 	for(int i = 0; i < global_ctx.num_pairs; i += global_ctx.batch_size){
-        auto batch_start = std::chrono::high_resolution_clock::now();
 		global_ctx.index = i;
 		global_ctx.index_end = min(i + global_ctx.batch_size, global_ctx.num_pairs);
 		ResetDevice(&global_ctx);
-		cuda_intersection(&global_ctx);
-		auto batch_end = std::chrono::high_resolution_clock::now();
-		auto batch_duration = std::chrono::duration_cast<std::chrono::milliseconds>(batch_end - batch_start);
-		std::cout << "batch time: " << batch_duration.count() << " ms" << std::endl;
+		if(global_ctx.use_approximation){
+			cuda_intersection_a(&global_ctx);
+		}else{
+			cuda_intersection(&global_ctx);
+		}
     }
 
-	auto total_end = std::chrono::high_resolution_clock::now();
-	auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start);
-	std::cout << "total query time: " << total_duration.count() << " ms" << std::endl;
-
+	logt("query finished", start);
     return 0;
 }

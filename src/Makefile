@@ -5,7 +5,7 @@ NVCC = nvcc
 SRCS := $(wildcard */*.cpp)
 OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 
-INCLUDES	= -I /usr/include -I ./include -I /usr/local/include -I /usr/local/cuda-12.2/targets/x86_64-linux/include  -I /home/qmh/optix/include
+INCLUDES	= -I /usr/include -I ./include -I /usr/local/include -I /usr/local/cuda-12.2/targets/x86_64-linux/include
 #-lgeos_c  
 LIBS		= -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -lboost_program_options -lgeos -lpthread
 CPPFLAGS	= -O2 -std=c++17 -Wno-cpp
@@ -58,24 +58,9 @@ intersection:	query/intersection.o $(GEOMETRY_OBJS)
 
 intersection_cpu:	query/intersection_cpu.o $(GEOMETRY_OBJS)
 	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
-	
-print_raster:	test/print_raster.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
-		
-print_layers:	test/print_layers.o $(GEOMETRY_OBJS)
-	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
-
-dump_points:	datagen/dump_points.o $(GEOMETRY_OBJS)
-	$(CXX) -o ../build/$@ $^ $(LIBS) 
 
 dump_polygons:	datagen/dump_polygons.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
-
-random_distribution:	datagen/random_distribution.o $(GEOMETRY_OBJS)
-	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
-
-filter_polygons:	datagen/filter_polygons.o $(GEOMETRY_OBJS)
-	$(CXX) -O3 -o ../build/$@ $^ $(LIBS) 
 
 clean:
 	rm -fr ../build/* $(OBJS) $(CU_OBJS)

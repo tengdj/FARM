@@ -56,6 +56,7 @@ void *query(void *args){
 
 	gctx->lock();
 	gctx->found += ctx->found;
+	gctx->raster_filter_time += ctx->raster_filter_time;
 	gctx->intersection_polygons.insert(gctx->intersection_polygons.end(), ctx->intersection_polygons.begin(), ctx->intersection_polygons.end());
 	gctx->unlock();
 	return NULL;
@@ -76,6 +77,7 @@ int main(int argc, char** argv) {
 	global_ctx.target_ideals = load_binary_file(global_ctx.target_path.c_str(),global_ctx);
     global_ctx.target_num = global_ctx.target_ideals.size();
 
+	timeval start = get_cur_time();
     pthread_t threads[global_ctx.num_threads];
 	query_context ctx[global_ctx.num_threads];
 	for (int i = 0; i < global_ctx.num_threads; i++)
@@ -93,17 +95,16 @@ int main(int argc, char** argv) {
 		pthread_join(threads[i], &status);
 	}
 
+	logt("rtree filtering finished", start);
+
 	global_ctx.index = 0;
 	global_ctx.target_num = global_ctx.object_pairs.size();    
 
-	auto preprocess_start = std::chrono::high_resolution_clock::now();
+	start = get_cur_time();
 	preprocess(&global_ctx);
-	auto preprocess_end = std::chrono::high_resolution_clock::now();
-	auto preprocess_duration = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start);
-	std::cout << "preprocess time: " << preprocess_duration.count() << " ms" << std::endl;
+	logt("preprocess finished", start);
 
-	global_ctx.num_threads = 1;
-	timeval start = get_cur_time();
+	start = get_cur_time();
 	pthread_t threads2[global_ctx.num_threads];
 	query_context ctx2[global_ctx.num_threads];
 	for(int i=0;i<global_ctx.num_threads;i++){
@@ -118,10 +119,7 @@ int main(int argc, char** argv) {
 		pthread_join(threads2[i], &status);
 	}
 
-	printf("FOUND: %d\n", global_ctx.intersection_polygons.size());
-
-	cout << endl;
 	global_ctx.print_stats();
-	logt("query",start);
+	logt("query finished", start);
 	return 0;
 }

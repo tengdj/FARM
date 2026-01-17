@@ -41,8 +41,8 @@ bool intersects_any(const Box& box, const std::vector<Box>& placed_boxes) {
 }
 
 int main() {
-    std::ifstream infile("/home/qmh/data/areawater.wkt");
-    std::ofstream outfile("/home/qmh/data/areawater_gaussian.wkt");
+    std::ifstream infile("/home/data/areawater.wkt");
+    std::ofstream outfile("/home/data/areawater_gaussian.wkt");
 
     std::vector<Polygon> polygons;
     std::string line;

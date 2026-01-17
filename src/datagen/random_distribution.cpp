@@ -42,8 +42,8 @@ Point polygonCentroid(Ideal *ideal) {
 int main() {
     // 1. 读取所有 polygon
 
-    string infile = "/home/qmh/data/wkt/complex.wkt";
-    // std::ofstream outfile("/home/qmh/data/wkt/valid_lakes_polygons_100_normal.wkt");
+    string infile = "/home/data/wkt/complex.wkt";
+    // std::ofstream outfile("/home/data/wkt/valid_lakes_polygons_100_normal.wkt");
 
     vector<Ideal*> source_ideals = load_polygon_wkt(infile.c_str());
 

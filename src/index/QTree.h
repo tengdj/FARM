@@ -1,10 +1,3 @@
-/*
- * QTree.h
- *
- *  Created on: Jan 1, 2021
- *      Author: teng
- */
-
 #ifndef SRC_INDEX_QTREE_H_
 #define SRC_INDEX_QTREE_H_
 #include <boost/sort/sort.hpp>

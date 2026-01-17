@@ -1,9 +1,3 @@
-/*
- * query_context.cpp
- *
- *  Created on: Sep 3, 2020
- *      Author: teng
- */
 #include "query_context.h"
 #include "../include/Ideal.h"
 
@@ -176,10 +170,6 @@ bool query_context::next_batch(int batch_num){
 //edge = [33.1568436 52.6532413 70.7067904 88.4315092 106.2501207 124.6311698 143.7354825 161.9386059 181.0331808 198.2849336]
 
 void query_context::print_stats(){
-
-	// log("count-query:\t%ld",query_count);
-	// log("count-contain:\t%ld",this->contain_check.counter);
-	// log("count-checked:\t%ld",object_checked.counter);
 	log("count-found:\t%ld",found);
 
 	if(object_checked.counter>0){
@@ -242,6 +232,7 @@ query_context get_parameters(int argc, char **argv){
 		("help", "produce help message")
 		("rasterize,r", "partition with rasterization")
 		("gpu,g", "query with gpu")
+		("approximation,a", "use approximation")
 		("hierachy,h", "partition with hierarchical grid")
 
 		("source,s", po::value<string>(&global_ctx.source_path), "path to the source")
@@ -251,7 +242,9 @@ query_context get_parameters(int argc, char **argv){
 		("batch_size,b", po::value<size_t>(&global_ctx.batch_size), "batch size")
 		("merge_threshold,m", po::value<float>(&global_ctx.merge_threshold), "merge threshold")
 		("NLow", po::value<int>(&global_ctx.NLow), "NLow")
-		("unorll_size,u", po::value<int>(&global_ctx.unroll_size), "unroll size")
+		("unorll_size,u", po::value<int>(&global_ctx.unroll_size), "unroll size"),
+		("within_distance,d", po::value<int>(&global_ctx.within_distance), "within distance"),
+		("category_count,w", po::value<int>(&global_ctx.category_count), "category count")
 		;
 	po::variables_map vm;
 	try{
@@ -268,6 +261,7 @@ query_context get_parameters(int argc, char **argv){
 
 	global_ctx.use_ideal = vm.count("rasterize");
 	global_ctx.use_gpu = vm.count("gpu");
+	global_ctx.use_approximation = vm.count("approximation");
 	global_ctx.use_hierachy = vm.count("hierachy");
 
 

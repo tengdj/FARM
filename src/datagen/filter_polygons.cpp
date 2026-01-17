@@ -16,7 +16,7 @@ bool is_valid_polygon(Ideal *poly) {
 }
 
 int main() {
-    string infile = "/home/qmh/data/wkt/complex_normal.wkt";
+    string infile = "/home/data/wkt/complex_normal.wkt";
     vector<Ideal*> source_ideals = load_polygon_wkt(infile.c_str());
     vector<Ideal*> polygons;
 
@@ -28,6 +28,6 @@ int main() {
 
     log("%d %d\n", source_ideals.size(), polygons.size());
 
-    dump_polygons_to_file(polygons, "/home/qmh/data/exp/complex_normal.idl");
+    dump_polygons_to_file(polygons, "/home/data/exp/complex_normal.idl");
     return 0;
 }

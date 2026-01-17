@@ -57,13 +57,6 @@ int main(int argc, char **argv)
     return 0;
 }
 
-/*
- * Parser.cpp
- *
- *  Created on: May 9, 2020
- *      Author: teng
- */
-
  #include "../include/Ideal.h"
  #include <fstream>
  #include "../index/RTree.h"

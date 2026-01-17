@@ -1,11 +1,3 @@
-/*
- * QTree.cpp
- *
- *  Created on: Jul 16, 2022
- *      Author: teng
- */
-
-
 #include "MyPolygon.h"
 
 
