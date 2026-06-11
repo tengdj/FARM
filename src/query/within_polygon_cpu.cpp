@@ -3,7 +3,7 @@
 #include <fstream>
 #include <queue>
 
-RTree<Ideal *, double, 2, double> ideal_rtree;
+RTree<Ideal *, double, 2, double> rtree;
 
 bool MySearchCallback(Ideal *ideal, void *arg)
 {
@@ -11,7 +11,7 @@ bool MySearchCallback(Ideal *ideal, void *arg)
 	query_context *gctx = ctx->global_ctx;
 
 	Ideal *target = (Ideal *)ctx->target;
-	if (ideal->id == target->id)
+	if (gctx->target_path.empty() && ideal->id == target->id)
 		return true;
 	ctx->object_pairs.push_back(make_pair(ideal->id, target->id));
 	return true;
@@ -22,7 +22,7 @@ void *rtree_query(void *args)
 	query_context *ctx = (query_context *)args;
 	query_context *gctx = ctx->global_ctx;
 	log("rtree thread %d is started", ctx->thread_id);
-	ctx->query_count = 0;
+	
 	while (ctx->next_batch(10))
 	{
 		for (int i = ctx->index; i < ctx->index_end; i++)
@@ -41,10 +41,10 @@ void *rtree_query(void *args)
 			}
 	
 			ctx->target = (void *)target;
-			ideal_rtree.Search(qb.low, qb.high, MySearchCallback, (void *)ctx);
+			rtree.Search(qb.low, qb.high, MySearchCallback, (void *)ctx);
 		}
 	}
-	ctx->merge_global();
+	ctx->merge_object_pairs();
 	return NULL;
 }
 
@@ -52,7 +52,7 @@ void *query(void *args){
 	query_context *ctx = (query_context *)args;
 	query_context *gctx = ctx->global_ctx;
 	log("thread %d is started",ctx->thread_id);
-	ctx->query_count = 0;
+	
 	while(ctx->next_batch(10)){
 		for(int i=ctx->index;i<ctx->index_end;i++){
             auto pair = gctx->object_pairs[i];
@@ -70,24 +70,20 @@ void *query(void *args){
 		}
 	}
 
-	gctx->lock();
-	gctx->found += ctx->found;
-	gctx->raster_filter_time += ctx->raster_filter_time;
-	gctx->unlock();
+	ctx->merge_global();
 	return NULL;
 }
 
 
 
 int main(int argc, char** argv) {
-	query_context global_ctx;
-	global_ctx = get_parameters(argc, argv);
+	query_context global_ctx = get_parameters(argc, argv);
 	global_ctx.query_type = QueryType::within_polygon;
 	
 	global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
 	for (Ideal *p : global_ctx.source_ideals)
 	{
-		ideal_rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
+		rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
 	}
 
 	if(global_ctx.target_path.empty()){
@@ -96,6 +92,10 @@ int main(int argc, char** argv) {
 		global_ctx.target_ideals = load_binary_file(global_ctx.target_path.c_str(),global_ctx);
 		global_ctx.target_num = global_ctx.target_ideals.size();
 	}
+
+	global_ctx.object_pairs.resize(global_ctx.source_ideals.size() * 200);
+	std::atomic<size_t> global_counter(0);
+	global_ctx.global_write_index = &global_counter;
 
 	timeval start = get_cur_time();
 	pthread_t threads[global_ctx.num_threads];
@@ -118,13 +118,14 @@ int main(int argc, char** argv) {
 	logt("rtree filtering finished", start);
 
 	global_ctx.index = 0;
-	global_ctx.target_num = global_ctx.object_pairs.size();
+	global_ctx.target_num = global_ctx.num_pairs;    
 
 	start = get_cur_time();
 	preprocess(&global_ctx);
 	logt("preprocessing finished", start);
 
 	start = get_cur_time();
+
 	pthread_t threads2[global_ctx.num_threads];
 	query_context ctx2[global_ctx.num_threads];
 	for(int i=0;i<global_ctx.num_threads;i++){
@@ -142,5 +143,7 @@ int main(int argc, char** argv) {
 
 	global_ctx.print_stats();
 	logt("query",start);
+
+	cout << endl;
 	return 0;
 }
