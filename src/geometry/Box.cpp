@@ -217,6 +217,15 @@ Point box::centroid(){
 	return Point((high[0]+low[0])/2, (high[1]+low[1])/2);
 }
 
+void box:: align(double step_x, double step_y){
+	const double EPS = 1e-9;
+	
+	low[0]  = std::floor(low[0] / step_x + EPS) * step_x;
+	low[1]  = std::floor(low[1] / step_y + EPS) * step_y;
+	high[0] = std::ceil(high[0] / step_x - EPS) * step_x;
+	high[1] = std::ceil(high[1] / step_y - EPS) * step_y;
+}
+
 void box::to_array(Point *p){
 	p[0].x = low[0];
 	p[0].y = low[1];

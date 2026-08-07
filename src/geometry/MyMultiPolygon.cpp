@@ -143,33 +143,3 @@ void print_boxes(vector<box *> boxes){
 	cboxes->print();
 	delete cboxes;
 }
-
-
-
-void MyMultiPoint::insert(vector<Point *> &origin_points){
-	points.insert(points.begin(), origin_points.begin(), origin_points.end());
-}
-void MyMultiPoint::insert(Point *p){
-	points.push_back(p);
-}
-void MyMultiPoint::print(size_t max_num){
-	double sample_rate = 1.0;
-	if(points.size()>max_num){
-		sample_rate = 1.0*max_num/points.size();
-	}
-	printf("MULTIPOINT (");
-	bool print_head = false;
-	for(size_t i=0;i<points.size();i++){
-		if(tryluck(sample_rate)){
-			if(!print_head){
-				print_head = true;
-			}else{
-				printf(",");
-			}
-			printf("%f %f",points[i]->x, points[i]->y);
-		}
-	}
-	printf(")\n");
-}
-
-

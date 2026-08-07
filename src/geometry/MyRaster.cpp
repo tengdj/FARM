@@ -5,31 +5,34 @@ MyRaster::~MyRaster(){
 	if(status) delete []status;
 }
 
-void MyRaster::init_raster(int num_pixels){
+void MyRaster::init_raster(int num_pixels) {
     assert(num_pixels >= 0);
 
-	double multi = abs((mbr->high[1]-mbr->low[1])/(mbr->high[0]-mbr->low[0]));
-	dimx = std::pow(num_pixels/multi,0.5);
-	dimy = dimx*multi;
+    double width = mbr->high[0] - mbr->low[0];
+    double height = mbr->high[1] - mbr->low[1];
 
-	if(dimx==0){
-		dimx = 1;
-	}
-	if(dimy==0){
-		dimy = 1;
-	}
+    assert(width > 0.0 && height > 0.0);
+    double multi = std::abs(height / width);
+  
+    dimx = static_cast<int>(std::round(std::pow(num_pixels / multi, 0.5)));
+    if (dimx < 1) dimx = 1;
+    dimy = static_cast<int>(std::round(dimx * multi));
+    if (dimy < 1) dimy = 1;
 
-	step_x = (mbr->high[0]-mbr->low[0])/dimx;
-	step_y = (mbr->high[1]-mbr->low[1])/dimy;
+    step_x = width / dimx;
+    step_y = height / dimy;
 
-	if(step_x<0.00001){
-		step_x = 0.00001;
-		dimx = (mbr->high[0]-mbr->low[0])/step_x+1;
-	}
-	if(step_y<0.00001){
-		step_y = 0.00001;
-		dimy = (mbr->high[1]-mbr->low[1])/step_y+1;
-	}
+    const double MIN_STEP = 0.00001;
+    
+    if (step_x < MIN_STEP) {
+        step_x = MIN_STEP;
+        dimx = static_cast<int>(std::ceil(width / step_x)); 
+    }
+    
+    if (step_y < MIN_STEP) {
+        step_y = MIN_STEP;
+        dimy = static_cast<int>(std::ceil(height / step_y));
+    }
 }
 
 void MyRaster::init_raster(int dx, int dy){
@@ -167,12 +170,6 @@ box *MyRaster::extractMER(int starter){
 	return curmer;
 }
 
-int MyRaster::get_id(int x, int y){
-	assert(x>=0&&x<dimx);
-	assert(y>=0&&y<dimy);
-	return y * dimx + x;
-}
-
 // from id to pixel x
 int MyRaster::get_x(int id){
 	return id % dimx;
@@ -184,14 +181,14 @@ int MyRaster::get_y(int id){
 	return id / dimx;
 }
 
-// the range must be [0, dimx]
+// the range must be [0, dimx)
 int MyRaster::get_offset_x(double xval){
 	assert(mbr);
 	assert(step_x>0.000000000001 && "the width per pixel must not be 0");
 	int x = double_to_int((xval-mbr->low[0])/step_x);
 	return min(max(x, 0), dimx - 1);
 }
-// the range must be [0, dimy]
+// the range must be [0, dimy)
 int MyRaster::get_offset_y(double yval){
 	assert(mbr);
 	assert(step_y>0.000000000001 && "the hight per pixel must not be 0");
@@ -199,40 +196,15 @@ int MyRaster::get_offset_y(double yval){
 	return min(max(y, 0), dimy - 1);
 }
 
-// void MyRaster::set_status(int id, PartitionStatus state){
-// 	int pos = id % 4 * 2;   // The multiplication by 2 is because each status occupies 2 bits.
-// 	if(state == OUT){
-// 		status[id / 4] &= ~((uint8_t)3 << pos);
-// 	}else if(state == IN){
-// 		status[id / 4] |= ((uint8_t)3 << pos);
-// 	}else{
-// 		status[id / 4] &= ~((uint8_t)1 << pos);
-// 		status[id / 4] |= ((uint8_t)1 << (pos + 1));
-// 	}
-// }
-
-void MyRaster::set_status(int id, uint8_t state){   // The multiplication by 2 is because each status occupies 2 bits.
-	status[id] = state;
+void MyRaster::set_status(int id, uint8_t state){
+	write_packed_status(status, static_cast<uint32_t>(id), bitwidth, state);
 }
 
-// PartitionStatus MyRaster::show_status(int id){
-// 	uint8_t st = status[id / 4];
-// 	int pos = id % 4 * 2;   // The multiplication by 2 is because each status occupies 2 bits.	
-// 	st &= ((uint8_t)3 << pos);
-// 	st >>= pos;
-// 	if(st == 0) return OUT;
-// 	if(st == 3) return IN;
-// 	return BORDER;
-// }
-
 PartitionStatus MyRaster::show_status(int id){
-	// if(id >= get_num_pixels()){
-	// 	log("id = %d num_pixels = %d\n", id, get_num_pixels());
-	// }
-	// assert(id < get_num_pixels());
-	if (status[id] == 0)
+	const uint8_t state = get_fullness(id);
+	if (state == 0)
 		return OUT;
-	else if (status[id] == category_count - 1)
+	else if (state == status_max_value(bitwidth))
 		return IN;
 	else
 		return BORDER;
@@ -240,28 +212,8 @@ PartitionStatus MyRaster::show_status(int id){
 
 void MyRaster::set_status_size()
 {
-	status_size = dimx * dimy;
-}
-
-vector<int> MyRaster::get_intersect_pixels(box *b){
-
-	// test all the pixels
-	int txstart = get_offset_x(b->low[0]);
-	int tystart = get_offset_y(b->low[1]);
-
-	double width_d = (b->high[0]-b->low[0]+step_x*0.9999999)/step_x;
-	int width = double_to_int(width_d);
-
-	double height_d = (b->high[1]-b->low[1]+step_y*0.9999999)/step_y;
-	int height = double_to_int(height_d);
-
-	vector<int> ret;
-	for(int i=txstart;i<txstart+width;i++){
-		for(int j=tystart;j<tystart+height;j++){
-			ret.push_back(get_id(i, j));
-		}
-	}
-	return ret;
+	status_size = static_cast<uint>(packed_status_bytes(
+		static_cast<size_t>(dimx) * dimy, bitwidth));
 }
 
 vector<int> MyRaster::get_closest_pixels(box &target){
@@ -345,39 +297,6 @@ vector<int> MyRaster::retrieve_pixels(box *target){
 	return ret;
 }
 
-bool MyRaster::contain(box *b, bool &contained){
-	if(!mbr->contain(*b)){
-		contained = false;
-		return true;
-	}
-	// test all the pixels that intersects b
-	vector<int> covered = get_intersect_pixels(b);
-
-	int incount = 0;
-	int outcount = 0;
-	for(auto pix : covered){
-		if(show_status(pix) == OUT){
-			outcount++;
-		}
-		if(show_status(pix) == IN){
-			incount++;
-		}
-	}
-	int total = covered.size();
-	covered.clear();
-	// all in/out
-	if(incount==total){
-		contained = true;
-		return true;
-	}else if(outcount==total){
-		contained = false;
-		return true;
-	}
-
-	// not determined by checking pixels only
-	return false;
-}
-
 vector<int> MyRaster::expand_radius(int core_x_low, int core_x_high, int core_y_low, int core_y_high, int step){
 
 	vector<int> needprocess;
@@ -441,51 +360,37 @@ size_t MyRaster::get_num_pixels(PartitionStatus status){
 	return num;	
 }
 
-void MyRaster::grid_align(){
-	UniversalGrid &space = UniversalGrid::getInstance();
-	bool flag1 = false, flag2 = false;
-	auto x = space.get_step_x();
-	auto y = space.get_step_y();
-	if (step_x <= x)
-		step_x = x, flag1 = true;
-	if (step_y <= y)
-		step_y = y, flag2 = true;
+void MyRaster::grid_align() {
+    UniversalGrid &space = UniversalGrid::getInstance();
 
-	for (int i = space.get_max_layers(); i > 0; i--){
-		if (!flag1 && step_x > x && step_x < x * 2){
-			flag1 = true;
-			step_x = abs(step_x - x) < abs(step_x - x * 2) ? x : x * 2;
-		}
-		if (!flag2 && step_y > y && step_y < y * 2){
-			flag2 = true;
-			step_y = abs(step_y - y) < abs(step_y - y * 2) ? y : y * 2;
-		}
-		if (flag1 && flag2)
-			break;
-		x *= 2;
-		y *= 2;
-	}
-	if(!flag1 || !flag2){
-		// printf("%lf %lf %lf %lf\n", x, y ,step_x, step_y);
-		cout << flag1 << " " << flag2 << endl;
-		cout << x << " " << y << " " << step_x << " " << step_y << endl;
-	}
-	assert(flag1 && flag2);
+    double base_x = space.get_step_x();
+    double base_y = space.get_step_y();
 
-	step_x = min(step_x, step_y);
-	step_y = step_x;
+    // find the 2^k * base closest to step.
+    auto align_dimension = [&](double current_step, double base_step, int max_layers) -> double {
+        if (current_step <= base_step) return base_step;
 
-	mbr->low[0] = floor(mbr->low[0] / step_x) * step_x;
-	mbr->low[1] = floor(mbr->low[1] / step_y) * step_y;
-	mbr->high[0] = ceil(mbr->high[0] / step_x) * step_x;
-	mbr->high[1] = ceil(mbr->high[1] / step_y) * step_y;
+        double log_val = log2(current_step / base_step);
+        int level = static_cast<int>(std::round(log_val));
 
-	dimx = static_cast<int>(round((mbr->high[0] - mbr->low[0]) / step_x));
-	dimy = static_cast<int>(round((mbr->high[1] - mbr->low[1]) / step_y));
+        if (level > max_layers) level = max_layers;
+        if (level < 0) level = 0; 
 
+        return base_step * std::pow(2.0, level);
+    };
 
-	// printf("dimx = %d, dimy = %d\n", dimx, dimy);
-	// printf("step_x = %lf, step_y = %lf\n", step_x, step_y);
-	// printf("MBR:\n");
-	// printf("POLYGON((%lf %lf, %lf %lf, %lf %lf, %lf %lf, %lf %lf))\n", mbr->low[0], mbr->low[1], mbr->low[0], mbr->high[1], mbr->high[0], mbr->high[1], mbr->high[0], mbr->low[1], mbr->low[0], mbr->low[1]);
+    int max_layers = space.get_max_layers();
+
+    step_x = align_dimension(step_x, base_x, max_layers);
+    step_y = align_dimension(step_y, base_y, max_layers);
+
+    step_x = std::min(step_x, step_y);
+    step_y = step_x; 
+
+    mbr->align(step_x, step_y);
+
+    dimx = static_cast<int>(std::round((mbr->high[0] - mbr->low[0]) / step_x));
+    dimy = static_cast<int>(std::round((mbr->high[1] - mbr->low[1]) / step_y));
+    if (dimx <= 0) dimx = 1;
+    if (dimy <= 0) dimy = 1;
 }

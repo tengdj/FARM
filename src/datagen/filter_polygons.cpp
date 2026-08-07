@@ -1,9 +1,9 @@
 #include <iostream>
 #include <fstream>
 #include <string>
-#include "Ideal.h"
+#include "farm.h"
 
-bool is_valid_polygon(Ideal *poly) {
+bool is_valid_polygon(Farm *poly) {
     for (int i = 0; i < poly->get_num_vertices(); i ++) {
         Point pt = poly->get_boundary()->p[i];
         double x = pt.x;
@@ -17,16 +17,16 @@ bool is_valid_polygon(Ideal *poly) {
 
 int main() {
     string infile = "/home/data/wkt/complex_normal.wkt";
-    vector<Ideal*> source_ideals = load_polygon_wkt(infile.c_str());
-    vector<Ideal*> polygons;
+    vector<Farm*> source_objects = load_polygon_wkt(infile.c_str());
+    vector<Farm*> polygons;
 
-    for(auto p : source_ideals){
+    for(auto p : source_objects){
         if(is_valid_polygon(p)){
             polygons.push_back(p);
         }
     }
 
-    log("%d %d\n", source_ideals.size(), polygons.size());
+    log("%d %d\n", source_objects.size(), polygons.size());
 
     dump_polygons_to_file(polygons, "/home/data/exp/complex_normal.idl");
     return 0;

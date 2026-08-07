@@ -1,12 +1,11 @@
-#include "Ideal.h"
+#include "farm.h"
 
 std::mutex polygon_mtx;
 std::queue<std::string> polygon_queue;
 std::condition_variable polygon_cv;
 bool polygon_done = false;
 
-// 线程函数：从队列中读取WKT并解析到局部容器中
-void process_lines(std::vector<Ideal*>& local_ideals) {
+void process_lines(std::vector<Farm*>& local_objects) {
     while (true) {
         std::string line;
         {
@@ -38,12 +37,12 @@ void process_lines(std::vector<Ideal*>& local_ideals) {
         // }
 
         size_t offset = wkt.find('(');
-        local_ideals.push_back(read_polygon(wkt.c_str(), offset));
+        local_objects.push_back(read_polygon(wkt.c_str(), offset));
     }
 }
 
-std::vector<Ideal*> load_polygon_wkt(const char* path) {
-    std::vector<Ideal*> ideals;
+std::vector<Farm*> load_polygon_wkt(const char* path) {
+    std::vector<Farm*> objs;
 
     if (!file_exist(path)) {
         log("%s does not exist", path);
@@ -57,87 +56,37 @@ std::vector<Ideal*> load_polygon_wkt(const char* path) {
     }
 
     std::vector<std::thread> workers;
-    int num_threads = 1; // 获取系统支持的线程数量
-	std::vector<std::vector<Ideal*>> local_ideals(num_threads); // 每个线程都有一个局部容器
+    int num_threads = 1; 
+	std::vector<std::vector<Farm*>> local_objects(num_threads);
 
-    // 启动多个线程处理WKT
     for (int i = 0; i < num_threads; ++i) {
-        workers.emplace_back(process_lines, std::ref(local_ideals[i]));
+        workers.emplace_back(process_lines, std::ref(local_objects[i]));
     }
 
-    // 主线程读取文件并将每一行放入队列
     std::string line;
     while (getline(infile, line)) {
         std::unique_lock<std::mutex> lock(polygon_mtx);
         polygon_queue.push(std::move(line));
-        polygon_cv.notify_one(); // 通知一个线程处理
+        polygon_cv.notify_one(); 
     }
 
     infile.close();
     polygon_done = true;
-    polygon_cv.notify_all(); // 通知所有线程处理结束
+    polygon_cv.notify_all(); 
 
-    // 等待所有线程结束
     for (auto& worker : workers) {
         if (worker.joinable()) {
             worker.join();
         }
     }
 
-	for (const auto& local_vec : local_ideals) {
-        ideals.insert(ideals.end(), local_vec.begin(), local_vec.end());
+	for (const auto& local_vec : local_objects) {
+        objs.insert(objs.end(), local_vec.begin(), local_vec.end());
     }
 
-	for(int i = 0; i < ideals.size(); i ++) ideals[i]->id = i; 
+	for(int i = 0; i < objs.size(); i ++) objs[i]->id = i;
 
-    return ideals;
-}
-
-Point* load_point_wkt(const char *path, size_t &count, query_context *ctx){
-	vector<string> wkts;
-	if(!file_exist(path)){
-		log("%s does not exist",path);
-		exit(1);
-	}
-
-	ifstream infile(path);
-	if(!infile){
-		std::cerr << "can not open this file\n";
-		exit(1);
-	}
-
-	string line;
-	// getline(infile, line);
-	while(getline(infile, line)){
-		count ++;
-		istringstream iss(line);
-		string wkt;
-
-		getline(iss, wkt); // 提取wkt
-		if (wkt.empty()) {
-            std::cerr << "read WKT failed\n";
-            continue;
-        }
-		// 去掉引号
-        // if (wkt.size() > 0 && wkt.front() == '"') {
-        //     wkt.erase(0, 1); // 删除起始的引号
-        // }
-        // if (wkt.size() > 0 && wkt.back() == '"') {
-        //     wkt.erase(wkt.size() - 1); // 删除结尾的引号
-        // }
-		wkts.push_back(wkt);
-	}
-
-	infile.close();
-
-	Point *points = new Point[count];
-
-	for(int i = 0; i < count; i ++){
-		size_t offset = wkts[i].find('(');
-		points[i] = *read_vertices(wkts[i].c_str(), offset, false)->p;
-	}
-
-	return points;	
+    return objs;
 }
 
 void dump_to_file(const char *path, char *data, size_t size)
@@ -155,7 +104,7 @@ void dump_to_file(const char *path, char *data, size_t size)
  *
  * */
 
-void dump_polygons_to_file(vector<Ideal *> ideals, const char *path){
+void dump_polygons_to_file(vector<Farm *> objs, const char *path){
 	ofstream os;
 	os.open(path, ios::out | ios::binary |ios::trunc);
 	assert(os.is_open());
@@ -164,9 +113,9 @@ void dump_polygons_to_file(vector<Ideal *> ideals, const char *path){
 	char *data_buffer = new char[buffer_size];
 	size_t data_size = 0;
 	size_t curoffset = 0;
-	PolygonMeta *pmeta = new PolygonMeta[ideals.size()];
-	for(int i=0;i<ideals.size();i++){
-		Ideal *p = ideals[i];
+	PolygonMeta *pmeta = new PolygonMeta[objs.size()];
+	for(int i=0;i<objs.size();i++){
+		Farm *p = objs[i];
 		if(p->get_data_size()+data_size > buffer_size){
 			os.write(data_buffer, data_size);
 			data_size = 0;
@@ -182,11 +131,11 @@ void dump_polygons_to_file(vector<Ideal *> ideals, const char *path){
 		os.write(data_buffer, data_size);
 	}
 	// dump the meta data of the polygons
-	os.write((char *)pmeta, sizeof(PolygonMeta)*ideals.size());
+	os.write((char *)pmeta, sizeof(PolygonMeta)*objs.size());
 //	for(PolygonMeta &pm:pmeta){
 //		printf("%ld\t%d\t%.12f\n", pm.offset, pm.size, pm.mbr.area());
 //	}
-	size_t bs = ideals.size();
+	size_t bs = objs.size();
 	os.write((char *)&bs, sizeof(size_t));
 	os.close();
 	delete []pmeta;
@@ -321,10 +270,10 @@ void *load_unit(void *arg)
 {
 	query_context *ctx = (query_context *)arg;
 	vector<load_holder *> *jobs = (vector<load_holder *> *)ctx->target;
-	vector<Ideal *> *global_polygons = (vector<Ideal *> *)ctx->target2;
+	vector<Farm *> *global_polygons = (vector<Farm *> *)ctx->target2;
 
 	char *buffer = new char[buffer_size];
-	vector<Ideal *> polygons;
+	vector<Farm *> polygons;
 	while (ctx->next_batch(1))
 	{
 		for (int i = ctx->index; i < ctx->index_end; i++)
@@ -336,7 +285,7 @@ void *load_unit(void *arg)
 			size_t off = 0;
 			while (off < poly_size)
 			{
-				Ideal *poly = new Ideal();
+				Farm *poly = new Farm();
 				off += poly->decode(buffer + off);
 				if (poly->get_num_vertices() >= 3 && tryluck(ctx->sample_rate))
 				{
@@ -358,11 +307,11 @@ void *load_unit(void *arg)
 	polygons.clear();
 	return NULL;
 }
-vector<Ideal *> load_binary_file(const char *path, query_context &global_ctx)
+vector<Farm *> load_binary_file(const char *path, query_context &global_ctx)
 {
 	global_ctx.index = 0;
 	global_ctx.index_end = 0;
-	vector<Ideal *> polygons;
+	vector<Farm *> polygons;
 	if (!file_exist(path))
 	{
 		log("%s does not exist", path);
@@ -415,27 +364,7 @@ vector<Ideal *> load_binary_file(const char *path, query_context &global_ctx)
 	logt("packed %ld tasks", start, tasks.size());
 
 	global_ctx.target_num = tasks.size();
-	pthread_t threads[global_ctx.num_threads];
-	query_context myctx[global_ctx.num_threads];
-	for (int i = 0; i < global_ctx.num_threads; i++)
-	{
-		myctx[i].index = 0;
-		myctx[i] = global_ctx;
-		myctx[i].thread_id = i;
-		myctx[i].global_ctx = &global_ctx;
-		myctx[i].target = (void *)&tasks;
-		myctx[i].target2 = (void *)&polygons;
-	}
-	for (int i = 0; i < global_ctx.num_threads; i++)
-	{
-		pthread_create(&threads[i], NULL, load_unit, (void *)&myctx[i]);
-	}
-
-	for (int i = 0; i < global_ctx.num_threads; i++)
-	{
-		void *status;
-		pthread_join(threads[i], &status);
-	}
+	global_ctx.run_worker_threads(load_unit, &tasks, &polygons);
 	infile.close();
 	delete[] pmeta;
 	for (load_holder *lh : tasks)
@@ -547,27 +476,7 @@ vector<MyPolygon *> load_polygons_from_path(const char *path, query_context &glo
 	logt("packed %ld tasks", start, tasks.size());
 
 	global_ctx.target_num = tasks.size();
-	pthread_t threads[global_ctx.num_threads];
-	query_context myctx[global_ctx.num_threads];
-	for (int i = 0; i < global_ctx.num_threads; i++)
-	{
-		myctx[i].index = 0;
-		myctx[i] = global_ctx;
-		myctx[i].thread_id = i;
-		myctx[i].global_ctx = &global_ctx;
-		myctx[i].target = (void *)&tasks;
-		myctx[i].target2 = (void *)&polygons;
-	}
-	for (int i = 0; i < global_ctx.num_threads; i++)
-	{
-		pthread_create(&threads[i], NULL, load_polygons_unit, (void *)&myctx[i]);
-	}
-
-	for (int i = 0; i < global_ctx.num_threads; i++)
-	{
-		void *status;
-		pthread_join(threads[i], &status);
-	}
+	global_ctx.run_worker_threads(load_polygons_unit, &tasks, &polygons);
 	infile.close();
 	delete[] pmeta;
 	for (load_holder *lh : tasks)
@@ -616,24 +525,6 @@ size_t load_mbr_from_file(const char *path, box **mbrs)
 	return num_polygons;
 }
 
-size_t load_points_from_path(const char *path, Point **points)
-{
-	size_t fsize = file_size(path);
-	if (fsize <= 0)
-	{
-		log("%s is empty", path);
-		exit(0);
-	}
-	size_t target_num = fsize / sizeof(Point);
-	log_refresh("start loading %ld points", target_num);
-
-	*points = new Point[target_num];
-	ifstream infile(path, ios::in | ios::binary);
-	infile.read((char *)*points, fsize);
-	infile.close();
-	return target_num;
-}
-
 VertexSequence *read_vertices(const char *wkt, size_t &offset, bool clockwise)
 {
 	// read until the left parenthesis
@@ -680,20 +571,20 @@ VertexSequence *read_vertices(const char *wkt, size_t &offset, bool clockwise)
 	return vs;
 }
 
-Ideal *read_polygon(const char *wkt, size_t &offset)
+Farm *read_polygon(const char *wkt, size_t &offset)
 {
 
-	Ideal *ideal = new Ideal();
+	Farm *farm = new Farm();
 	skip_space(wkt, offset);
 	// left parentheses for the entire polygon
 	assert(wkt[offset++] == '(');
 
 	// read the vertices of the boundary polygon
 	// the vertex must rotation in clockwise
-	ideal->set_boundary(read_vertices(wkt, offset, false));
-	if (ideal->get_boundary()->clockwise())
+	farm->set_boundary(read_vertices(wkt, offset, false));
+	if (farm->get_boundary()->clockwise())
 	{
-		ideal->get_boundary()->reverse();
+		farm->get_boundary()->reverse();
 	}
 	skip_space(wkt, offset);
 	// polygons as the holes of the boundary polygon
@@ -705,11 +596,11 @@ Ideal *read_polygon(const char *wkt, size_t &offset)
 		{
 			vc->reverse();
 		}
-		ideal->get_holes().push_back(vc);
+		farm->get_holes().push_back(vc);
 
 		skip_space(wkt, offset);
 	}
 	assert(wkt[offset++] == ')');
-	ideal->getMBB();
-	return ideal;
+	farm->getMBB();
+	return farm;
 }

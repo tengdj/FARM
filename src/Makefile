@@ -7,29 +7,34 @@ OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 
 INCLUDES	= -I /usr/include -I ./include -I /usr/local/include -I /usr/local/cuda-12.2/targets/x86_64-linux/include
 #-lgeos_c  
-LIBS		= -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -lboost_program_options -lgeos -lpthread
-CPPFLAGS	= -O2 -std=c++17 -Wno-cpp
+LIBS		= -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -lboost_program_options  -lpthread
+CPPFLAGS	= -O2 -fno-tree-vectorize -std=c++17 -Wno-cpp
 
 NVCCFLAGS   = -O2 -arch=sm_89 -std=c++17 -DCUB_IGNORE_DEPRECATED_CPP_DIALECT --expt-extended-lambda --expt-relaxed-constexpr --use_fast_math
 CUDALIBS    = -L/usr/local/cuda-12.2/lib64/stubs -lcuda -L/usr/local/cuda-12.2/lib64/ -lcudart
 
 
 GEOMETRY_SRCS := $(wildcard geometry/*.cpp)
-GEOMETRY_SRCS += $(wildcard geometry/triangulate/*.cpp)
 GEOMETRY_SRCS += $(wildcard storage/*.cpp)
 GEOMETRY_OBJS := $(patsubst %.cpp,%.o,$(GEOMETRY_SRCS))
-
-PARTITION_SRCS := $(wildcard partition/*.cpp)
-PARTITION_OBJS := $(patsubst %.cpp,%.o,$(PARTITION_SRCS))
 
 #compile all the cu files
 CU_SRCS := $(wildcard cuda/*.cu)
 CU_OBJS := $(patsubst %.cu,%_cu.o,$(CU_SRCS))
+GPU_COMMON_OBJS := cuda/preprocessing_cu.o
 
 ifdef USE_GPU
 	CPPFLAGS += -DUSE_GPU
 	LIBS  += ${CUDALIBS}
-	GEOMETRY_OBJS += ${CU_OBJS}
+	INTERSECT_GPU_OBJS := $(GPU_COMMON_OBJS) cuda/query_intersect_cu.o
+	WITHIN_POLYGON_GPU_OBJS := $(GPU_COMMON_OBJS) cuda/query_within_polygon_cu.o
+	INTERSECTION_GPU_OBJS := $(GPU_COMMON_OBJS) cuda/query_intersection_cu.o
+endif
+
+ifdef PROFILE_QUERY
+	CPPFLAGS += -DFARM_PROFILE_QUERY=1
+else
+	CPPFLAGS += -DFARM_PROFILE_QUERY=0
 endif
 
 %_cu.o: %.cu
@@ -38,29 +43,34 @@ endif
 %.o:	%.cpp
 	$(CXX) -c $(CPPFLAGS) $(INCLUDES) -o $@ $<	
 
-all:	contain_polygon within_polygon
+ifdef USE_GPU
+all:	intersect within_polygon intersection dump_polygons
+else
+all:	intersect_cpu within_polygon_cpu intersection_cpu
+endif
 
 
-intersect:	query/intersect.o $(GEOMETRY_OBJS)
+intersect:	query/intersect.o $(GEOMETRY_OBJS) $(INTERSECT_GPU_OBJS)
 	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
 
 intersect_cpu:	query/intersect_cpu.o $(GEOMETRY_OBJS)
-	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
+	$(CXX) -O2 -fno-tree-vectorize -o ../build/$@ $^ $(LIBS)
 	
-within_polygon:	query/within_polygon.o $(GEOMETRY_OBJS)
+within_polygon:	query/within_polygon.o $(GEOMETRY_OBJS) $(WITHIN_POLYGON_GPU_OBJS)
 	$(CXX) -O2 -o ../build/$@ $^ $(LIBS) 
 
 within_polygon_cpu:	query/within_polygon_cpu.o $(GEOMETRY_OBJS)
-	$(CXX) -O2 -o ../build/$@ $^ $(LIBS) 
+	$(CXX) -O2 -fno-tree-vectorize -o ../build/$@ $^ $(LIBS) 
 
-intersection:	query/intersection.o $(GEOMETRY_OBJS)
+intersection:	query/intersection.o $(GEOMETRY_OBJS) $(INTERSECTION_GPU_OBJS)
 	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
 
 intersection_cpu:	query/intersection_cpu.o $(GEOMETRY_OBJS)
-	$(CXX) -O2 -o ../build/$@ $^ $(LIBS)
+	$(CXX) -O2 -fno-tree-vectorize -o ../build/$@ $^ $(LIBS)
 
 dump_polygons:	datagen/dump_polygons.o $(GEOMETRY_OBJS)
 	$(CXX) -o ../build/$@ $^ $(LIBS) 
+
 
 clean:
 	rm -fr ../build/* $(OBJS) $(CU_OBJS)

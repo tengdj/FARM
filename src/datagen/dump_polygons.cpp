@@ -1,4 +1,4 @@
-#include "../include/Ideal.h"
+#include "../include/farm.h"
 #include "../include/query_context.h"
 
 int main(int argc, char** argv) {
@@ -10,7 +10,8 @@ int main(int argc, char** argv) {
     string input_path = argv[1];;
     string output_path = argv[2];
 	
-	vector<Ideal *> polygons = load_polygon_wkt(input_path.c_str());
+	vector<Farm *> polygons = load_polygon_wkt(input_path.c_str());
+
     dump_polygons_to_file(polygons, output_path.c_str());
     return 0;
 }

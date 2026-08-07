@@ -1,4 +1,5 @@
 # FARM
+
 FARM is a spatial database management system that supports efficient querying of complex polygons with Fill-ratio-Aware Raster Model and GPU Acceleration.
 
 ### Installation
@@ -10,16 +11,16 @@ Install FARM:
 ```bash
 export USE_GPU=1
 cd src
-make
+make all
 ```
 
-**Prerequisites：**
+**Prerequisites:**
 
 Operating System: Linux (tested on Ubuntu 23.10).
 
 Compiler: GCC (with C++17 support), NVCC (CUDA compiler).
 
-CUDA Toolkit: Version 12.8 or later.
+CUDA Toolkit: Version 12.2 or later.
 
 ### Data Preparation
 
@@ -50,13 +51,13 @@ To run the program, use the following commands:
 
 arguments:
 
-`-r` enables the raster model for filtering.
-
-`-g` enables GPU acceleration. If omitted (and using the `_cpu` executable) it runs on the CPU.
-
 `-a` uses approximation query.
 
-`-m` sets the confidence threshold for approximate queries, this controls the balance between precision and recall.
+`-h` enables hierarchical raster processing.
+
+`-c` sets the confidence threshold for approximate queries, this controls the balance between precision and recall.
+
+`-m` sets the merge threshold for GPU exact intersect and within queries.
 
 `-b` sets the batch size for GPU processing.
 
@@ -68,23 +69,22 @@ arguments:
 
 Run intersect query (use the default parameter values)
 
-``` bash
+```bash
 # gpu version
-./intersect -s complex.dt -t lakes.dt -r -g
+./intersect -s complex.dt -t lakes.dt -h
 # cpu version
-./intersect_cpu -s complex.dt -t lakes.dt -r
+./intersect_cpu -s complex.dt -t lakes.dt -h
 # approximate query
-./intersect -s complex.dt -t lakes.dt -r -g -a
+./intersect -s complex.dt -t lakes.dt -h -a
 ```
 
 Run within distance query (use the default parameter values, within-distance threshold = 10KM)
 
 ```bash
 # gpu version
-./within_polygon -s lakes.dt -r -g
+./within_polygon -s lakes.dt -h
 # cpu version
-./within_polygon_cpu -s lakes.dt -r
+./within_polygon_cpu -s lakes.dt -h
 # approximate query
-./within_polygon -s lakes.dt -r -g -a
+./within_polygon -s lakes.dt -h -a
 ```
-

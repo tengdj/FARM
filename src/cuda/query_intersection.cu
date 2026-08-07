@@ -1,784 +1,1514 @@
 #include "geometry.cuh"
-#include "Ideal.h"
-#include "shared_kernels.cuh" 
-#include <thrust/device_vector.h>
-#include <thrust/sort.h>
-#include <thrust/device_ptr.h>
-#include <thrust/iterator/constant_iterator.h>
-#include <thrust/remove.h>
-#include <thrust/adjacent_difference.h>
-#include <thrust/unique.h>
-#include <thrust/count.h>
+#include "farm.h"
+#include <cub/block/block_radix_sort.cuh>
+#include <cub/device/device_scan.cuh>
+#include <cub/device/device_segmented_radix_sort.cuh>
+#include <cub/device/device_select.cuh>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
-struct Task
+__device__ __forceinline__ void gpu_restrict_area_to_overlap(
+    double area_low, double area_high, double pixel_area, double overlap_area,
+    double &overlap_low, double &overlap_high)
 {
-    uint s_start = 0;
-    uint t_start = 0;
-    uint s_length = 0;
-    uint t_length = 0;
-    int pair_id = 0;
-};
-
-__global__ void kernel_filter_intersection(pair<uint32_t,uint32_t>* pairs, IdealOffset *idealoffset,
-                                             RasterInfo *info, uint8_t *status, uint size, 
-                                             PixPair *pixpairs, uint *pp_size, uint8_t category_count)
-{
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	if (x >= size) return;  
-
-	const pair<uint32_t, uint32_t> pair = pairs[x];
-    const uint32_t src_idx = pair.first;
-	const uint32_t tar_idx = pair.second;
-	const IdealOffset source = idealoffset[src_idx];
-	const IdealOffset target = idealoffset[tar_idx];
-
-	const box s_mbr = info[src_idx].mbr, t_mbr = info[tar_idx].mbr;				
-	const double s_step_x = info[src_idx].step_x, s_step_y = info[src_idx].step_y; 
-	const int s_dimx = info[src_idx].dimx, s_dimy = info[src_idx].dimy;			 
-	const double t_step_x = info[tar_idx].step_x, t_step_y = info[tar_idx].step_y; 
-	const int t_dimx = info[tar_idx].dimx, t_dimy = info[tar_idx].dimy;		
-
-	int i_min = gpu_get_offset_x(s_mbr.low[0], t_mbr.low[0] + 1e-6, s_step_x, s_dimx);
-	int i_max = gpu_get_offset_x(s_mbr.low[0], t_mbr.high[0] - 1e-6, s_step_x, s_dimx);
-	int j_min = gpu_get_offset_y(s_mbr.low[1], t_mbr.low[1] + 1e-6, s_step_y, s_dimy);
-	int j_max = gpu_get_offset_y(s_mbr.low[1], t_mbr.high[1] - 1e-6, s_step_y, s_dimy);
-	
-	for (int i = i_min; i <= i_max; i++)
-	{
-		for (int j = j_min; j <= j_max; j++)
-		{
-			int p = gpu_get_id(i, j, s_dimx);
-			PartitionStatus source_status = gpu_show_status(status, source.status_start, p, category_count);
-            if(source_status != BORDER) continue;
-
-			box bx = gpu_get_pixel_box(i, j, s_mbr.low[0], s_mbr.low[1], s_step_x, s_step_y);
-
-            bx.low[0] += 1e-6;
-            bx.low[1] += 1e-6;
-            bx.high[0] -= 1e-6;
-            bx.high[1] -= 1e-6;
-
-			int _i_min = gpu_get_offset_x(t_mbr.low[0], bx.low[0], t_step_x, t_dimx);
-			int _i_max = gpu_get_offset_x(t_mbr.low[0], bx.high[0], t_step_x, t_dimx);
-			int _j_min = gpu_get_offset_y(t_mbr.low[1], bx.low[1], t_step_y, t_dimy);
-			int _j_max = gpu_get_offset_y(t_mbr.low[1], bx.high[1], t_step_y, t_dimy);
-
-			for (int _i = _i_min; _i <= _i_max; _i++)
-			{
-				for (int _j = _j_min; _j <= _j_max; _j++)
-				{
-					int p2 = gpu_get_id(_i, _j, t_dimx);
-
-					PartitionStatus target_status = gpu_show_status(status, target.status_start, p2, category_count);
-
-					if (target_status == BORDER)
-					{
-						int idx = atomicAdd(pp_size, 1U);
-						
-                        pixpairs[idx] = {p, p2, x};
-					}
-				}
-			}
-		}
-	}
-    return;
+    overlap_low = fmax(0.0, area_low - (pixel_area - overlap_area));
+    overlap_high = fmin(overlap_area, area_high);
+    overlap_low = fmin(overlap_area, fmax(0.0, overlap_low));
+    overlap_high = fmin(overlap_area, fmax(0.0, overlap_high));
+    overlap_low = fmin(overlap_low, overlap_high);
 }
 
-__global__ void kernel_unroll_intersection(PixPair *pixpairs, pair<uint32_t, uint32_t> *pairs,
-											 IdealOffset *idealoffset, uint8_t *status,
-											 uint32_t *es_offset, EdgeSeq *edge_sequences,
-											 uint *size, Task *tasks, uint *task_size)
+constexpr uint32_t INTERSECTION_APPROX_THREADS = 128;
+constexpr uint32_t INTERSECTION_APPROX_WARPS = INTERSECTION_APPROX_THREADS / 32;
+
+__device__ __forceinline__ double intersection_warp_sum(double value)
 {
-	const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-	if(idx >= *size) return;
-	
-	int p = pixpairs[idx].source_pixid;
-	int p2 = pixpairs[idx].target_pixid;
-	int pair_id = pixpairs[idx].pair_id;
-
-	const pair<uint32_t, uint32_t> pair = pairs[pair_id];
-    const uint32_t src_idx = pair.first;
-    const uint32_t tar_idx = pair.second;
-
-	const IdealOffset source = idealoffset[src_idx];
-    const IdealOffset target = idealoffset[tar_idx];
-
-	uint s_offset_start = source.offset_start;
-	uint t_offset_start = target.offset_start;
-	uint s_edge_sequences_start = source.edge_sequences_start;
-	uint t_edge_sequences_start = target.edge_sequences_start;
-
-	int s_num_sequence = (es_offset + s_offset_start)[p + 1] - (es_offset + s_offset_start)[p];
-	int t_num_sequence = (es_offset + t_offset_start)[p2 + 1] - (es_offset + t_offset_start)[p2];
-
-	// printf("(es_offset + t_offset_start)[p2] = %u, (es_offset + t_offset_start)[p2 + 1] = %u\n", (es_offset + t_offset_start)[p2], (es_offset + t_offset_start)[p2 + 1]);
-	uint s_vertices_start = source.vertices_start;
-	uint t_vertices_start = target.vertices_start;
-
-	const int max_size = 16;
-
-	for (int i = 0; i < s_num_sequence; ++i)
-	{
-		EdgeSeq r = (edge_sequences + s_edge_sequences_start)[(es_offset + s_offset_start)[p] + i];
-		for (int j = 0; j < t_num_sequence; ++j)
-		{
-	 		EdgeSeq r2 = (edge_sequences + t_edge_sequences_start)[(es_offset + t_offset_start)[p2] + j];
-			// printf("r.length = %d, r2.length = %d\n", r.length, r2.length);
-			for (uint s = 0; s < r.length; s += max_size)
-			{
-				uint end_s = min(s + max_size, r.length);
-				for (uint t = 0; t < r2.length; t += max_size)
-				{
-					uint end_t = min(t + max_size, r2.length);
-
-					uint idx_task = atomicAdd(task_size, 1U);
-					tasks[idx_task].s_start = s_vertices_start + r.start + s;
-					tasks[idx_task].t_start = t_vertices_start + r2.start + t;
-					tasks[idx_task].s_length = end_s - s;
-					tasks[idx_task].t_length = end_t - t;
-					tasks[idx_task].pair_id = pair_id;
-	 			}
-	 		}
-		}
-	}
-}
-
-__global__ void kernel_refinement_intersection(Task *tasks, Point *d_vertices, uint *size, Intersection* intersections, uint* num)
-{
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	if (x >= *size) return;
-	
-	uint s1 = tasks[x].s_start;
-	uint s2 = tasks[x].t_start;
-	uint len1 = tasks[x].s_length;
-	uint len2 = tasks[x].t_length;
-	int pair_id = tasks[x].pair_id;
-
-	gpu_segment_intersect_batch(d_vertices, s1, s2, s1 + len1, s2 + len2, pair_id, intersections, num);
-}
-
-struct CompareSourceIntersections {
-	__host__ __device__
-	bool operator()(const Intersection& a, const Intersection& b) const {
-        if (a.pair_id != b.pair_id) {
-            return a.pair_id < b.pair_id; 
-        }else if (a.edge_source_id != b.edge_source_id){
-			return a.edge_source_id < b.edge_source_id;
-		}
-        return a.t < b.t; 
+    #pragma unroll
+    for(uint32_t offset = 16; offset > 0; offset >>= 1){
+        value += __shfl_down_sync(0xffffffffU, value, offset);
     }
-};
-
-struct CompareTargetIntersections {
-    __host__ __device__
-    bool operator()(const Intersection& a, const Intersection& b) const {
-        if (a.pair_id != b.pair_id) {
-            return a.pair_id < b.pair_id; 
-        }else if (a.edge_target_id != b.edge_target_id){
-			return a.edge_target_id < b.edge_target_id;
-		}
-        return a.u < b.u; 
-    }
-};
-
-struct IntersectionEqual {
-    __host__ __device__
-    bool operator()(const Intersection& a, const Intersection& b) const {
-        // return a.pair_id == b.pair_id && a.edge_source_id == b.edge_source_id && a.edge_target_id == b.edge_target_id && a.t == b.t && a.u == b.u;
-		return a.p == b.p;
-	}
-};
-
-
-__global__ void find_inters_per_pair(Intersection *intersections, uint* size, uint *inters_per_pair){
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    if (x < *size)
-    {
-        int pair_id = intersections[x].pair_id;
-        atomicAdd(inters_per_pair + pair_id, 1);
-    }
+    return value;
 }
 
-__global__ void make_segments(Intersection *intersections, uint *num_intersections, Segment *segments, uint *num_segments, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, Point *vertices, uint *inters_per_pair, bool is_source)
+__global__ void kernel_approximate_intersection_area(
+    const pair<uint32_t, uint32_t>* __restrict__ pairs,
+    const FarmOffset* __restrict__ farm_offset,
+    const RasterInfo* __restrict__ info,
+    const uint8_t* __restrict__ status,
+    size_t size,
+	    uint8_t bitwidth,
+    double* __restrict__ areas)
 {
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	if(x < *num_intersections){
-		int pair_id = intersections[x].pair_id;
+    const size_t pair_id = blockIdx.x;
+    if(pair_id >= size) return;
+
+    __shared__ uint32_t shared_source_idx;
+    __shared__ uint32_t shared_target_idx;
+    __shared__ uint32_t shared_source_status_start;
+    __shared__ uint32_t shared_target_status_start;
+    __shared__ double warp_low[INTERSECTION_APPROX_WARPS];
+    __shared__ double warp_high[INTERSECTION_APPROX_WARPS];
+    if(threadIdx.x == 0){
         const pair<uint32_t, uint32_t> pair = pairs[pair_id];
-        const uint32_t id = is_source ? pair.first : pair.second;
-
-        Intersection a = intersections[x];
-        Intersection b = (x + 1 >= *num_intersections || intersections[x].pair_id != intersections[x + 1].pair_id) ? intersections[x + 1 - inters_per_pair[pair_id]] : intersections[x + 1];
-
-        if(a.p == b.p) return;
-
-        int a_edge_id = is_source ? a.edge_source_id : a.edge_target_id;
-        int b_edge_id = is_source ? b.edge_source_id : b.edge_target_id;
-        float a_param = is_source ? a.t : a.u;
-        float b_param = is_source ? b.t : b.u;
-        int num_vertices = idealoffset[id + 1].vertices_start - idealoffset[id].vertices_start;
-
-        if(fabs(a_param - 1.0) < eps){
-			a_edge_id = (a_edge_id + 1) < (idealoffset[id + 1].vertices_start - 1) ? a_edge_id + 1 : a_edge_id + 2 - num_vertices;
-			a_param = 0.0;
-        } 
-
-        if(fabs(b_param) < eps){
-            b_edge_id--;
-			b_param = 1.0;
-        }
-
-        // if(x == 20 && pair_id == 11){
-        //     printf("range %d %d\n", idealoffset[id].vertices_start, idealoffset[id + 1].vertices_start);
-        // }
-        // if(pair_id == 11){
-        //     printf("%d %d %lf %lf\n", a_edge_id, b_edge_id, a_param, b_param);
-        // }
-
-        int idx = atomicAdd(num_segments, 1);
-        segments[idx] = {is_source, a.p, b.p, 
-                        (a_edge_id == b_edge_id) && (a_param < b_param) ? -1 : a_edge_id + 1,
-                        (a_edge_id == b_edge_id) && (a_param < b_param) ? -1 : b_edge_id, 
-                        // (a_edge_id == b_edge_id && a_param < b_param),
-                        // (a_edge_id == b_edge_id && a_param < b_param), 
-                        pair_id};
-
-	}
-}
-
-struct ExtractPairId {
-    __host__ __device__
-    int operator()(const Segment& seg) const {
-        return seg.pair_id;
+        shared_source_idx = info[pair.first].step_x >= info[pair.second].step_x
+            ? pair.first : pair.second;
+        shared_target_idx = shared_source_idx == pair.first ? pair.second : pair.first;
+        shared_source_status_start = farm_offset[shared_source_idx].status_start;
+        shared_target_status_start = farm_offset[shared_target_idx].status_start;
     }
-};
+    __syncthreads();
 
-__global__ void kernel_filter_segment_contain(Segment *segments, pair<uint32_t,uint32_t> *pairs,
-											  IdealOffset *idealoffset, RasterInfo *info, 
-											  uint8_t *status, Point *vertices, uint size, uint8_t *flags, 
-											  PixMapping *ptpixpairs, uint *pp_size, uint8_t category_count)
-{
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	if (x >= size) return;
+    const uint32_t source_idx = shared_source_idx;
+    const uint32_t target_idx = shared_target_idx;
+    const RasterInfo source_info = info[source_idx];
+    const RasterInfo target_info = info[target_idx];
+    const uint32_t source_status_start = shared_source_status_start;
+    const uint32_t target_status_start = shared_target_status_start;
+    const double source_pixel_area = source_info.step_x * source_info.step_y;
+    const double target_pixel_area = target_info.step_x * target_info.step_y;
 
-	Segment seg = segments[x];
-	const pair<uint32_t, uint32_t> pair = pairs[seg.pair_id];
-	uint32_t poly_idx = !seg.is_source ? pair.first : pair.second;
-	const IdealOffset offset = idealoffset[poly_idx];
-	
-	Point p;
-	if(seg.edge_start == -1) p = (seg.start + seg.end) * 0.5;
-	else p = vertices[seg.edge_start];
-	
-	const box mbr = info[poly_idx].mbr;
-	const double step_x = info[poly_idx].step_x;
-	const double step_y = info[poly_idx].step_y;
-	const int dimx = info[poly_idx].dimx;
-	const int dimy = info[poly_idx].dimy;
-	
-	const int xoff = gpu_get_offset_x(mbr.low[0], p.x, step_x, dimx);
-	const int yoff = gpu_get_offset_y(mbr.low[1], p.y, step_y, dimy);
-	const int target = gpu_get_id(xoff, yoff, dimx);
+    const int source_start_x = gpu_get_offset_x(source_info.mbr.low[0],
+        target_info.mbr.low[0] + 1e-6, source_info.step_x, source_info.dimx);
+    const int source_end_x = gpu_get_offset_x(source_info.mbr.low[0],
+        target_info.mbr.high[0] - 1e-6, source_info.step_x, source_info.dimx);
+    const int source_start_y = gpu_get_offset_y(source_info.mbr.low[1],
+        target_info.mbr.low[1] + 1e-6, source_info.step_y, source_info.dimy);
+    const int source_end_y = gpu_get_offset_y(source_info.mbr.low[1],
+        target_info.mbr.high[1] - 1e-6, source_info.step_y, source_info.dimy);
 
-	const PartitionStatus st = gpu_show_status(status, offset.status_start, target, category_count);
-	
-    if (st == BORDER) {
-		uint idx = atomicAdd(pp_size, 1U);
-		ptpixpairs[idx].pair_id = x;
-		ptpixpairs[idx].pix_id = target;
-	}else{
-        flags[x] = st;
-    }
-}
+    double total_low = 0.0;
+    double total_high = 0.0;
+    const int source_width = source_end_x >= source_start_x
+        ? source_end_x - source_start_x + 1 : 0;
+    const int source_height = source_end_y >= source_start_y
+        ? source_end_y - source_start_y + 1 : 0;
+    const int source_count = source_width * source_height;
+    for(int source_linear = threadIdx.x; source_linear < source_count;
+        source_linear += blockDim.x){
+            const int source_x = source_start_x + source_linear % source_width;
+            const int source_y = source_start_y + source_linear / source_width;
+            const int source_id = gpu_get_id(source_x, source_y, source_info.dimx);
+	            const uint8_t source_fullness = gpu_get_fullness(
+					status, source_status_start, source_id, bitwidth);
+            if(source_fullness == 0) continue;
 
-__global__ void kernel_refinement_segment_contain(PixMapping *ptpixpairs, Segment *segments, 
-												pair<uint32_t, uint32_t> *pairs,
-												IdealOffset *idealoffset, RasterInfo *info,
-												uint32_t *es_offset, EdgeSeq *edge_sequences,
-												Point *vertices, uint32_t *gridline_offset,
-												double *gridline_nodes, uint *size, uint8_t *flags)
-{
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	if (x >= *size)
-		return;
+            const box source_box = gpu_get_pixel_box(source_x, source_y,
+                source_info.mbr.low[0], source_info.mbr.low[1],
+                source_info.step_x, source_info.step_y);
+            const int target_start_x = gpu_get_offset_x(target_info.mbr.low[0],
+                source_box.low[0] + 1e-6, target_info.step_x, target_info.dimx);
+            const int target_end_x = gpu_get_offset_x(target_info.mbr.low[0],
+                source_box.high[0] - 1e-6, target_info.step_x, target_info.dimx);
+            const int target_start_y = gpu_get_offset_y(target_info.mbr.low[1],
+                source_box.low[1] + 1e-6, target_info.step_y, target_info.dimy);
+            const int target_end_y = gpu_get_offset_y(target_info.mbr.low[1],
+                source_box.high[1] - 1e-6, target_info.step_y, target_info.dimy);
+            const double source_low = gpu_decode_fullness(source_fullness,
+	                source_pixel_area, bitwidth, true);
+            const double source_high = gpu_decode_fullness(source_fullness,
+	                source_pixel_area, bitwidth, false);
 
-	int seg_id = ptpixpairs[x].pair_id;
-	int target = ptpixpairs[x].pix_id;
-	
-	Segment seg = segments[seg_id];
-	const pair<uint32_t, uint32_t> pair = pairs[seg.pair_id];
-	const uint32_t poly_idx = !seg.is_source ? pair.first : pair.second;
-	const IdealOffset offset = idealoffset[poly_idx];
-	
-	Point p;
-	if(seg.edge_start == -1) p = (seg.start + seg.end) * 0.5;
-	else p = vertices[seg.edge_start];
+            for(int target_x = target_start_x; target_x <= target_end_x; target_x++){
+                for(int target_y = target_start_y; target_y <= target_end_y; target_y++){
+                    const int target_id = gpu_get_id(target_x, target_y, target_info.dimx);
+	                    const uint8_t target_fullness = gpu_get_fullness(
+							status, target_status_start, target_id, bitwidth);
+                    if(target_fullness == 0) continue;
 
-	const box s_mbr = info[poly_idx].mbr;
-	const double s_step_x = info[poly_idx].step_x;
-	const double s_step_y = info[poly_idx].step_y;
-	const int s_dimx = info[poly_idx].dimx;
-	const int s_dimy = info[poly_idx].dimy;
+                    const box target_box = gpu_get_pixel_box(target_x, target_y,
+                        target_info.mbr.low[0], target_info.mbr.low[1],
+                        target_info.step_x, target_info.step_y);
+                    const double overlap_width = fmin(source_box.high[0], target_box.high[0])
+                        - fmax(source_box.low[0], target_box.low[0]);
+                    const double overlap_height = fmin(source_box.high[1], target_box.high[1])
+                        - fmax(source_box.low[1], target_box.low[1]);
+                    if(overlap_width <= 0.0 || overlap_height <= 0.0) continue;
 
-	bool ret = false;
+                    const double overlap_area = overlap_width * overlap_height;
+                    double source_overlap_low, source_overlap_high;
+                    double target_overlap_low, target_overlap_high;
+                    gpu_restrict_area_to_overlap(source_low, source_high,
+                        source_pixel_area, overlap_area,
+                        source_overlap_low, source_overlap_high);
+                    gpu_restrict_area_to_overlap(
+                        gpu_decode_fullness(target_fullness, target_pixel_area,
+	                            bitwidth, true),
+                        gpu_decode_fullness(target_fullness, target_pixel_area,
+	                            bitwidth, false),
+                        target_pixel_area, overlap_area,
+                        target_overlap_low, target_overlap_high);
 
-	const int xoff = gpu_get_x(target, s_dimx);
-	const int yoff = gpu_get_y(target, s_dimx, s_dimy);
-	const box bx = gpu_get_pixel_box(xoff, yoff, s_mbr.low[0], s_mbr.low[1], s_step_x, s_step_y);
-
-	// printf("POINT (%lf %lf)\tLINESTRING((%lf %lf, %lf %lf, %lf %lf, %lf %lf, %lf %lf))\n", p.x, p.y, bx.low[0], bx.low[1], bx.high[0], bx.low[1], bx.high[0], bx.high[1], bx.low[0], bx.high[1], bx.low[0], bx.low[1]);
-
-	const uint32_t offset_start = offset.offset_start;
-	const uint32_t es_start = (es_offset + offset_start)[target];
-	const uint32_t es_end = (es_offset + offset_start)[target + 1];
-	const int s_num_sequence = es_end - es_start;
-
-	for (int i = 0; i < s_num_sequence; ++i)
-	{
-		const EdgeSeq r = (edge_sequences + offset.edge_sequences_start)[es_start + i];
-		const uint32_t vertices_start = offset.vertices_start;
-		for (int j = 0; j < r.length; j++)
-		{
-			const Point v1 = (vertices + vertices_start)[r.start + j];
-			const Point v2 = (vertices + vertices_start)[r.start + j + 1];
-			if(p == v1 || p == v2){
-				flags[seg_id] = 1;
-				return; 
-			}
-			if ((v1.y >= p.y) != (v2.y >= p.y))
-			{
-
-				const double dx = v2.x - v1.x;
-				const double dy = v2.y - v1.y;
-				const double py_diff = p.y - v1.y;
-
-				if (abs(dy) > 1e-9)
-				{
-					const double int_x = dx * py_diff / dy + v1.x;
-					if(fabs(p.x - int_x) < 1e-9) {
-						flags[seg_id] = 1;
-						return; 
-					}
-					if (p.x < int_x && int_x <= bx.high[0])
-					{
-						ret = !ret;
-					}
-				}
-			}else if (v1.y == p.y && v2.y == p.y && (v1.x >= p.x) != (v2.x >= p.x)){
-                flags[seg_id] = 1;
-                return; 
+                    double intersection_high = fmin(source_overlap_high, target_overlap_high);
+                    intersection_high = fmin(overlap_area, fmax(0.0, intersection_high));
+                    double intersection_low = fmax(0.0,
+                        source_overlap_low + target_overlap_low - overlap_area);
+                    intersection_low = fmin(intersection_high, intersection_low);
+                    total_low += intersection_low;
+                    total_high += intersection_high;
+                }
             }
+    }
+
+    const uint32_t lane = threadIdx.x & 31U;
+    const uint32_t warp = threadIdx.x >> 5;
+    total_low = intersection_warp_sum(total_low);
+    total_high = intersection_warp_sum(total_high);
+    if(lane == 0){
+        warp_low[warp] = total_low;
+        warp_high[warp] = total_high;
+    }
+    __syncthreads();
+    if(warp == 0){
+        double block_low = lane < INTERSECTION_APPROX_WARPS ? warp_low[lane] : 0.0;
+        double block_high = lane < INTERSECTION_APPROX_WARPS ? warp_high[lane] : 0.0;
+        block_low = intersection_warp_sum(block_low);
+        block_high = intersection_warp_sum(block_high);
+        if(lane == 0){
+    // areas[] stores the shoelace double area used by the exact path.
+            areas[pair_id] = block_low + block_high;
+        }
+    }
+}
+
+__global__ void kernel_filter_intersection(
+    const pair<uint32_t, uint32_t>* __restrict__ pairs, 
+    const FarmOffset* __restrict__ farm_offset,
+    const RasterInfo* __restrict__ info, 
+    const uint8_t* __restrict__ status, 
+    uint size, 
+    PixPair* __restrict__ pixpairs, 
+    uint* pp_size, 
+	    uint8_t bitwidth,
+    uint32_t pixpair_capacity,
+    uint32_t* __restrict__ overflow)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (x >= size) return;
+
+    const pair<uint32_t, uint32_t> pair = pairs[x];
+    const uint32_t idx_a = info[pair.first].step_x >= info[pair.second].step_x ? pair.first : pair.second;
+    const uint32_t idx_b = info[pair.first].step_x >= info[pair.second].step_x ? pair.second : pair.first;
+    const RasterInfo info_a = info[idx_a];
+    const RasterInfo info_b = info[idx_b];
+
+    const int ratio_x = (int)(info_a.step_x / info_b.step_x + 0.5);
+    const int ratio_y = (int)(info_a.step_y / info_b.step_y + 0.5);
+
+    const int base_offset_x = __double2int_rn((info_a.mbr.low[0] - info_b.mbr.low[0]) / info_b.step_x);
+    const int base_offset_y = __double2int_rn((info_a.mbr.low[1] - info_b.mbr.low[1]) / info_b.step_y);
+
+    const uint32_t status_start_a = farm_offset[idx_a].status_start;
+    const uint32_t status_start_b = farm_offset[idx_b].status_start;
+
+    for (int i = 0; i < info_a.dimx; i++)
+    {
+        int t_i_start = base_offset_x + i * ratio_x;
+        int t_i_end   = t_i_start + ratio_x;
+
+        if (t_i_end <= 0 || t_i_start >= info_b.dimx) continue;
+        int loop_tx_start = max(0, t_i_start);
+        int loop_tx_end   = min(info_b.dimx, t_i_end);
+
+        for (int j = 0; j < info_a.dimy; j++)
+        {
+            int pa = gpu_get_id(i, j, info_a.dimx);
+	            PartitionStatus source_status = gpu_show_status(
+					status, status_start_a, pa, bitwidth);
+            
+            if (source_status != BORDER) continue;
+
+            int t_j_start = base_offset_y + j * ratio_y;
+            int t_j_end   = t_j_start + ratio_y;
+
+            if (t_j_end <= 0 || t_j_start >= info_b.dimy) continue;
+            int loop_ty_start = max(0, t_j_start);
+            int loop_ty_end   = min(info_b.dimy, t_j_end);
+
+            for (int ti = loop_tx_start; ti < loop_tx_end; ti++)
+            {
+                for (int tj = loop_ty_start; tj < loop_ty_end; tj++)
+                {
+                    int pb = gpu_get_id(ti, tj, info_b.dimx);
+	                    PartitionStatus target_status = gpu_show_status(
+							status, status_start_b, pb, bitwidth);
+
+					if (target_status != BORDER) continue;
+
+					uint idx = atomicAdd(pp_size, 1U);
+					if(idx < pixpair_capacity){
+						pixpairs[idx] = {pa, pb, x};
+					}else{
+						atomicExch(overflow, 1U);
+					}
+                }
+            }
+        }
+    }
+}
+
+__global__ void kernel_unroll_intersection_tasks(
+	const PixPair *pixpairs, uint32_t pixpair_count,
+	const pair<uint32_t, uint32_t> *pairs,
+	const FarmOffset *farm_offset, const RasterInfo *info,
+	const uint32_t *es_offset, const EdgeSeq *edge_sequences,
+	Task *tasks, uint32_t task_capacity, uint32_t *task_count,
+	uint32_t *overflow)
+{
+	const uint32_t pixpair_id = blockIdx.x * blockDim.x + threadIdx.x;
+	if(pixpair_id >= pixpair_count) return;
+	const PixPair pixel_pair = pixpairs[pixpair_id];
+	const pair<uint32_t, uint32_t> pair = pairs[pixel_pair.pair_id];
+	const uint32_t source_idx = info[pair.first].step_x >= info[pair.second].step_x
+		? pair.first : pair.second;
+	const uint32_t target_idx = source_idx == pair.first ? pair.second : pair.first;
+	const FarmOffset source_offset = farm_offset[source_idx];
+	const FarmOffset target_offset = farm_offset[target_idx];
+	const uint32_t source_sequence_begin = es_offset[source_offset.offset_start + pixel_pair.pixid_a];
+	const uint32_t source_sequence_end = es_offset[source_offset.offset_start + pixel_pair.pixid_a + 1];
+	const uint32_t target_sequence_begin = es_offset[target_offset.offset_start + pixel_pair.pixid_b];
+	const uint32_t target_sequence_end = es_offset[target_offset.offset_start + pixel_pair.pixid_b + 1];
+
+	for(uint32_t source_sequence = source_sequence_begin;
+		source_sequence < source_sequence_end; source_sequence++){
+		const EdgeSeq source = edge_sequences[source_offset.edge_sequences_start + source_sequence];
+		if(source.length == 0) continue;
+		for(uint32_t target_sequence = target_sequence_begin;
+			target_sequence < target_sequence_end; target_sequence++){
+			const EdgeSeq target = edge_sequences[target_offset.edge_sequences_start + target_sequence];
+			if(target.length == 0) continue;
+			const uint32_t source_chunks = (source.length + MAX_SIZE - 1) / MAX_SIZE;
+			const uint32_t target_chunks = (target.length + MAX_SIZE - 1) / MAX_SIZE;
+			const uint32_t sequence_task_count = source_chunks * target_chunks;
+			const uint32_t output_begin = atomicAdd(task_count, sequence_task_count);
+			if(output_begin > task_capacity || sequence_task_count > task_capacity - output_begin){
+				atomicExch(overflow, 1U);
+				continue;
+			}
+
+			uint32_t local_task = 0;
+			for(uint32_t source_start = 0; source_start < source.length; source_start += MAX_SIZE){
+				for(uint32_t target_start = 0; target_start < target.length; target_start += MAX_SIZE){
+					Task &task = tasks[output_begin + local_task++];
+					task.s_start = source_offset.vertices_start + source.start + source_start;
+					task.t_start = target_offset.vertices_start + target.start + target_start;
+					task.s_length = min((uint32_t)MAX_SIZE, source.length - source_start);
+					task.t_length = min((uint32_t)MAX_SIZE, target.length - target_start);
+					task.pair_id = pixel_pair.pair_id;
+				}
+			}
 		}
 	}
-
-	int nc = 0;
-	const uint32_t gridline_start = offset.gridline_offset_start;
-	const uint32_t i_start = (gridline_offset + gridline_start)[xoff + 1];
-	const uint32_t i_end = (gridline_offset + gridline_start)[xoff + 2];
-
-	nc = binary_search_count((gridline_nodes + offset.gridline_nodes_start), i_start, i_end, p.y);
-
-    if(nc % 2 == 1){
-        ret = !ret;
-    }
-
-    if(ret){
-        flags[seg_id] = 2;
-    }else{
-        flags[seg_id] = 0;
-    }	
 }
 
-__global__ void rebuild_polygons(Segment* segments, uint8_t* status, size_t size, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, Point* vertices, int* offsets, double* area){
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	if(x < size){
-		int start_idx = offsets[x];
-		int end_idx = offsets[x + 1];
-        int num_segments = offsets[size];
+namespace {
 
-        bool foundCycle = false;
+constexpr float INTERSECTION_PARAM_EPS = 1e-6f;
+constexpr float INTERSECTION_PARALLEL_EPS_SQ = 1e-12f;
+constexpr uint32_t INTERSECTION_PAYLOAD_MASK = 0x3fffffffU;
+constexpr uint32_t INTERSECTION_NO_OVERLAP = INTERSECTION_PAYLOAD_MASK;
 
-		// printf("x = %d %d %d\n", x, start_idx, end_idx);
-		for(int i = start_idx; i < end_idx; i ++){
-            if (i < num_segments - 1 && (status[i] == 0 || status[i] == 1))
-                continue;
-                
-            if (i == num_segments - 1 && status[i] == 0)
-                continue;
+struct IntersectionDeviceControl
+{
+	uint32_t count;
+	uint32_t overflow;
+	uint32_t auxiliary_count;
+};
 
-            if (i == num_segments - 1 && status[i] == 2 && foundCycle){
-                continue;
-            }
+struct IntersectionStageResult
+{
+	uint32_t count;
+	uint32_t overflow;
+};
 
-			Segment seg = segments[i];
-			size_t currentSegIdx = i;
-			Point currentPoint = seg.start;
-			Point lastPoint = currentPoint;
-			Point startPoint = currentPoint;
-			// printf("START POINT (%lf %lf) %d\n", currentPoint.x, currentPoint.y, seg.pair_id);
+static_assert(offsetof(IntersectionDeviceControl, auxiliary_count) ==
+	sizeof(IntersectionStageResult), "stage control fields must be contiguous");
 
-			double a = 0.0f;
-			double b = 0.0f;
+struct GpuIntersection
+{
+	uint32_t pair_id;
+	uint32_t edge_source_id;
+	uint32_t edge_target_id;
+	float t;
+	float u;
+	uint32_t metadata;
+};
 
-			foundCycle = false;
+static_assert(sizeof(GpuIntersection) == 24, "GpuIntersection must remain compact");
 
-			while(status[currentSegIdx]){
-				status[currentSegIdx] = 0;
-				const Segment& seg = segments[currentSegIdx];
-				if(seg.edge_start != -1){
-                	if(seg.edge_start <= seg.edge_end){
-						for(int verId = seg.edge_start; verId <= seg.edge_end; verId ++){
-							a += lastPoint.x * vertices[verId].y;
-							b += lastPoint.y * vertices[verId].x;
-							lastPoint = vertices[verId];
-							// printf("POINT (%lf %lf) %lf %lf %d\n", vertices[verId].x, vertices[verId].y, a, b, seg.pair_id);
-						}
-                	}else{
-						pair<uint32_t, uint32_t> pair = pairs[seg.pair_id];
-						uint32_t offset_idx = seg.is_source ? pair.first : pair.second;
-						for(int verId = seg.edge_start; verId < idealoffset[offset_idx + 1].vertices_start - 1; verId ++){
-							a += lastPoint.x * vertices[verId].y;
-							b += lastPoint.y * vertices[verId].x;
-							lastPoint = vertices[verId];
-							// printf("POINT (%lf %lf) %lf %lf %d\n", vertices[verId].x, vertices[verId].y, a, b, seg.pair_id);
-						}
-						for(int verId = idealoffset[offset_idx].vertices_start; verId <= seg.edge_end; verId ++){
-							
-							a += lastPoint.x * vertices[verId].y;
-							b += lastPoint.y * vertices[verId].x;
-							lastPoint = vertices[verId];
-							// printf("POINT (%lf %lf) %lf %lf %d\n", vertices[verId].x, vertices[verId].y, a, b, seg.pair_id);
-						}
-					}
-				}
+__host__ __device__ __forceinline__ uint32_t gpu_intersection_overlap(const GpuIntersection &inter)
+{
+	const uint32_t value = inter.metadata & INTERSECTION_PAYLOAD_MASK;
+	return value == INTERSECTION_NO_OVERLAP ? 0U : value;
+}
 
-            	Point nextPoint = currentPoint == seg.start ? seg.end : seg.start;
+__device__ __forceinline__ uint32_t gpu_intersection_metadata(uint32_t overlap_group)
+{
+	return overlap_group == 0 ? INTERSECTION_NO_OVERLAP : overlap_group;
+}
 
-				if (nextPoint == startPoint) {
-					// printf("lastPoint: POINT(%lf %lf) startPoint: POINT(%lf %lf)\n", lastPoint.x, lastPoint.y, startPoint.x, startPoint.y);
-					a += lastPoint.x * startPoint.y;
-					b += lastPoint.y * startPoint.x;
-					// printf("POINT (%lf %lf) %lf %lf %d\n", startPoint.x, startPoint.y, a, b, seg.pair_id);
-					foundCycle = true;
-					break;
-				}
+__device__ __forceinline__ float intersection_cross(float ax, float ay, float bx, float by)
+{
+	return fmaf(ax, by, -ay * bx);
+}
 
-				bool foundNext = false;
-
-				int idx = binary_search(segments, start_idx, end_idx - 1, nextPoint);
-				if(idx != -1){
-					uint8_t st0 = status[idx], st1 = status[idx + 1];
-					if(st0 == 2 || st1 == 2){
-						currentSegIdx = (st0 == 2) ? idx : idx + 1;
-					}else if(st0 == 1 || st1 == 1){
-						currentSegIdx = (st0 == 1) ? idx : idx + 1;
-					} 
-                    currentPoint = nextPoint;
-                    foundNext = true;
-				}
-
-				// if (!foundNext && nextPoint == startPoint) {
-				// 	lastPoint = currentPoint;
-				// 	a += lastPoint.x * startPoint.y;
-				// 	b += lastPoint.y * startPoint.x;
-				// 	foundCycle = true;
-				// 	break;
-				// }
-				
-				if (!foundNext) break;
-
-				a += lastPoint.x * currentPoint.y;
-				b += lastPoint.y * currentPoint.x;
-				lastPoint = currentPoint;
-				// printf("POINT (%lf %lf) %lf %lf %d\n", currentPoint.x, currentPoint.y, a, b, seg.pair_id);
-			}
-			if (foundCycle) {
-				atomicAdd(area, 0.5 * fabs(a - b));
-				// printf("area: %lf\n", 0.5 * fabs(a - b));
-			} 			
-		}		
+__device__ __forceinline__ void normalize_ring_parameter(
+	uint32_t &edge_id, float &param, uint32_t vertices_start, uint32_t vertices_end)
+{
+	param = fminf(1.0f, fmaxf(0.0f, param));
+	if(param <= INTERSECTION_PARAM_EPS){
+		param = 0.0f;
+	}else if(param >= 1.0f - INTERSECTION_PARAM_EPS){
+		edge_id = edge_id + 1 < vertices_end - 1 ? edge_id + 1 : vertices_start;
+		param = 0.0f;
 	}
 }
 
-__global__ void kernel_calculate_area(PixPair *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *info, uint8_t *status, uint *size, uint8_t category_count, double *res){
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    if(x < *size){
-        int pa = pixpairs[x].source_pixid;
-        int pb = pixpairs[x].target_pixid;
-        int pair_id = pixpairs[x].pair_id;
+__device__ __forceinline__ GpuIntersection make_gpu_intersection(
+	uint32_t pair_id,
+	uint32_t source_edge, uint32_t target_edge, float t, float u,
+	uint32_t source_vertices_start, uint32_t source_vertices_end,
+	uint32_t target_vertices_start, uint32_t target_vertices_end)
+{
+	normalize_ring_parameter(source_edge, t, source_vertices_start, source_vertices_end);
+	normalize_ring_parameter(target_edge, u, target_vertices_start, target_vertices_end);
+	return {
+		pair_id, source_edge, target_edge, t, u,
+		gpu_intersection_metadata(0)
+	};
+}
 
-        pair<uint32_t, uint32_t> pair = pairs[pair_id];
-        uint32_t src_idx = pair.first;
-        uint32_t tar_idx = pair.second;
-        IdealOffset source = idealoffset[src_idx];
-        IdealOffset target = idealoffset[tar_idx];
+__device__ __forceinline__ float segment_parameter(
+	float px, float py, float qx, float qy, float dx, float dy)
+{
+	return fabsf(dx) >= fabsf(dy) ? (px - qx) / dx : (py - qy) / dy;
+}
 
-        uint8_t pa_fullness = (status + source.status_start)[pa], pb_fullness = (status + target.status_start)[pb];
-        double pa_pixelArea = info[src_idx].step_x * info[src_idx].step_y;
-        double pb_pixelArea = info[tar_idx].step_x * info[tar_idx].step_y;
-        double pa_low = gpu_decode_fullness(pa_fullness, pa_pixelArea, category_count, true);
-        double pa_high = gpu_decode_fullness(pa_fullness, pa_pixelArea, category_count, false);
-        double pa_apx = (pa_low + pa_high) / 2;
-        double pb_low = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, true);
-        double pb_high = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, false);
-        double pb_apx = (pb_low + pb_high) / 2;
-        double int_area_high = std::min(pa_pixelArea, pb_pixelArea);
+struct LocalGpuIntersections
+{
+	GpuIntersection records[2];
+	uint32_t count;
+	bool overlap;
+};
 
-        atomicAdd(res + pair_id, int_area_high);
-    }
+__device__ __forceinline__ LocalGpuIntersections intersect_gpu_edge_pair(
+	const Point &source_p, const Point &source_q,
+	const Point &target_p, const Point &target_q,
+	uint32_t source_edge, uint32_t target_edge,
+	uint32_t source_vertices_start, uint32_t source_vertices_end,
+	uint32_t target_vertices_start, uint32_t target_vertices_end,
+	uint32_t pair_id)
+{
+	LocalGpuIntersections result{};
+	const float source_dx = source_q.x - source_p.x;
+	const float source_dy = source_q.y - source_p.y;
+	const float source_len_sq = fmaf(source_dx, source_dx, source_dy * source_dy);
+	if(source_len_sq == 0.0f) return result;
+	if(fmaxf(source_p.x, source_q.x) + INTERSECTION_PARAM_EPS < fminf(target_p.x, target_q.x) ||
+	   fminf(source_p.x, source_q.x) - INTERSECTION_PARAM_EPS > fmaxf(target_p.x, target_q.x) ||
+	   fmaxf(source_p.y, source_q.y) + INTERSECTION_PARAM_EPS < fminf(target_p.y, target_q.y) ||
+	   fminf(source_p.y, source_q.y) - INTERSECTION_PARAM_EPS > fmaxf(target_p.y, target_q.y)){
+		return result;
+	}
+	const float target_dx = target_q.x - target_p.x;
+	const float target_dy = target_q.y - target_p.y;
+	const float target_len_sq = fmaf(target_dx, target_dx, target_dy * target_dy);
+	if(target_len_sq == 0.0f) return result;
+	const float denom = intersection_cross(source_dx, source_dy, target_dx, target_dy);
+	const float rel_x = target_p.x - source_p.x;
+	const float rel_y = target_p.y - source_p.y;
+	if(denom * denom <= INTERSECTION_PARALLEL_EPS_SQ * source_len_sq * target_len_sq){
+		const float rel_len_sq = fmaf(rel_x, rel_x, rel_y * rel_y);
+		const float collinear = intersection_cross(rel_x, rel_y, source_dx, source_dy);
+		if(collinear * collinear > INTERSECTION_PARALLEL_EPS_SQ * source_len_sq *
+			fmaxf(rel_len_sq, 1.0f)) return result;
+		const float t0 = fmaf(rel_x, source_dx, rel_y * source_dy) / source_len_sq;
+		const float t1 = t0 + fmaf(target_dx, source_dx, target_dy * source_dy) / source_len_sq;
+		const float overlap_start = fmaxf(0.0f, fminf(t0, t1));
+		const float overlap_end = fminf(1.0f, fmaxf(t0, t1));
+		if(overlap_end - overlap_start <= INTERSECTION_PARAM_EPS) return result;
+		const float start_x = fmaf(overlap_start, source_dx, source_p.x);
+		const float start_y = fmaf(overlap_start, source_dy, source_p.y);
+		const float end_x = fmaf(overlap_end, source_dx, source_p.x);
+		const float end_y = fmaf(overlap_end, source_dy, source_p.y);
+		const float u0 = segment_parameter(start_x, start_y,
+			target_p.x, target_p.y, target_dx, target_dy);
+		const float u1 = segment_parameter(end_x, end_y,
+			target_p.x, target_p.y, target_dx, target_dy);
+		result.records[0] = make_gpu_intersection(pair_id, source_edge, target_edge,
+			overlap_start, u0, source_vertices_start, source_vertices_end,
+			target_vertices_start, target_vertices_end);
+		result.records[1] = make_gpu_intersection(pair_id, source_edge, target_edge,
+			overlap_end, u1, source_vertices_start, source_vertices_end,
+			target_vertices_start, target_vertices_end);
+		result.count = 2;
+		result.overlap = true;
+		return result;
+	}
+	const float inv_denom = 1.0f / denom;
+	const float t = intersection_cross(rel_x, rel_y, target_dx, target_dy) * inv_denom;
+	const float u = intersection_cross(rel_x, rel_y, source_dx, source_dy) * inv_denom;
+	if(t < -INTERSECTION_PARAM_EPS || t > 1.0f + INTERSECTION_PARAM_EPS ||
+	   u < -INTERSECTION_PARAM_EPS || u > 1.0f + INTERSECTION_PARAM_EPS) return result;
+	result.records[0] = make_gpu_intersection(pair_id, source_edge, target_edge,
+		t, u, source_vertices_start, source_vertices_end,
+		target_vertices_start, target_vertices_end);
+	result.count = 1;
+	return result;
+}
+
+__device__ __forceinline__ uint32_t warp_exclusive_sum(
+	uint32_t value, uint32_t lane, uint32_t &total)
+{
+	uint32_t inclusive = value;
+	#pragma unroll
+	for(uint32_t offset = 1; offset < 32; offset <<= 1){
+		const uint32_t other = __shfl_up_sync(0xffffffffU, inclusive, offset);
+		if(lane >= offset) inclusive += other;
+	}
+	total = __shfl_sync(0xffffffffU, inclusive, 31);
+	return inclusive - value;
+}
+
+constexpr uint32_t INTERSECTION_WARPS_PER_BLOCK = 8;
+
+struct SharedIntersectionPoint
+{
+	float x;
+	float y;
+};
+
+__global__ void kernel_refinement_intersection(
+	const Task *tasks, const pair<uint32_t, uint32_t> *pairs,
+	const FarmOffset *farm_offset, const RasterInfo *info, const Point *vertices,
+	uint32_t task_count, GpuIntersection *intersections, uint32_t intersection_capacity,
+	uint32_t *intersection_count, uint32_t *overlap_counter,
+	uint32_t *intersections_per_pair, uint32_t *overflow)
+{
+	const uint32_t lane = threadIdx.x & 31U;
+	const uint32_t warp_id = threadIdx.x >> 5;
+	const uint32_t task_id = blockIdx.x * INTERSECTION_WARPS_PER_BLOCK + warp_id;
+	if(task_id >= task_count) return;
+	Task task{};
+	if(lane == 0) task = tasks[task_id];
+	task.s_start = __shfl_sync(0xffffffffU, task.s_start, 0);
+	task.t_start = __shfl_sync(0xffffffffU, task.t_start, 0);
+	task.s_length = __shfl_sync(0xffffffffU, task.s_length, 0);
+	task.t_length = __shfl_sync(0xffffffffU, task.t_length, 0);
+	task.pair_id = __shfl_sync(0xffffffffU, task.pair_id, 0);
+	const pair<uint32_t, uint32_t> pair = pairs[task.pair_id];
+	const uint32_t source_idx = info[pair.first].step_x >= info[pair.second].step_x
+		? pair.first : pair.second;
+	const uint32_t target_idx = source_idx == pair.first ? pair.second : pair.first;
+	const uint32_t source_vertices_start = farm_offset[source_idx].vertices_start;
+	const uint32_t source_vertices_end = farm_offset[source_idx + 1].vertices_start;
+	const uint32_t target_vertices_start = farm_offset[target_idx].vertices_start;
+	const uint32_t target_vertices_end = farm_offset[target_idx + 1].vertices_start;
+	__shared__ SharedIntersectionPoint source_points[INTERSECTION_WARPS_PER_BLOCK][MAX_SIZE + 1];
+	__shared__ SharedIntersectionPoint target_points[INTERSECTION_WARPS_PER_BLOCK][MAX_SIZE + 1];
+	if(lane <= task.s_length){
+		const Point point = vertices[task.s_start + lane];
+		source_points[warp_id][lane] = {point.x, point.y};
+	}
+	if(lane <= task.t_length){
+		const Point point = vertices[task.t_start + lane];
+		target_points[warp_id][lane] = {point.x, point.y};
+	}
+	__syncwarp();
+	uint32_t task_record_count = 0;
+	const uint32_t edge_pair_count = task.s_length * task.t_length;
+	const uint32_t round_count = (edge_pair_count + 31U) / 32U;
+	for(uint32_t round = 0; round < round_count; round++){
+		const uint32_t flat_id = round * 32U + lane;
+		LocalGpuIntersections local{};
+		if(flat_id < edge_pair_count){
+			const uint32_t source_local = flat_id / task.t_length;
+			const uint32_t target_local = flat_id - source_local * task.t_length;
+			const SharedIntersectionPoint source_a = source_points[warp_id][source_local];
+			const SharedIntersectionPoint source_b = source_points[warp_id][source_local + 1];
+			const SharedIntersectionPoint target_a = target_points[warp_id][target_local];
+			const SharedIntersectionPoint target_b = target_points[warp_id][target_local + 1];
+			local = intersect_gpu_edge_pair(
+				Point(source_a.x, source_a.y), Point(source_b.x, source_b.y),
+				Point(target_a.x, target_a.y), Point(target_b.x, target_b.y),
+				task.s_start + source_local, task.t_start + target_local,
+				source_vertices_start, source_vertices_end,
+				target_vertices_start, target_vertices_end, task.pair_id);
+		}
+		uint32_t record_total = 0;
+		const uint32_t record_prefix = warp_exclusive_sum(local.count, lane, record_total);
+		uint32_t overlap_total = 0;
+		const uint32_t overlap_prefix = warp_exclusive_sum(local.overlap ? 1U : 0U,
+			lane, overlap_total);
+		uint32_t record_begin = 0;
+		uint32_t overlap_begin = 0;
+		uint32_t valid = 1;
+		if(lane == 0){
+			if(record_total > 0){
+				record_begin = atomicAdd(intersection_count, record_total);
+				if(record_begin > intersection_capacity ||
+				   record_total > intersection_capacity - record_begin){
+					atomicExch(overflow, 1U);
+					valid = 0;
+				}
+			}
+			if(overlap_total > 0){
+				overlap_begin = atomicAdd(overlap_counter, overlap_total);
+				if(overlap_begin + overlap_total >= INTERSECTION_NO_OVERLAP){
+					atomicExch(overflow, 1U);
+					valid = 0;
+				}
+			}
+			task_record_count += record_total;
+		}
+		record_begin = __shfl_sync(0xffffffffU, record_begin, 0);
+		overlap_begin = __shfl_sync(0xffffffffU, overlap_begin, 0);
+		valid = __shfl_sync(0xffffffffU, valid, 0);
+		if(valid && local.count > 0){
+			if(local.overlap){
+				const uint32_t group = overlap_begin + overlap_prefix + 1U;
+				local.records[0].metadata = gpu_intersection_metadata(group);
+				local.records[1].metadata = gpu_intersection_metadata(group);
+			}
+			intersections[record_begin + record_prefix] = local.records[0];
+			if(local.count == 2){
+				intersections[record_begin + record_prefix + 1] = local.records[1];
+			}
+		}
+	}
+	if(lane == 0 && task_record_count > 0){
+		atomicAdd(intersections_per_pair + task.pair_id, task_record_count);
+	}
+}
+
+constexpr uint32_t INTERSECTION_PARAM_BITS = 20;
+constexpr uint32_t INTERSECTION_PARAM_LEVELS = (1U << INTERSECTION_PARAM_BITS) - 1U;
+constexpr uint32_t INTERSECTION_SORT_BITS = INTERSECTION_PARAM_BITS + 32U;
+
+struct IntersectionSortStorage
+{
+	uint64_t *keys_a;
+	uint64_t *keys_b;
+	uint32_t *indices_a;
+	uint32_t *indices_b;
+};
+
+static IntersectionSortStorage make_intersection_sort_storage(void *buffer, uint32_t count)
+{
+	auto *bytes = reinterpret_cast<uint8_t *>(buffer);
+	IntersectionSortStorage storage;
+	storage.keys_a = reinterpret_cast<uint64_t *>(bytes);
+	storage.keys_b = reinterpret_cast<uint64_t *>(bytes + count * sizeof(uint64_t));
+	storage.indices_a = reinterpret_cast<uint32_t *>(
+		bytes + count * 2ULL * sizeof(uint64_t));
+	storage.indices_b = storage.indices_a + count;
+	return storage;
+}
+
+__device__ __forceinline__ uint32_t quantize_intersection_parameter(float value)
+{
+	value = fminf(1.0f, fmaxf(0.0f, value));
+	return __float2uint_rn(value * static_cast<float>(INTERSECTION_PARAM_LEVELS));
+}
+
+__device__ __forceinline__ uint64_t make_indexed_intersection_key(
+	const GpuIntersection &inter, const pair<uint32_t, uint32_t> *pairs,
+	const FarmOffset *farm_offset, const RasterInfo *info,
+	bool source_order)
+{
+	const pair<uint32_t, uint32_t> pair = pairs[inter.pair_id];
+	const uint32_t source_idx = info[pair.first].step_x >= info[pair.second].step_x
+		? pair.first : pair.second;
+	const uint32_t target_idx = source_idx == pair.first ? pair.second : pair.first;
+	const uint32_t ring_idx = source_order ? source_idx : target_idx;
+	const uint32_t edge_id = source_order ? inter.edge_source_id : inter.edge_target_id;
+	const float param = source_order ? inter.t : inter.u;
+	const uint32_t ring_begin = farm_offset[ring_idx].vertices_start;
+	const uint64_t local_edge = edge_id - ring_begin;
+	const uint64_t position = (local_edge << INTERSECTION_PARAM_BITS)
+		| quantize_intersection_parameter(param);
+	return position;
+}
+
+__global__ void build_indexed_intersection_keys(
+	const GpuIntersection *intersections, const uint32_t *input_indices,
+	uint32_t *output_indices, uint64_t *keys, uint32_t count,
+	const pair<uint32_t, uint32_t> *pairs, const FarmOffset *farm_offset,
+	const RasterInfo *info, bool source_order)
+{
+	const uint32_t id = blockIdx.x * blockDim.x + threadIdx.x;
+	if(id >= count) return;
+	const uint32_t record_id = input_indices == nullptr ? id : input_indices[id];
+	const GpuIntersection inter = intersections[record_id];
+	keys[id] = make_indexed_intersection_key(inter, pairs, farm_offset, info,
+		source_order);
+	output_indices[id] = record_id;
+}
+
+__device__ __forceinline__ bool intersection_record_less(
+	const GpuIntersection &a, const GpuIntersection &b, bool source_order)
+{
+	if(a.pair_id != b.pair_id) return a.pair_id < b.pair_id;
+	const uint32_t a_primary_edge = source_order ? a.edge_source_id : a.edge_target_id;
+	const uint32_t b_primary_edge = source_order ? b.edge_source_id : b.edge_target_id;
+	if(a_primary_edge != b_primary_edge) return a_primary_edge < b_primary_edge;
+	const float a_primary_param = source_order ? a.t : a.u;
+	const float b_primary_param = source_order ? b.t : b.u;
+	if(a_primary_param != b_primary_param) return a_primary_param < b_primary_param;
+	const uint32_t a_secondary_edge = source_order ? a.edge_target_id : a.edge_source_id;
+	const uint32_t b_secondary_edge = source_order ? b.edge_target_id : b.edge_source_id;
+	if(a_secondary_edge != b_secondary_edge) return a_secondary_edge < b_secondary_edge;
+	const float a_secondary_param = source_order ? a.u : a.t;
+	const float b_secondary_param = source_order ? b.u : b.t;
+	if(a_secondary_param != b_secondary_param) return a_secondary_param < b_secondary_param;
+	return a.metadata < b.metadata;
+}
+
+constexpr uint32_t INTERSECTION_LOCAL_SORT_THREADS = 256;
+constexpr uint32_t INTERSECTION_LOCAL_SORT_ITEMS = 2;
+constexpr uint32_t INTERSECTION_LOCAL_SORT_CAPACITY =
+	INTERSECTION_LOCAL_SORT_THREADS * INTERSECTION_LOCAL_SORT_ITEMS;
+
+__global__ void finish_intersection_pair_offsets(
+	uint32_t *offsets, uint32_t pair_count, uint32_t record_count)
+{
+	if(blockIdx.x == 0 && threadIdx.x == 0) offsets[pair_count] = record_count;
+}
+
+__global__ void scatter_intersection_indices_by_pair(
+	const GpuIntersection *intersections, uint32_t count,
+	uint32_t *pair_cursors, uint32_t *grouped_indices)
+{
+	const uint32_t id = blockIdx.x * blockDim.x + threadIdx.x;
+	if(id >= count) return;
+	const uint32_t output_id = atomicAdd(pair_cursors + intersections[id].pair_id, 1U);
+	grouped_indices[output_id] = id;
+}
+
+__global__ void build_heavy_intersection_segments(
+	const uint32_t *counts, const uint32_t *offsets, uint32_t pair_count,
+	uint32_t local_threshold, uint32_t *segment_begin, uint32_t *segment_end,
+	uint32_t *segment_count)
+{
+	const uint32_t pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+	if(pair_id >= pair_count || counts[pair_id] <= local_threshold) return;
+	const uint32_t output_id = atomicAdd(segment_count, 1U);
+	segment_begin[output_id] = offsets[pair_id];
+	segment_end[output_id] = offsets[pair_id + 1];
+}
+
+template<bool SourceOrder>
+__global__ void block_sort_intersection_pairs(
+	const GpuIntersection *intersections, const uint32_t *input_indices,
+	uint32_t *output_indices, const uint32_t *counts, const uint32_t *offsets,
+	uint32_t pair_count, uint32_t local_threshold,
+	const pair<uint32_t, uint32_t> *pairs, const FarmOffset *farm_offset,
+	const RasterInfo *info)
+{
+	const uint32_t pair_id = blockIdx.x;
+	if(pair_id >= pair_count) return;
+	const uint32_t count = counts[pair_id];
+	if(count == 0 || count > local_threshold || count > INTERSECTION_LOCAL_SORT_CAPACITY) return;
+	using BlockSort = cub::BlockRadixSort<uint64_t, INTERSECTION_LOCAL_SORT_THREADS,
+		INTERSECTION_LOCAL_SORT_ITEMS, uint32_t>;
+	__shared__ typename BlockSort::TempStorage sort_storage;
+	__shared__ uint64_t shared_keys[INTERSECTION_LOCAL_SORT_CAPACITY];
+	__shared__ uint32_t shared_indices[INTERSECTION_LOCAL_SORT_CAPACITY];
+	uint64_t keys[INTERSECTION_LOCAL_SORT_ITEMS];
+	uint32_t indices[INTERSECTION_LOCAL_SORT_ITEMS];
+	const uint32_t begin = offsets[pair_id];
+	#pragma unroll
+	for(uint32_t item = 0; item < INTERSECTION_LOCAL_SORT_ITEMS; item++){
+		const uint32_t local_id = threadIdx.x * INTERSECTION_LOCAL_SORT_ITEMS + item;
+		if(local_id < count){
+			indices[item] = input_indices[begin + local_id];
+			keys[item] = make_indexed_intersection_key(intersections[indices[item]],
+				pairs, farm_offset, info, SourceOrder);
+		}else{
+			indices[item] = UINT32_MAX;
+			keys[item] = UINT64_MAX;
+		}
+	}
+	BlockSort(sort_storage).Sort(keys, indices);
+	#pragma unroll
+	for(uint32_t item = 0; item < INTERSECTION_LOCAL_SORT_ITEMS; item++){
+		const uint32_t local_id = threadIdx.x * INTERSECTION_LOCAL_SORT_ITEMS + item;
+		shared_keys[local_id] = keys[item];
+		shared_indices[local_id] = indices[item];
+	}
+	__syncthreads();
+	for(uint32_t local_begin = threadIdx.x; local_begin < count;
+		local_begin += blockDim.x){
+		if(local_begin > 0 && shared_keys[local_begin - 1] == shared_keys[local_begin]) continue;
+		uint32_t local_end = local_begin + 1;
+		while(local_end < count && shared_keys[local_end] == shared_keys[local_begin]) local_end++;
+		for(uint32_t i = local_begin + 1; i < local_end; i++){
+			const uint32_t value = shared_indices[i];
+			const GpuIntersection current = intersections[value];
+			uint32_t j = i;
+			while(j > local_begin && intersection_record_less(
+				current, intersections[shared_indices[j - 1]], SourceOrder)){
+				shared_indices[j] = shared_indices[j - 1];
+				j--;
+			}
+			shared_indices[j] = value;
+		}
+	}
+	__syncthreads();
+	for(uint32_t local_id = threadIdx.x; local_id < count; local_id += blockDim.x){
+		output_indices[begin + local_id] = shared_indices[local_id];
+	}
+}
+
+template<bool SourceOrder>
+__global__ void order_heavy_intersection_key_runs(
+	const uint64_t *keys, uint32_t *indices,
+	const uint32_t *segment_begin, const uint32_t *segment_end,
+	uint32_t segment_count, const GpuIntersection *intersections)
+{
+	const uint32_t segment_id = blockIdx.x;
+	if(segment_id >= segment_count) return;
+	const uint32_t begin = segment_begin[segment_id];
+	const uint32_t end = segment_end[segment_id];
+	for(uint32_t run_begin = begin + threadIdx.x; run_begin < end;
+		run_begin += blockDim.x){
+		if(run_begin > begin && keys[run_begin - 1] == keys[run_begin]) continue;
+		uint32_t run_end = run_begin + 1;
+		while(run_end < end && keys[run_end] == keys[run_begin]) run_end++;
+		for(uint32_t i = run_begin + 1; i < run_end; i++){
+			const uint32_t value = indices[i];
+			const GpuIntersection current = intersections[value];
+			uint32_t j = i;
+			while(j > run_begin && intersection_record_less(
+				current, intersections[indices[j - 1]], SourceOrder)){
+				indices[j] = indices[j - 1];
+				j--;
+			}
+			indices[j] = value;
+		}
+	}
+}
+
+size_t query_intersection_scan_workspace(
+	uint32_t *counts, uint32_t *offsets, uint32_t pair_count)
+{
+	void *temporary_storage = nullptr;
+	size_t temporary_storage_bytes = 0;
+	CUDA_SAFE_CALL(cub::DeviceScan::ExclusiveSum(
+		temporary_storage, temporary_storage_bytes, counts, offsets, pair_count));
+	return temporary_storage_bytes;
+}
+
+size_t query_segmented_intersection_sort_workspace(
+	IntersectionSortStorage storage, uint32_t count, uint32_t segment_count,
+	uint32_t *segment_begin, uint32_t *segment_end)
+{
+	void *temporary_storage = nullptr;
+	size_t temporary_storage_bytes = 0;
+	CUDA_SAFE_CALL(cub::DeviceSegmentedRadixSort::SortPairs(
+		temporary_storage, temporary_storage_bytes,
+		storage.keys_a, storage.keys_b, storage.indices_a, storage.indices_b,
+		count, segment_count, segment_begin, segment_end, 0, INTERSECTION_SORT_BITS));
+	return temporary_storage_bytes;
+}
+
+void segmented_sort_intersections(
+	IntersectionSortStorage storage, uint32_t count, uint32_t segment_count,
+	uint32_t *segment_begin, uint32_t *segment_end,
+	void *temporary_storage, size_t temporary_storage_bytes)
+{
+	if(count == 0 || segment_count == 0) return;
+	CUDA_SAFE_CALL(cub::DeviceSegmentedRadixSort::SortPairs(
+		temporary_storage, temporary_storage_bytes,
+		storage.keys_a, storage.keys_b, storage.indices_a, storage.indices_b,
+		count, segment_count, segment_begin, segment_end, 0, INTERSECTION_SORT_BITS));
+}
+
+__device__ __forceinline__ const GpuIntersection &ordered_gpu_intersection(
+	const GpuIntersection *intersections, const uint32_t *indices, uint32_t id)
+{
+	return intersections[indices == nullptr ? id : indices[id]];
+}
+
+__global__ void mark_unique_indexed_gpu_intersections(
+	const GpuIntersection *intersections, const uint32_t *indices,
+	uint32_t count, uint8_t *flags)
+{
+	const uint32_t id = blockIdx.x * blockDim.x + threadIdx.x;
+	if(id >= count) return;
+	if(id == 0){
+		flags[id] = 1;
+		return;
+	}
+	const GpuIntersection current = intersections[indices[id]];
+	const GpuIntersection previous = intersections[indices[id - 1]];
+	flags[id] = current.pair_id != previous.pair_id ||
+		current.edge_source_id != previous.edge_source_id ||
+		current.edge_target_id != previous.edge_target_id ||
+		fabsf(current.t - previous.t) > INTERSECTION_PARAM_EPS ||
+		fabsf(current.u - previous.u) > INTERSECTION_PARAM_EPS;
+}
+
+size_t query_indexed_intersection_compact_workspace(
+	uint32_t *input, uint8_t *flags, uint32_t *output,
+	uint32_t *selected_count, uint32_t count)
+{
+	void *temporary_storage = nullptr;
+	size_t temporary_storage_bytes = 0;
+	CUDA_SAFE_CALL(cub::DeviceSelect::Flagged(
+		temporary_storage, temporary_storage_bytes,
+		input, flags, output, selected_count, count));
+	return temporary_storage_bytes;
+}
+
+uint32_t compact_unique_indexed_gpu_intersections(
+	const GpuIntersection *intersections, uint32_t *input, uint32_t *output,
+	uint32_t count, uint8_t *flags, uint32_t *selected_count,
+	void *temporary_storage, size_t temporary_storage_bytes)
+{
+	if(count <= 1){
+		if(count == 1 && input != output){
+			CUDA_SAFE_CALL(cudaMemcpy(output, input, sizeof(uint32_t), cudaMemcpyDeviceToDevice));
+		}
+		return count;
+	}
+	const int grid_size = (count + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	mark_unique_indexed_gpu_intersections<<<grid_size, BLOCK_SIZE>>>(
+		intersections, input, count, flags);
+	check_execution("mark_unique_indexed_gpu_intersections");
+	CUDA_SAFE_CALL(cub::DeviceSelect::Flagged(
+		temporary_storage, temporary_storage_bytes,
+		input, flags, output, selected_count, count));
+	uint32_t host_count = 0;
+	CUDA_SAFE_CALL(cudaMemcpy(&host_count, selected_count,
+		sizeof(uint32_t), cudaMemcpyDeviceToHost));
+	return host_count;
+}
+
+
+__global__ void count_gpu_intersections_per_pair(
+	const GpuIntersection *intersections, const uint32_t *indices,
+	uint32_t count, uint32_t *counts)
+{
+	const uint32_t id = blockIdx.x * blockDim.x + threadIdx.x;
+	if(id < count){
+		atomicAdd(counts + ordered_gpu_intersection(intersections, indices, id).pair_id, 1U);
+	}
+}
+
+__device__ __forceinline__ Point gpu_interpolate_intersection(
+	const Point *vertices, uint32_t edge_id, float param)
+{
+	const Point a = vertices[edge_id];
+	const Point b = vertices[edge_id + 1];
+	return Point(fmaf(param, b.x - a.x, a.x), fmaf(param, b.y - a.y, a.y));
+}
+
+__device__ __forceinline__ bool gpu_point_on_segment_fp32(
+	const Point &point, const Point &a, const Point &b)
+{
+	const float dx = b.x - a.x;
+	const float dy = b.y - a.y;
+	const float px = point.x - a.x;
+	const float py = point.y - a.y;
+	const float length_sq = fmaf(dx, dx, dy * dy);
+	if(length_sq == 0.0f){
+		return fmaf(px, px, py * py) <= INTERSECTION_PARALLEL_EPS_SQ;
+	}
+	const float cross = intersection_cross(dx, dy, px, py);
+	if(cross * cross > INTERSECTION_PARALLEL_EPS_SQ * length_sq *
+		fmaxf(fmaf(px, px, py * py), 1.0f)){
+		return false;
+	}
+	const float dot = fmaf(px, dx, py * dy);
+	return dot >= -INTERSECTION_PARAM_EPS && dot <= length_sq + INTERSECTION_PARAM_EPS;
+}
+
+__device__ PartitionStatus gpu_point_in_ring_fp32(
+	const Point &point, const Point *vertices, uint32_t begin, uint32_t end)
+{
+	bool inside = false;
+	for(uint32_t edge = begin; edge + 1 < end; edge++){
+		const Point a = vertices[edge];
+		const Point b = vertices[edge + 1];
+		if(gpu_point_on_segment_fp32(point, a, b)) return BORDER;
+		if((a.y > point.y) != (b.y > point.y)){
+			const float intersection_x = fmaf((b.x - a.x) / (b.y - a.y), point.y - a.y, a.x);
+			if(intersection_x > point.x) inside = !inside;
+		}
+	}
+	return inside ? IN : OUT;
+}
+
+__device__ PartitionStatus classify_shared_gpu_arc(
+	const Point &sample, const Point &primary_direction,
+	const Point *vertices, uint32_t secondary_begin, uint32_t secondary_end,
+	bool is_primary)
+{
+	for(uint32_t edge = secondary_begin; edge + 1 < secondary_end; edge++){
+		const Point a = vertices[edge];
+		const Point b = vertices[edge + 1];
+		if(!gpu_point_on_segment_fp32(sample, a, b)) continue;
+		const float secondary_dx = b.x - a.x;
+		const float secondary_dy = b.y - a.y;
+		const float cross = intersection_cross(primary_direction.x, primary_direction.y,
+			secondary_dx, secondary_dy);
+		const float primary_len_sq = fmaf(primary_direction.x, primary_direction.x,
+			primary_direction.y * primary_direction.y);
+		const float secondary_len_sq = fmaf(secondary_dx, secondary_dx, secondary_dy * secondary_dy);
+		if(cross * cross > INTERSECTION_PARALLEL_EPS_SQ * primary_len_sq * secondary_len_sq) continue;
+		if(!is_primary) return OUT;
+		const float dot = fmaf(primary_direction.x, secondary_dx, primary_direction.y * secondary_dy);
+		return dot > 0.0f ? IN : OUT;
+	}
+	return BORDER;
+}
+
+__device__ PartitionStatus classify_gpu_intersection_arc(
+	const GpuIntersection &current, const GpuIntersection &next,
+	const Point *vertices, uint32_t source_begin, uint32_t source_end,
+	uint32_t target_begin, uint32_t target_end, bool is_primary)
+{
+	const uint32_t overlap_group = gpu_intersection_overlap(current);
+	if(overlap_group != 0 && overlap_group == gpu_intersection_overlap(next)){
+		if(!is_primary) return OUT;
+		const Point source_start = gpu_interpolate_intersection(
+			vertices, current.edge_source_id, current.t);
+		const Point source_finish = gpu_interpolate_intersection(
+			vertices, next.edge_source_id, next.t);
+		const Point target_a = vertices[current.edge_target_id];
+		const Point target_b = vertices[current.edge_target_id + 1];
+		const float dot = fmaf(source_finish.x - source_start.x, target_b.x - target_a.x,
+			(source_finish.y - source_start.y) * (target_b.y - target_a.y));
+		return dot > 0.0f ? IN : OUT;
+	}
+
+	if(overlap_group == 0 &&
+	   current.t > INTERSECTION_PARAM_EPS && current.t < 1.0f - INTERSECTION_PARAM_EPS &&
+	   current.u > INTERSECTION_PARAM_EPS && current.u < 1.0f - INTERSECTION_PARAM_EPS){
+		const Point source_a = vertices[current.edge_source_id];
+		const Point source_b = vertices[current.edge_source_id + 1];
+		const Point target_a = vertices[current.edge_target_id];
+		const Point target_b = vertices[current.edge_target_id + 1];
+		const float cross = intersection_cross(target_b.x - target_a.x, target_b.y - target_a.y,
+			source_b.x - source_a.x, source_b.y - source_a.y);
+		return is_primary ? (cross > 0.0f ? IN : OUT) : (cross < 0.0f ? IN : OUT);
+	}
+
+	const uint32_t current_edge = is_primary ? current.edge_source_id : current.edge_target_id;
+	const uint32_t next_edge = is_primary ? next.edge_source_id : next.edge_target_id;
+	const float current_param = is_primary ? current.t : current.u;
+	const float next_param = is_primary ? next.t : next.u;
+	const Point current_point = gpu_interpolate_intersection(vertices, current_edge, current_param);
+	const Point next_point = gpu_interpolate_intersection(vertices, next_edge, next_param);
+	Point sample;
+	Point direction;
+	if(current_edge == next_edge && current_param < next_param){
+		sample = Point((current_point.x + next_point.x) * 0.5f,
+			(current_point.y + next_point.y) * 0.5f);
+		direction = next_point - current_point;
+	}else{
+		const Point edge_end = vertices[current_edge + 1];
+		sample = Point((current_point.x + edge_end.x) * 0.5f,
+			(current_point.y + edge_end.y) * 0.5f);
+		direction = edge_end - current_point;
+	}
+
+	const uint32_t secondary_begin = is_primary ? target_begin : source_begin;
+	const uint32_t secondary_end = is_primary ? target_end : source_end;
+	const PartitionStatus status = gpu_point_in_ring_fp32(sample, vertices,
+		secondary_begin, secondary_end);
+	if(status != BORDER) return status;
+	const PartitionStatus shared = classify_shared_gpu_arc(sample, direction, vertices,
+		secondary_begin, secondary_end, is_primary);
+	return shared == BORDER ? OUT : shared;
+}
+
+__device__ __forceinline__ void add_gpu_area_vertex(
+	const Point *vertices, uint32_t vertex_id,
+	double &area, double &last_x, double &last_y)
+{
+	const double x = vertices[vertex_id].x;
+	const double y = vertices[vertex_id].y;
+	area += last_x * y - last_y * x;
+	last_x = x;
+	last_y = y;
+}
+
+__device__ double gpu_arc_double_area(
+	const GpuIntersection &current, const GpuIntersection &next,
+	const Point *vertices, uint32_t ring_begin, uint32_t ring_end, bool is_primary)
+{
+	const uint32_t edge1 = is_primary ? current.edge_source_id : current.edge_target_id;
+	uint32_t edge2 = is_primary ? next.edge_source_id : next.edge_target_id;
+	const float param1 = is_primary ? current.t : current.u;
+	float param2 = is_primary ? next.t : next.u;
+	const Point point1 = gpu_interpolate_intersection(vertices, edge1, param1);
+	const Point point2 = gpu_interpolate_intersection(vertices, edge2, param2);
+
+	if(param2 <= INTERSECTION_PARAM_EPS){
+		edge2 = edge2 > ring_begin ? edge2 - 1 : ring_end - 2;
+		param2 = 1.0f;
+	}
+
+	double area = 0.0;
+	double last_x = point1.x;
+	double last_y = point1.y;
+
+	if(edge1 < edge2 || (edge1 == edge2 && param1 < param2)){
+		for(uint32_t vertex_id = edge1 + 1; vertex_id <= edge2; vertex_id++){
+			add_gpu_area_vertex(vertices, vertex_id, area, last_x, last_y);
+		}
+	}else{
+		for(uint32_t vertex_id = edge1 + 1; vertex_id < ring_end - 1; vertex_id++){
+			add_gpu_area_vertex(vertices, vertex_id, area, last_x, last_y);
+		}
+		for(uint32_t vertex_id = ring_begin; vertex_id <= edge2; vertex_id++){
+			add_gpu_area_vertex(vertices, vertex_id, area, last_x, last_y);
+		}
+	}
+	area += last_x * point2.y - last_y * point2.x;
+	return area;
+}
+
+__global__ void classify_and_accumulate_gpu_arcs(
+	const GpuIntersection *intersections, const uint32_t *indices, uint32_t count,
+	const pair<uint32_t, uint32_t> *pairs, const FarmOffset *farm_offset,
+	const RasterInfo *info, const Point *vertices, const uint32_t *counts,
+	double *areas, bool is_primary)
+{
+	const uint32_t id = blockIdx.x * blockDim.x + threadIdx.x;
+	if(id >= count) return;
+	const GpuIntersection current = ordered_gpu_intersection(intersections, indices, id);
+	const uint32_t pair_id = current.pair_id;
+	const uint32_t pair_count = counts[pair_id];
+	const uint32_t next_id = id + 1 >= count ||
+		ordered_gpu_intersection(intersections, indices, id + 1).pair_id != pair_id
+		? id + 1 - pair_count : id + 1;
+	const GpuIntersection next = ordered_gpu_intersection(intersections, indices, next_id);
+	const pair<uint32_t, uint32_t> pair = pairs[pair_id];
+	const uint32_t source_idx = info[pair.first].step_x >= info[pair.second].step_x ? pair.first : pair.second;
+	const uint32_t target_idx = source_idx == pair.first ? pair.second : pair.first;
+	const uint32_t source_begin = farm_offset[source_idx].vertices_start;
+	const uint32_t source_end = farm_offset[source_idx + 1].vertices_start;
+	const uint32_t target_begin = farm_offset[target_idx].vertices_start;
+	const uint32_t target_end = farm_offset[target_idx + 1].vertices_start;
+
+	if(classify_gpu_intersection_arc(current, next, vertices,
+		source_begin, source_end, target_begin, target_end, is_primary) != IN){
+		return;
+	}
+	const uint32_t ring_begin = is_primary ? source_begin : target_begin;
+	const uint32_t ring_end = is_primary ? source_end : target_end;
+	atomicAdd(areas + pair_id,
+		gpu_arc_double_area(current, next, vertices, ring_begin, ring_end, is_primary));
+}
+
+__device__ double gpu_positive_double_area(
+	const Point *vertices, uint32_t begin, uint32_t end)
+{
+	double area = 0.0;
+	for(uint32_t id = begin; id + 1 < end; id++){
+		area += (double)vertices[id].x * vertices[id + 1].y
+			- (double)vertices[id].y * vertices[id + 1].x;
+	}
+	return fabs(area);
+}
+
+__device__ bool gpu_mbr_contains(const box &container, const box &subject)
+{
+	return container.low[0] <= subject.low[0] && container.low[1] <= subject.low[1]
+		&& container.high[0] >= subject.high[0] && container.high[1] >= subject.high[1];
+}
+
+__global__ void collect_no_crossing_gpu_pairs(
+	const pair<uint32_t, uint32_t> *pairs, uint32_t pair_count,
+	const RasterInfo *info, const uint32_t *intersection_counts,
+	uint32_t *containment_pairs, uint32_t *containment_count)
+{
+	const uint32_t pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+	if(pair_id >= pair_count || intersection_counts[pair_id] != 0) return;
+	const pair<uint32_t, uint32_t> pair = pairs[pair_id];
+	const uint32_t source_idx = info[pair.first].step_x >= info[pair.second].step_x ? pair.first : pair.second;
+	const uint32_t target_idx = source_idx == pair.first ? pair.second : pair.first;
+	if(!gpu_mbr_contains(info[source_idx].mbr, info[target_idx].mbr) &&
+	   !gpu_mbr_contains(info[target_idx].mbr, info[source_idx].mbr)) return;
+	const uint32_t output_id = atomicAdd(containment_count, 1U);
+	containment_pairs[output_id] = pair_id;
+}
+
+__global__ void resolve_gpu_containment_pairs(
+	const uint32_t *containment_pairs, const uint32_t *containment_count,
+	const pair<uint32_t, uint32_t> *pairs, const FarmOffset *farm_offset,
+	const RasterInfo *info, const Point *vertices, double *areas)
+{
+	const uint32_t queue_id = blockIdx.x;
+	if(queue_id >= *containment_count) return;
+	const uint32_t pair_id = containment_pairs[queue_id];
+	const pair<uint32_t, uint32_t> pair = pairs[pair_id];
+	const uint32_t source_idx = info[pair.first].step_x >= info[pair.second].step_x ? pair.first : pair.second;
+	const uint32_t target_idx = source_idx == pair.first ? pair.second : pair.first;
+	const uint32_t source_begin = farm_offset[source_idx].vertices_start;
+	const uint32_t source_end = farm_offset[source_idx + 1].vertices_start;
+	const uint32_t target_begin = farm_offset[target_idx].vertices_start;
+	const uint32_t target_end = farm_offset[target_idx + 1].vertices_start;
+	__shared__ uint32_t has_outside;
+	__shared__ uint32_t has_inside;
+	__shared__ uint32_t resolved;
+	__shared__ uint32_t source_contains_target;
+	__shared__ uint32_t target_contains_source;
+	if(threadIdx.x == 0){
+		has_outside = 0;
+		has_inside = 0;
+		resolved = 0;
+		source_contains_target = gpu_mbr_contains(
+			info[source_idx].mbr, info[target_idx].mbr);
+		target_contains_source = gpu_mbr_contains(
+			info[target_idx].mbr, info[source_idx].mbr);
+	}
+	__syncthreads();
+
+	if(source_contains_target){
+		for(uint32_t id = target_begin + threadIdx.x; id + 1 < target_end; id += blockDim.x){
+			PartitionStatus status = gpu_point_in_ring_fp32(vertices[id], vertices,
+				source_begin, source_end);
+			if(status == OUT) atomicExch(&has_outside, 1U);
+			if(status == IN) atomicExch(&has_inside, 1U);
+			const Point midpoint((vertices[id].x + vertices[id + 1].x) * 0.5f,
+				(vertices[id].y + vertices[id + 1].y) * 0.5f);
+			status = gpu_point_in_ring_fp32(midpoint, vertices, source_begin, source_end);
+			if(status == OUT) atomicExch(&has_outside, 1U);
+			if(status == IN) atomicExch(&has_inside, 1U);
+		}
+	}
+	__syncthreads();
+	if(threadIdx.x == 0 && !has_outside && source_contains_target){
+		const double source_area = gpu_positive_double_area(vertices, source_begin, source_end);
+		const double target_area = gpu_positive_double_area(vertices, target_begin, target_end);
+		if(has_inside || fabs(source_area - target_area) <=
+		   1e-6 + 1e-5 * fmax(source_area, target_area)){
+			areas[pair_id] = target_area;
+			resolved = 1;
+		}
+	}
+	__syncthreads();
+	if(resolved) return;
+
+	if(threadIdx.x == 0){
+		has_outside = 0;
+		has_inside = 0;
+	}
+	__syncthreads();
+	if(target_contains_source){
+		for(uint32_t id = source_begin + threadIdx.x; id + 1 < source_end; id += blockDim.x){
+			PartitionStatus status = gpu_point_in_ring_fp32(vertices[id], vertices,
+				target_begin, target_end);
+			if(status == OUT) atomicExch(&has_outside, 1U);
+			if(status == IN) atomicExch(&has_inside, 1U);
+			const Point midpoint((vertices[id].x + vertices[id + 1].x) * 0.5f,
+				(vertices[id].y + vertices[id + 1].y) * 0.5f);
+			status = gpu_point_in_ring_fp32(midpoint, vertices, target_begin, target_end);
+			if(status == OUT) atomicExch(&has_outside, 1U);
+			if(status == IN) atomicExch(&has_inside, 1U);
+		}
+	}
+	__syncthreads();
+	if(threadIdx.x == 0 && !has_outside && target_contains_source){
+		const double source_area = gpu_positive_double_area(vertices, source_begin, source_end);
+		const double target_area = gpu_positive_double_area(vertices, target_begin, target_end);
+		if(has_inside || fabs(source_area - target_area) <=
+		   1e-6 + 1e-5 * fmax(source_area, target_area)){
+			areas[pair_id] = source_area;
+		}
+	}
+}
+
+__global__ void finalize_gpu_intersection_areas(double *areas, uint32_t count)
+{
+	const uint32_t id = blockIdx.x * blockDim.x + threadIdx.x;
+	if(id < count) areas[id] = fabs(areas[id]);
+}
+
+} // namespace
+
+static void cuda_approximate_intersection(query_context *gctx, size_t batch_size)
+{
+    if(batch_size == 0) return;
+
+    double *d_areas = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_areas, batch_size * sizeof(double)));
+
+    kernel_approximate_intersection_area<<<batch_size, INTERSECTION_APPROX_THREADS>>>(
+        gctx->d_candidate_pairs + gctx->index,
+        gctx->d_farm_offset,
+        gctx->d_info,
+        gctx->d_status,
+        batch_size,
+	        static_cast<uint8_t>(gctx->bitwidth),
+        d_areas);
+    check_execution("kernel_approximate_intersection_area");
+
+    CUDA_SAFE_CALL(cudaMemcpy(gctx->areas + gctx->index, d_areas,
+        batch_size * sizeof(double), cudaMemcpyDeviceToHost));
+    CUDA_SAFE_CALL(cudaFree(d_areas));
 }
 
 void cuda_intersection(query_context *gctx)
 {
-	size_t batch_size = gctx->index_end - gctx->index;
-    uint h_bufferinput_size, h_bufferoutput_size;
-	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
-	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
+	const size_t batch_size = gctx->index_end - gctx->index;
+	if(gctx->use_approximation){
+		cuda_approximate_intersection(gctx, batch_size);
+		return;
+	}
+	if(batch_size == 0) return;
 
-	/*1. Raster Model Filtering*/
-    const int block_size = BLOCK_SIZE;
-    int grid_size = (batch_size + block_size - 1) / block_size;
+	const int block_size = BLOCK_SIZE;
+	const uint32_t pair_count = static_cast<uint32_t>(batch_size);
+	auto *batch_pairs = gctx->d_candidate_pairs + gctx->index;
+	const uint32_t pixpair_capacity = CUDA_SCRATCH_BUFFER_BYTES / sizeof(PixPair);
+	const uint32_t intersection_capacity = CUDA_SCRATCH_BUFFER_BYTES / sizeof(GpuIntersection);
 
-    kernel_filter_intersection<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, batch_size, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->category_count);
-    cudaDeviceSynchronize();
-    check_execution("kernel_filter_intersection");
+	double *d_areas = nullptr;
+	uint32_t *d_intersections_per_pair = nullptr;
+	IntersectionDeviceControl *d_control = nullptr;
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_areas, batch_size * sizeof(double)));
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_intersections_per_pair, batch_size * sizeof(uint32_t)));
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_control, sizeof(IntersectionDeviceControl)));
+	uint32_t *d_stage_count = &d_control->count;
+	uint32_t *d_overflow = &d_control->overflow;
+	uint32_t *d_overlap_counter = &d_control->auxiliary_count;
+	CUDA_SAFE_CALL(cudaMemset(d_areas, 0, batch_size * sizeof(double)));
+	CUDA_SAFE_CALL(cudaMemset(d_intersections_per_pair, 0, batch_size * sizeof(uint32_t)));
+	CUDA_SAFE_CALL(cudaMemset(d_control, 0, sizeof(IntersectionDeviceControl)));
 
-    CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
+	int grid_size = (pair_count + block_size - 1) / block_size;
+	kernel_filter_intersection<<<grid_size, block_size>>>(
+		batch_pairs, gctx->d_farm_offset, gctx->d_info, gctx->d_status,
+		pair_count, reinterpret_cast<PixPair *>(gctx->d_BufferInput),
+			d_stage_count, static_cast<uint8_t>(gctx->bitwidth),
+		pixpair_capacity, d_overflow);
+	check_execution("kernel_filter_intersection");
 
-	if(h_bufferinput_size == 0) return;
-	
-    /*2. Unroll Refinement*/
+	IntersectionStageResult stage_result{};
+	CUDA_SAFE_CALL(cudaMemcpy(&stage_result, d_control,
+		sizeof(stage_result), cudaMemcpyDeviceToHost));
+	const uint32_t pixpair_count = stage_result.count;
+	if(stage_result.overflow || pixpair_count > pixpair_capacity){
+		fprintf(stderr, "intersection pixel-pair buffer overflow: %u > %u\n",
+			pixpair_count, pixpair_capacity);
+		exit(EXIT_FAILURE);
+	}
 
-    grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	uint32_t intersection_count = 0;
+	if(pixpair_count > 0){
+		grid_size = (pixpair_count + block_size - 1) / block_size;
+		const uint32_t task_capacity = CUDA_SCRATCH_BUFFER_BYTES / sizeof(Task);
+		CUDA_SAFE_CALL(cudaMemset(d_control, 0, sizeof(IntersectionStageResult)));
+		kernel_unroll_intersection_tasks<<<grid_size, block_size>>>(
+			reinterpret_cast<PixPair *>(gctx->d_BufferInput), pixpair_count,
+			batch_pairs, gctx->d_farm_offset, gctx->d_info,
+			gctx->d_offset, gctx->d_edge_sequences,
+			reinterpret_cast<Task *>(gctx->d_BufferOutput), task_capacity,
+			d_stage_count, d_overflow);
+		check_execution("kernel_unroll_intersection");
 
-    kernel_unroll_intersection<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_status, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
-    cudaDeviceSynchronize();
-    check_execution("kernel_unroll_intersection");
+		CUDA_SAFE_CALL(cudaMemcpy(&stage_result, d_control,
+			sizeof(stage_result), cudaMemcpyDeviceToHost));
+		const uint32_t task_count = stage_result.count;
+		if(stage_result.overflow || task_count > task_capacity){
+			fprintf(stderr, "intersection task buffer overflow: %u > %u\n",
+				task_count, task_capacity);
+			exit(EXIT_FAILURE);
+		}
 
-  	CUDA_SWAP_BUFFER();
-  
-    /*3. Refinement step*/
-
-    grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
-    kernel_refinement_intersection<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_vertices, gctx->d_bufferinput_size, (Intersection *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
-    cudaDeviceSynchronize();
-    check_execution("kernel_refinement_intersection");
-
-	CUDA_SWAP_BUFFER();
-
-	if(h_bufferinput_size == 0) return;
-
-	// check source polygon edges 
-    thrust::device_ptr<Intersection> begin = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput);
-    thrust::device_ptr<Intersection> end = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput + h_bufferinput_size);
-
-	thrust::sort(thrust::device, begin, end, 
-    [] __device__(const Intersection &a, const Intersection &b) {
-		if (a.pair_id != b.pair_id) {
-            return a.pair_id < b.pair_id; 
-        }else if (a.p.x != b.p.x){
-            return a.p.x < b.p.x;
-        }
-        return a.p.y < b.p.y;
-    });
-
-	auto new_end = thrust::unique(begin, end,
-    [] __device__(const Intersection &a, const Intersection &b) {
-        return a.pair_id == b.pair_id && a.p == b.p;
-    });
-
-    h_bufferinput_size = thrust::distance(begin, new_end);
-	end = begin + h_bufferinput_size;
-
-	auto &num_intersections = h_bufferinput_size;
-
-	CUDA_SAFE_CALL(cudaMemcpy(gctx->d_bufferinput_size, &h_bufferinput_size, 
-							sizeof(uint), cudaMemcpyHostToDevice));
-
-	grid_size = (num_intersections + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
-    uint *d_inters_per_pair = nullptr;
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_inters_per_pair, batch_size * sizeof(uint)));
-    CUDA_SAFE_CALL(cudaMemset(d_inters_per_pair, 0, batch_size * sizeof(uint)));
-
-	find_inters_per_pair<<<grid_size, block_size>>>((Intersection *)gctx->d_BufferInput, gctx->d_bufferinput_size, d_inters_per_pair);
-	cudaDeviceSynchronize();
-    check_execution("kernel_find_inters_per_pair");
-
-	thrust::sort(thrust::device, begin, end, CompareSourceIntersections());
-	
-	make_segments<<<grid_size, block_size>>>((Intersection *)gctx->d_BufferInput, gctx->d_bufferinput_size, (Segment *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_vertices, d_inters_per_pair, true);
-	cudaDeviceSynchronize();
-    check_execution("kernel_make_segments");
-
-	// check target polygon edges 
-
-	begin = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput);
-    end = thrust::device_pointer_cast((Intersection*)gctx->d_BufferInput + num_intersections);
-    thrust::sort(thrust::device, begin, end, CompareTargetIntersections());
-	
-	make_segments<<<grid_size, block_size>>>((Intersection *)gctx->d_BufferInput, gctx->d_bufferinput_size, (Segment *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_vertices, d_inters_per_pair, false);
-	cudaDeviceSynchronize();
-    check_execution("kernel_make_segments");
-
-	CUDA_SWAP_BUFFER();
-			
-	uint &num_segments = h_bufferinput_size;
-
-	if(num_segments == 0) return;
-
-	thrust::device_ptr<Segment> seg_begin = thrust::device_pointer_cast((Segment*)gctx->d_BufferInput);
-    thrust::device_ptr<Segment> seg_end = thrust::device_pointer_cast((Segment *)gctx->d_BufferInput + num_segments);
-    thrust::sort(thrust::device, seg_begin, seg_end, 
-		[] __device__(const Segment &a, const Segment &b) {
-			if(a.pair_id != b.pair_id){
-				return a.pair_id < b.pair_id;
-			}else if(fabs(a.start.x - b.start.x) >= 1e-9){
-				return a.start.x < b.start.x;
-			}else if(fabs(a.start.y - b.start.y) >= 1e-9){
-				return a.start.y < b.start.y;
-			}else if(fabs(a.end.x - b.end.x) >= 1e-9){
-				return a.end.x < b.end.x;
-			}else if(fabs(a.end.y - b.end.y) >= 1e-9){
-				return a.end.y < b.end.y;
-			}else{
-				return a.is_source < b.is_source;
+		if(task_count > 0){
+			CUDA_SAFE_CALL(cudaMemset(d_control, 0, sizeof(IntersectionDeviceControl)));
+			grid_size = (task_count + INTERSECTION_WARPS_PER_BLOCK - 1)
+				/ INTERSECTION_WARPS_PER_BLOCK;
+			kernel_refinement_intersection<<<grid_size, block_size>>>(
+				reinterpret_cast<Task *>(gctx->d_BufferOutput), batch_pairs,
+				gctx->d_farm_offset, gctx->d_info, gctx->d_vertices,
+				task_count, reinterpret_cast<GpuIntersection *>(gctx->d_BufferInput),
+				intersection_capacity, d_stage_count,
+				d_overlap_counter, d_intersections_per_pair, d_overflow);
+			check_execution("kernel_refinement_intersection");
+			CUDA_SAFE_CALL(cudaMemcpy(&stage_result, d_control,
+				sizeof(stage_result), cudaMemcpyDeviceToHost));
+			intersection_count = stage_result.count;
+			if(stage_result.overflow || intersection_count > intersection_capacity){
+				fprintf(stderr, "intersection record buffer overflow\n");
+				exit(EXIT_FAILURE);
 			}
-		});
+		}
+	}
 
-    thrust::device_vector<int> d_indices(num_segments);
-    thrust::sequence(d_indices.begin(), d_indices.end());
+	const size_t auxiliary_bytes = std::max(
+		static_cast<size_t>(intersection_count) * sizeof(uint8_t),
+		static_cast<size_t>(pair_count) * sizeof(uint32_t));
+	void *d_auxiliary = nullptr;
+	CUDA_SAFE_CALL(cudaMalloc(&d_auxiliary, auxiliary_bytes));
+	auto *d_unique_flags = reinterpret_cast<uint8_t *>(d_auxiliary);
+	auto *d_containment_pairs = reinterpret_cast<uint32_t *>(d_auxiliary);
 
+	void *d_cub_workspace = nullptr;
+	size_t cub_workspace_bytes = 0;
+	uint32_t *d_pair_sort_state = nullptr;
+	if(intersection_count > 0){
+		auto *buffer_a = reinterpret_cast<GpuIntersection *>(gctx->d_BufferInput);
+		IntersectionSortStorage sort_storage = make_intersection_sort_storage(
+			gctx->d_BufferOutput, intersection_count);
+		const uint32_t local_sort_threshold = INTERSECTION_LOCAL_SORT_CAPACITY;
+		const size_t pair_state_count = static_cast<size_t>(pair_count) * 4 + 1;
+		CUDA_SAFE_CALL(cudaMalloc((void **)&d_pair_sort_state,
+			pair_state_count * sizeof(uint32_t)));
+		uint32_t *d_pair_offsets = d_pair_sort_state;
+		uint32_t *d_pair_cursors = d_pair_offsets + pair_count + 1;
+		uint32_t *d_segment_begin = d_pair_cursors + pair_count;
+		uint32_t *d_segment_end = d_segment_begin + pair_count;
 
-	thrust::device_vector<int> pair_ids(num_segments);
-	thrust::transform(seg_begin, seg_end, pair_ids.begin(), ExtractPairId());
+		const size_t scan_bytes = query_intersection_scan_workspace(
+			d_intersections_per_pair, d_pair_offsets, pair_count);
+		const size_t segmented_sort_bytes = query_segmented_intersection_sort_workspace(
+			sort_storage, intersection_count, pair_count,
+			d_segment_begin, d_segment_end);
+		const size_t compact_bytes = query_indexed_intersection_compact_workspace(
+			sort_storage.indices_b, d_unique_flags, sort_storage.indices_a,
+			d_stage_count, intersection_count);
+		cub_workspace_bytes = std::max(scan_bytes,
+			std::max(segmented_sort_bytes, compact_bytes));
+		if(cub_workspace_bytes > 0){
+			CUDA_SAFE_CALL(cudaMalloc(&d_cub_workspace, cub_workspace_bytes));
+		}
 
-    thrust::device_vector<int> d_flags(num_segments);
-    thrust::adjacent_difference(thrust::device, pair_ids.begin(), pair_ids.end(), d_flags.begin());
+		grid_size = (intersection_count + block_size - 1) / block_size;
+		const int pair_grid_size = (pair_count + block_size - 1) / block_size;
+		CUDA_SAFE_CALL(cub::DeviceScan::ExclusiveSum(
+			d_cub_workspace, cub_workspace_bytes,
+			d_intersections_per_pair, d_pair_offsets, pair_count));
+		finish_intersection_pair_offsets<<<1, 1>>>(
+			d_pair_offsets, pair_count, intersection_count);
+		check_execution("finish_intersection_pair_offsets");
+		CUDA_SAFE_CALL(cudaMemcpy(d_pair_cursors, d_pair_offsets,
+			pair_count * sizeof(uint32_t), cudaMemcpyDeviceToDevice));
+		scatter_intersection_indices_by_pair<<<grid_size, block_size>>>(
+			buffer_a, intersection_count, d_pair_cursors, sort_storage.indices_a);
+		check_execution("scatter_intersection_indices_by_pair");
 
-    thrust::transform(d_flags.begin(), d_flags.end(), d_flags.begin(),
-        [] __device__(int x){ return x != 0 ? 1 : 0; });
+		build_indexed_intersection_keys<<<grid_size, block_size>>>(
+			buffer_a, sort_storage.indices_a, sort_storage.indices_a, sort_storage.keys_a,
+			intersection_count, batch_pairs, gctx->d_farm_offset, gctx->d_info,
+			true);
+		check_execution("build_source_intersection_keys");
+		block_sort_intersection_pairs<true><<<pair_count,
+			INTERSECTION_LOCAL_SORT_THREADS>>>(
+			buffer_a, sort_storage.indices_a, sort_storage.indices_b,
+			d_intersections_per_pair, d_pair_offsets, pair_count,
+			local_sort_threshold, batch_pairs, gctx->d_farm_offset, gctx->d_info);
+		check_execution("block_sort_source_intersection_pairs");
+		CUDA_SAFE_CALL(cudaMemset(d_stage_count, 0, sizeof(uint32_t)));
+		build_heavy_intersection_segments<<<pair_grid_size, block_size>>>(
+			d_intersections_per_pair, d_pair_offsets, pair_count,
+			local_sort_threshold, d_segment_begin, d_segment_end,
+			d_stage_count);
+		check_execution("build_source_heavy_intersection_segments");
+		uint32_t heavy_segment_count = 0;
+		CUDA_SAFE_CALL(cudaMemcpy(&heavy_segment_count, d_stage_count,
+			sizeof(uint32_t), cudaMemcpyDeviceToHost));
+		segmented_sort_intersections(sort_storage, intersection_count,
+			heavy_segment_count, d_segment_begin, d_segment_end,
+			d_cub_workspace, cub_workspace_bytes);
+		if(heavy_segment_count > 0){
+			order_heavy_intersection_key_runs<true><<<heavy_segment_count,
+				block_size>>>(sort_storage.keys_b, sort_storage.indices_b,
+				d_segment_begin, d_segment_end, heavy_segment_count, buffer_a);
+			check_execution("order_heavy_source_intersection_keys");
+		}
+		CUDA_SAFE_CALL(cudaMemset(d_stage_count, 0, sizeof(uint32_t)));
+		intersection_count = compact_unique_indexed_gpu_intersections(
+			buffer_a, sort_storage.indices_b, sort_storage.indices_a,
+			intersection_count, d_unique_flags, d_stage_count,
+			d_cub_workspace, cub_workspace_bytes);
 
-    d_flags[0] = 1;	
+		if(intersection_count > 0){
+			grid_size = (intersection_count + block_size - 1) / block_size;
+			CUDA_SAFE_CALL(cudaMemset(d_intersections_per_pair, 0,
+				pair_count * sizeof(uint32_t)));
+			count_gpu_intersections_per_pair<<<grid_size, block_size>>>(
+				buffer_a, sort_storage.indices_a, intersection_count,
+				d_intersections_per_pair);
+			check_execution("count_gpu_intersections_per_pair");
 
-    int num_groups = thrust::count(d_flags.begin(), d_flags.end(), 1);
+			CUDA_SAFE_CALL(cub::DeviceScan::ExclusiveSum(
+				d_cub_workspace, cub_workspace_bytes,
+				d_intersections_per_pair, d_pair_offsets, pair_count));
+			finish_intersection_pair_offsets<<<1, 1>>>(
+				d_pair_offsets, pair_count, intersection_count);
+			check_execution("finish_canonical_intersection_pair_offsets");
+			classify_and_accumulate_gpu_arcs<<<grid_size, block_size>>>(
+				buffer_a, sort_storage.indices_a, intersection_count, batch_pairs,
+				gctx->d_farm_offset, gctx->d_info, gctx->d_vertices,
+				d_intersections_per_pair, d_areas, true);
+			check_execution("classify_source_gpu_arcs");
 
-	thrust::device_vector<int> d_starts(num_groups + 1, num_segments);
-	
-    thrust::copy_if(thrust::device,
-					d_indices.begin(), d_indices.end(),
-                    d_flags.begin(), d_starts.begin(),
-                    thrust::identity<int>());
-	
-	uint8_t *pip = nullptr;
-	CUDA_SAFE_CALL(cudaMalloc((void **) &pip, num_segments * sizeof(uint8_t)));
-	CUDA_SAFE_CALL(cudaMemset(pip, 0, num_segments * sizeof(uint8_t)));
+			build_indexed_intersection_keys<<<grid_size, block_size>>>(
+				buffer_a, sort_storage.indices_a, sort_storage.indices_a,
+				sort_storage.keys_a, intersection_count, batch_pairs,
+				gctx->d_farm_offset, gctx->d_info, false);
+			check_execution("build_target_intersection_keys");
+			block_sort_intersection_pairs<false><<<pair_count,
+				INTERSECTION_LOCAL_SORT_THREADS>>>(
+				buffer_a, sort_storage.indices_a, sort_storage.indices_b,
+				d_intersections_per_pair, d_pair_offsets, pair_count,
+				local_sort_threshold, batch_pairs, gctx->d_farm_offset,
+				gctx->d_info);
+			check_execution("block_sort_target_intersection_pairs");
+			CUDA_SAFE_CALL(cudaMemset(d_stage_count, 0, sizeof(uint32_t)));
+			build_heavy_intersection_segments<<<pair_grid_size, block_size>>>(
+				d_intersections_per_pair, d_pair_offsets, pair_count,
+				local_sort_threshold, d_segment_begin, d_segment_end,
+				d_stage_count);
+			check_execution("build_target_heavy_intersection_segments");
+			heavy_segment_count = 0;
+			CUDA_SAFE_CALL(cudaMemcpy(&heavy_segment_count, d_stage_count,
+				sizeof(uint32_t), cudaMemcpyDeviceToHost));
+			segmented_sort_intersections(sort_storage, intersection_count,
+				heavy_segment_count, d_segment_begin, d_segment_end,
+				d_cub_workspace, cub_workspace_bytes);
+			if(heavy_segment_count > 0){
+				order_heavy_intersection_key_runs<false><<<heavy_segment_count,
+					block_size>>>(sort_storage.keys_b, sort_storage.indices_b,
+					d_segment_begin, d_segment_end, heavy_segment_count, buffer_a);
+				check_execution("order_heavy_target_intersection_keys");
+			}
+			classify_and_accumulate_gpu_arcs<<<grid_size, block_size>>>(
+				buffer_a, sort_storage.indices_b, intersection_count, batch_pairs,
+				gctx->d_farm_offset, gctx->d_info, gctx->d_vertices,
+				d_intersections_per_pair, d_areas, false);
+			check_execution("classify_target_gpu_arcs");
+		}
+	}
 
-	grid_size = (num_segments + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	CUDA_SAFE_CALL(cudaMemset(d_stage_count, 0, sizeof(uint32_t)));
+	grid_size = (pair_count + block_size - 1) / block_size;
+	collect_no_crossing_gpu_pairs<<<grid_size, block_size>>>(
+		batch_pairs, pair_count, gctx->d_info, d_intersections_per_pair,
+		d_containment_pairs, d_stage_count);
+	check_execution("collect_no_crossing_gpu_pairs");
+	resolve_gpu_containment_pairs<<<pair_count, block_size>>>(
+		d_containment_pairs, d_stage_count, batch_pairs,
+		gctx->d_farm_offset, gctx->d_info, gctx->d_vertices, d_areas);
+	check_execution("resolve_gpu_containment_pairs");
+	finalize_gpu_intersection_areas<<<grid_size, block_size>>>(d_areas, pair_count);
+	check_execution("finalize_gpu_intersection_areas");
 
-	kernel_filter_segment_contain<<<grid_size, block_size>>>(
-		(Segment *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, 
-		gctx->d_idealoffset, gctx->d_info, gctx->d_status, 
-		gctx->d_vertices, num_segments, pip, 
-		(PixMapping *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->category_count);
-	cudaDeviceSynchronize();
-    check_execution("kernel_filter_segment_contain");
-    
-	CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-
-	grid_size = (h_bufferoutput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
-	kernel_refinement_segment_contain<<<grid_size, block_size>>>(
-		(PixMapping *)gctx->d_BufferOutput, (Segment *)gctx->d_BufferInput,
-		gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, 
-		gctx->d_offset, gctx->d_edge_sequences, gctx->d_vertices, 
-		gctx->d_gridline_offset, gctx->d_gridline_nodes, gctx->d_bufferoutput_size, 
-		pip);
-	cudaDeviceSynchronize();
-    check_execution("kernel_refinement_segment_contain");	
-
-	// printf("---------------------------------------------------------------------------------------------------\n");
-	
-    // PrintBuffer((Segment *)gctx->d_BufferInput, num_segments);
-	
-	// // PrintBuffer((bool *) pip, num_segments);
-	
-	// uint8_t* h_Buffer = new uint8_t[num_segments];
-    // CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, pip, num_segments * sizeof(uint8_t), cudaMemcpyDeviceToHost));
-	// // int _sum = 0;
-    // for (int i = 0; i < num_segments; i++) {
-	// 	// _sum += h_Buffer[i];
-	// 	printf("%d ", h_Buffer[i]);
-	// 	if(i % 10 == 9) printf("\n");
-    // }
-
-	// // printf("sum = %d\n", _sum);
-
-    // return;
-
-	// printf("---------------------------------------------------------------------------------------------------\n");
-	// auto transfer_start = std::chrono::high_resolution_clock::now();
-
-	// int* start_ptr = thrust::raw_pointer_cast(d_starts.data());
-	// double *d_area = nullptr;
-	// CUDA_SAFE_CALL(cudaMalloc((void **) &d_area, sizeof(double)));
-
-	// grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
-	// rebuild_polygons<<<grid_size, block_size>>>((Segment *)gctx->d_BufferInput, pip, num_groups, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_vertices, start_ptr, d_area);
-	// cudaDeviceSynchronize();
-    // check_execution("kernel_refinement_segment_contain");	
-
-	// double h_area;
-	// CUDA_SAFE_CALL(cudaMemcpy(&h_area, d_area, sizeof(double), cudaMemcpyDeviceToHost));
-	// printf("area = %lf\n", h_area);
-	// gctx->area += h_area;
-
-    // auto transfer_end = std::chrono::high_resolution_clock::now();
-	// auto transfer_duration = std::chrono::duration_cast<std::chrono::milliseconds>(transfer_end - transfer_start);
-	// std::cout << "transfer time: " << transfer_duration.count() << " ms" << std::endl;
-	
-	// CUDA_SAFE_CALL(cudaHostAlloc((void**)&gctx->segments, num_segments * sizeof(Segment), cudaHostAllocDefault));
-	// gctx->num_segments = num_segments;
-	// CUDA_SAFE_CALL(cudaMemcpy(gctx->segments, (Segment *)gctx->d_BufferInput, num_segments * sizeof(Segment), cudaMemcpyDeviceToHost));
-    
-	// CUDA_SAFE_CALL(cudaHostAlloc((void**)&gctx->pip, num_segments * sizeof(uint8_t), cudaHostAllocDefault));
-	// CUDA_SAFE_CALL(cudaMemcpy(gctx->pip, pip, num_segments * sizeof(uint8_t), cudaMemcpyDeviceToHost));
-
-	CUDA_SAFE_CALL(cudaFree(d_inters_per_pair));
-	CUDA_SAFE_CALL(cudaFree(pip));
-	// CUDA_SAFE_CALL(cudaFree(d_area));
-    return;
-}
-
-void cuda_intersection_a(query_context *gctx)
-{
-	size_t batch_size = gctx->index_end - gctx->index;
-    uint h_bufferinput_size, h_bufferoutput_size;
-	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
-	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
-
-    double *d_res = nullptr;
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_res, batch_size * sizeof(double)));
-    CUDA_SAFE_CALL(cudaMemset(d_res, 0, batch_size * sizeof(double)));
-
-	/*1. Raster Model Filtering*/
-    const int block_size = BLOCK_SIZE;
-    int grid_size = (batch_size + block_size - 1) / block_size;
-
-    kernel_filter_intersection<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, batch_size, (PixPair *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->category_count);
-    cudaDeviceSynchronize();
-    check_execution("kernel_filter_intersection");
-
-    CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-
-    grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    
-    kernel_calculate_area<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, gctx->d_bufferinput_size, gctx->category_count, d_res);
-    cudaDeviceSynchronize();
-    check_execution("kernel_calculate_area");
-
-    return;
+	CUDA_SAFE_CALL(cudaMemcpy(gctx->areas + gctx->index, d_areas,
+		batch_size * sizeof(double), cudaMemcpyDeviceToHost));
+	if(d_cub_workspace) CUDA_SAFE_CALL(cudaFree(d_cub_workspace));
+	if(d_pair_sort_state) CUDA_SAFE_CALL(cudaFree(d_pair_sort_state));
+	CUDA_SAFE_CALL(cudaFree(d_auxiliary));
+	CUDA_SAFE_CALL(cudaFree(d_control));
+	CUDA_SAFE_CALL(cudaFree(d_intersections_per_pair));
+	CUDA_SAFE_CALL(cudaFree(d_areas));
 }

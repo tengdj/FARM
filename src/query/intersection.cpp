@@ -1,98 +1,82 @@
-#include "../include/Ideal.h"
-#include <fstream>
-#include <queue>
-#include <chrono>
+#include "../include/farm.h"
+#include <algorithm>
 
-RTree<Ideal *, double, 2, double> ideal_rtree;
+RTree<Farm *, double, 2, double> rtree;
 
-bool MySearchCallback(Ideal *ideal, void *arg)
+bool MySearchCallback(Farm *obj, void *arg)
 {
-	query_context *ctx = (query_context *)arg;
+	query_context *ctx = static_cast<query_context *>(arg);
 	query_context *gctx = ctx->global_ctx;
 
-	Ideal *target = (Ideal *)ctx->target;
-    // if(ideal->getMBB()->intersect(*target->getMBB()))
-	ctx->object_pairs.push_back(make_pair(ideal->id, target->id + gctx->source_ideals.size()));
+	Farm *target = static_cast<Farm *>(ctx->target);
+	uint32_t target_id = target->id + static_cast<uint32_t>(gctx->source_objects.size());
+	ctx->object_pairs.emplace_back(obj->id, target_id);
 
 	return true;
 }
 
 void *rtree_query(void *args)
 {
-	query_context *ctx = (query_context *)args;
+	query_context *ctx = static_cast<query_context *>(args);
 	query_context *gctx = ctx->global_ctx;
 	log("rtree thread %d is started", ctx->thread_id);
-	ctx->query_count = 0;
+	
 	while (ctx->next_batch(10))
 	{
-		for (int i = ctx->index; i < ctx->index_end; i++)
+		for (size_t i = ctx->index; i < ctx->index_end; i++)
 		{
-			Ideal *target = gctx->target_ideals[i];
-			ctx->target = (void *)target;
+			Farm *target = gctx->target_objects[i];
+			ctx->target = target;
 			box *bx = target->getMBB();
-			ideal_rtree.Search(bx->low, bx->high, MySearchCallback, (void *)ctx);
+			rtree.Search(bx->low, bx->high, MySearchCallback, ctx);
 		}
 	}
-	ctx->merge_global();
-	return NULL;
+	ctx->merge_object_pairs();
+	return nullptr;
 }
 
 int main(int argc, char** argv) {
 	query_context global_ctx;
-	global_ctx = get_parameters(argc, argv);
+	get_parameters(argc, argv, global_ctx);
 	global_ctx.query_type = QueryType::intersection;
 
-    global_ctx.source_ideals = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
-    for (Ideal *p : global_ctx.source_ideals)
+    global_ctx.source_objects = load_binary_file(global_ctx.source_path.c_str(),global_ctx);
+    for (Farm *p : global_ctx.source_objects)
 	{
-		ideal_rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
+		rtree.Insert(p->getMBB()->low, p->getMBB()->high, p);
 	}
-	global_ctx.target_ideals = load_binary_file(global_ctx.target_path.c_str(),global_ctx);
-    global_ctx.target_num = global_ctx.target_ideals.size();
+	global_ctx.target_objects = load_binary_file(global_ctx.target_path.c_str(),global_ctx);
+    global_ctx.target_num = global_ctx.target_objects.size();
 
 	timeval start = get_cur_time();
-    pthread_t threads[global_ctx.num_threads];
-	query_context ctx[global_ctx.num_threads];
-	for (int i = 0; i < global_ctx.num_threads; i++)
-	{
-		ctx[i] = query_context(global_ctx);
-		ctx[i].thread_id = i;
-	}
-	for (int i = 0; i < global_ctx.num_threads; i++)
-	{
-		pthread_create(&threads[i], NULL, rtree_query, (void *)&ctx[i]);
-	}
-	for (int i = 0; i < global_ctx.num_threads; i++)
-	{
-		void *status;
-		pthread_join(threads[i], &status);
-	}
+	global_ctx.run_worker_threads(rtree_query);
 	logt("rtree filtering finished", start);
-
-	global_ctx.index = 0;
-	global_ctx.target_num = global_ctx.object_pairs.size();    
+	log("total %zu pairs found", global_ctx.num_pairs);
+	if(global_ctx.num_pairs == 0){
+		global_ctx.print_stats();
+		logt("query finished", start);
+		return 0;
+	}
 
 	start = get_cur_time();
 	preprocess(&global_ctx);
+	global_ctx.areas = new double[global_ctx.num_pairs];
 	logt("preprocess finished", start);
 
 	start = get_cur_time();
 	preprocess_for_gpu(&global_ctx);
 	logt("preprocess for gpu finished", start);
 
-    if(global_ctx.batch_size == 0) global_ctx.batch_size = global_ctx.num_pairs;
 	start = get_cur_time();
-	for(int i = 0; i < global_ctx.num_pairs; i += global_ctx.batch_size){
+	if(global_ctx.batch_size == 0) global_ctx.batch_size = global_ctx.num_pairs;
+
+	for(size_t i = 0; i < global_ctx.num_pairs; i += global_ctx.batch_size){
 		global_ctx.index = i;
-		global_ctx.index_end = min(i + global_ctx.batch_size, global_ctx.num_pairs);
-		ResetDevice(&global_ctx);
-		if(global_ctx.use_approximation){
-			cuda_intersection_a(&global_ctx);
-		}else{
-			cuda_intersection(&global_ctx);
-		}
+		global_ctx.index_end = std::min(i + global_ctx.batch_size, global_ctx.num_pairs);
+		cuda_intersection(&global_ctx);
     }
 
+	global_ctx.print_stats();
 	logt("query finished", start);
     return 0;
 }

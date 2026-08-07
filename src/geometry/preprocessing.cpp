@@ -1,26 +1,26 @@
-#include "../include/Ideal.h"
+#include "../include/farm.h"
 #include "UniversalGrid.h"
 
 void *rasterization_unit(void *args){
 	query_context *ctx = (query_context *)args;
 	query_context *gctx = ctx->global_ctx;
 
-	vector<Ideal *> &ideals = *(vector<Ideal *> *)gctx->target;
+	vector<Farm *> &objs = *(vector<Farm *> *)gctx->target;
 
-	// log("thread %d is started",ctx->thread_id);
+	log("thread %d is started",ctx->thread_id);
 
 	while(ctx->next_batch(10)){
 		for(int i=ctx->index;i<ctx->index_end;i++){
-			struct timeval start = get_cur_time();
-			ideals[i]->init_raster(ideals[i]->get_boundary()->num_vertices / gctx->vpr);
-			ideals[i]->use_hierachy = gctx->use_hierachy;
-			if(gctx->use_hierachy) {
-				ideals[i]->grid_align();
-				ideals[i]->layering(gctx->NLow);
+				objs[i]->set_bitwidth(gctx->bitwidth);
+			objs[i]->init_raster(objs[i]->get_boundary()->num_vertices / gctx->vpr);
+			objs[i]->use_hierarchy = gctx->use_hierarchy;
+			if(gctx->use_hierarchy) {
+				objs[i]->grid_align();
+				objs[i]->layering(gctx->NLow);
 			}else{
-				ideals[i]->set_status_size();
+				objs[i]->set_status_size();
 			}
-			ideals[i]->rasterization(ctx->vpr);
+			objs[i]->rasterization(gctx->vpr);
 			ctx->report_progress();
 		}
 	}
@@ -30,49 +30,65 @@ void *rasterization_unit(void *args){
 
 void process_rasterization(query_context *gctx){
 	log("start rasterizing the referred polygons");
-	vector<Ideal *> &ideals = *(vector<Ideal *> *)gctx->target;
-	assert(ideals.size()>0);
+	vector<Farm *> &objs = *(vector<Farm *> *)gctx->target;
+	assert(objs.size()>0);
 	gctx->index = 0;
 	size_t former = gctx->target_num;
-	gctx->target_num = ideals.size();
+	gctx->target_num = objs.size();
 
 	// struct timeval start = get_cur_time();
-	pthread_t threads[gctx->num_threads];
-	query_context ctx[gctx->num_threads];
-	for(int i=0;i<gctx->num_threads;i++){
-		ctx[i].thread_id = i;
-		ctx[i].global_ctx = gctx;
-	}
-
-	for(int i=0;i<gctx->num_threads;i++){
-		pthread_create(&threads[i], NULL, rasterization_unit, (void *)&ctx[i]);
-	}
-
-	for(int i = 0; i < gctx->num_threads; i++ ){
-		void *status;
-		pthread_join(threads[i], &status);
-	}
+	gctx->run_worker_threads(rasterization_unit);
 
 	gctx->index = 0;
-	gctx->query_count = 0;
 	gctx->target_num = former;
 }
 
 void preprocess(query_context *gctx){
-	vector<Ideal *> target_ideals;
-	// auto pairs = gctx->object_pairs;
-	// for(auto &p:pairs){
-	// 	target_ideals.push_back(gctx->source_ideals[p.first]);
-	// 	target_ideals.push_back(gctx->target_ideals[p.second]);
-	// }
-	// sort(target_ideals.begin(), target_ideals.end());
-	// target_ideals.erase(unique(target_ideals.begin(), target_ideals.end()), target_ideals.end());
-	// gctx->target = (void *)&target_ideals;
-	target_ideals.insert(target_ideals.end(), gctx->source_ideals.begin(), gctx->source_ideals.end());
-	target_ideals.insert(target_ideals.end(), gctx->target_ideals.begin(), gctx->target_ideals.end());
-	gctx->target = (void *)&target_ideals;
+	gctx->referred_objects.clear();
+	vector<uint8_t> source_seen(gctx->source_objects.size(), 0);
+	vector<uint8_t> target_seen(gctx->target_objects.size(), 0);
 
-	if(gctx->use_hierachy){
+	auto add_source = [&](uint32_t idx) {
+		if(idx < gctx->source_objects.size() && !source_seen[idx]){
+			source_seen[idx] = 1;
+			gctx->referred_objects.push_back(gctx->source_objects[idx]);
+		}
+	};
+	auto add_target = [&](uint32_t idx) {
+		if(idx < gctx->target_objects.size() && !target_seen[idx]){
+			target_seen[idx] = 1;
+			gctx->referred_objects.push_back(gctx->target_objects[idx]);
+		}
+	};
+
+	if(gctx->num_pairs > 0){
+		size_t source_count = gctx->source_objects.size();
+		for(size_t i = 0; i < gctx->num_pairs; i++){
+			auto p = gctx->object_pairs[i];
+			add_source(p.first);
+			if(gctx->target_path.empty()){
+				add_source(p.second);
+			}else{
+#ifdef USE_GPU
+				if(p.second >= source_count && p.second - source_count < gctx->target_objects.size()){
+					add_target(p.second - source_count);
+				}else{
+					add_target(p.second);
+				}
+#else
+				add_target(p.second);
+#endif
+			}
+		}
+	}
+
+	if(gctx->referred_objects.empty()){
+		gctx->referred_objects.insert(gctx->referred_objects.end(), gctx->source_objects.begin(), gctx->source_objects.end());
+		gctx->referred_objects.insert(gctx->referred_objects.end(), gctx->target_objects.begin(), gctx->target_objects.end());
+	}
+	gctx->target = (void *)&gctx->referred_objects;
+
+	if(gctx->use_hierarchy){
 		UniversalGrid::getInstance().configure(gctx->max_layers);
 	}
 	
@@ -81,7 +97,7 @@ void preprocess(query_context *gctx){
 #ifdef USE_GPU
 	cuda_create_buffer(gctx);		
 #endif
-	target_ideals.clear();
 
 	gctx->target = NULL;
+
 }

@@ -57,7 +57,7 @@ public:
         return v;
     }
 
-    CUDA_HOSTDEV Point operator+(const Point &p) const { return Point(x + p.x, y + p.y); }
+    CUDA_HOSTDEV Point operator+(const Point &p) const { return Point((double)x + p.x, (double)y + p.y); }
     CUDA_HOSTDEV Point operator-(const Point &p) const { return Point(x - p.x, y - p.y); }
     CUDA_HOSTDEV Point operator*(const float &t) const { return Point(t * x, t * y); }
 
@@ -130,21 +130,22 @@ public:
 };
 
 struct Intersection{
-	Point p;
+	// Point p;
     int pair_id;
-    int edge_source_id;     
-    int edge_target_id;     
+    uint edge_source_id;     
+    uint edge_target_id;     
     double t;
     double u;
+    int status;
 
 	// Intersection(){}
 	// Intersection(Point _p, int _pair_id, int _edge_source_id, int _edge_target_id, double _t, double _u) : p(_p), pair_id(_pair_id), edge_source_id(_edge_source_id), edge_target_id(_edge_target_id), t(_t), u(_u){}
 
 	void print(){
-		printf("POINT(%lf %lf), %d %u %u %lf %lf\n", p.x, p.y, pair_id, edge_source_id, edge_target_id, t, u);
+
+		// printf("POINT(%f %f)\t%d\t %u %u %f %f %d\n", p.x, p.y, pair_id, edge_source_id, edge_target_id, t, u, status);
 	}
 };
-
 
 class Vertex : public Point {
   public:

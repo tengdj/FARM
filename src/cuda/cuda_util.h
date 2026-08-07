@@ -4,21 +4,12 @@
 #include <cuda.h>
 #include "../include/util.h"
 #include "../include/Box.h"
-#include "../include/Ideal.h"
+#include "../include/farm.h"
 
-#include <boost/archive/binary_iarchive.hpp>
-#include <boost/archive/binary_oarchive.hpp>
-#include <boost/geometry.hpp>
-#include <boost/geometry/geometries/linestring.hpp>
-#include <boost/geometry/geometries/point_xy.hpp>
-#include <boost/geometry/geometries/polygon.hpp>
-#include <boost/geometry/geometries/register/box.hpp>
-#include <boost/geometry/geometries/register/point.hpp>
 #include <thrust/device_vector.h>
 
 using coord_t = float;
-using point_t = boost::geometry::model::d2::point_xy<coord_t>;
-using polygon_t = boost::geometry::model::polygon<point_t>;
+constexpr size_t CUDA_SCRATCH_BUFFER_BYTES = 4UL * 1024 * 1024 * 1024;
 
 #define CUDA_SAFE_CALL(call) 										  	  \
 	do {																  \
@@ -37,7 +28,34 @@ using polygon_t = boost::geometry::model::polygon<point_t>;
         CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));\
         CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));                                         \
     } while(0);     
-                                                                                      
+        
+template <typename T>
+void alloc_host_pinned(T** ptr, size_t count, const char* label) {
+    if (count == 0) {
+        *ptr = nullptr;
+        return;
+    }
+    size_t bytes = count * sizeof(T);
+    CUDA_SAFE_CALL(cudaMallocHost((void**)ptr, bytes));
+    log("\t%.2f MB\t%s (Host Pinned)", 1.0 * bytes / 1024 / 1024, label);
+}
+
+template <typename T>
+void alloc_device(T** ptr, size_t count, const char* label) {
+    if (count == 0) {
+        *ptr = nullptr;
+        return;
+    }
+    size_t bytes = count * sizeof(T);
+    CUDA_SAFE_CALL(cudaMalloc((void**)ptr, bytes));
+    log("\t%.2f MB\t%s (Device)", 1.0 * bytes / 1024 / 1024, label);
+}
+
+template <typename T>
+void free_pinned(T* ptr) {
+    if (ptr) CUDA_CHECK(cudaFreeHost(ptr));
+}
+
 class CudaTimer {
 public:
     CudaTimer() {
@@ -189,17 +207,6 @@ __device__ __forceinline__ int binary_search_count(const double *arr, uint32_t s
 	return count;
 }
 
-__device__ 
-inline int binary_search(const Segment* sorted_array, int left, int right, Point target) {
-    while (left < right) {
-        int mid = (left + right) >> 1;
-        if(target <= sorted_array[mid].start) right = mid;
-        else left = mid + 1;
-    }
-	if(sorted_array[left].start == target) return left;
-    else return -1; // Not Found
-}
-
 __device__
 inline uint float_to_uint(float xy) {
 //    uint ret = 0;
@@ -215,6 +222,12 @@ inline uint float_to_uint(float xy) {
     return (uint)(xy*100000);
 }
 
+__device__ inline void gpu_swap(uint32_t &a, uint32_t &b) {
+    uint32_t tmp = a;
+    a = b;
+    b = tmp;
+}
+
 
 template <typename T>
 inline void PrintBuffer(T* d_Buffer, uint size){
@@ -223,13 +236,27 @@ inline void PrintBuffer(T* d_Buffer, uint size){
 
     for (int i = 0; i < size; i++) {
         if constexpr (std::is_fundamental<T>::value) {
-            std::cout << (float)h_Buffer[i] << " ";
-            if ((i + 1) % 5 == 0) printf("\n");
+            printf("%f ", (float)h_Buffer[i]);
+            if ((i + 1) % 10 == 0) printf("\n");
         }else{
             h_Buffer[i].print();
         }
     }
     printf("\n");
+}
+
+inline void PrintIntersection(Intersection* d_Buffer, uint size, Point* vertices){
+    Intersection* h_Buffer = new Intersection[size];
+    CUDA_SAFE_CALL(cudaMemcpy(h_Buffer, d_Buffer, size * sizeof(Intersection), cudaMemcpyDeviceToHost));
+
+    for (int i = 0; i < size; i++) {
+        Intersection inter = h_Buffer[i];
+        double p_x = (double)vertices[inter.edge_source_id].x + ((double)vertices[inter.edge_source_id+1].x - (double)vertices[inter.edge_source_id].x) * (double)inter.t; 
+        double p_y = (double)vertices[inter.edge_source_id].y + ((double)vertices[inter.edge_source_id+1].y - (double)vertices[inter.edge_source_id].y) * (double)inter.t;  
+
+        printf("POINT(%.10lf %.10lf)\t%d\t %u %u %lf %lf\t%d\n", p_x, p_y, inter.pair_id, inter.edge_source_id, inter.edge_target_id, inter.t, inter.u, inter.status);
+    }
+    printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
 }
 
 #endif /* CUDA_UTIL_H_ */

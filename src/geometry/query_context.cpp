@@ -1,33 +1,17 @@
 #include "query_context.h"
-#include "../include/Ideal.h"
+#include "../include/farm.h"
 
 query_context::query_context(){
 	num_threads = get_num_threads();
 	pthread_mutex_init(&lk, NULL);
 }
-query_context::query_context(query_context &t){
-	*this = t;
-	this->source_polygons.clear();
-	this->target_polygons.clear();
-	this->global_ctx = &t;
-	pthread_mutex_init(&lk, NULL);
-}
 query_context::~query_context(){
-
-	vertex_number.clear();
-	latency.clear();
 	// this is the host context
 	if(this->global_ctx == NULL){
-		for(MyPolygon *p:source_polygons){
-			delete p;
-		}
-		for(MyPolygon *p:target_polygons){
-			delete p;
-		}
-		if(points){
-			delete []points;
-		}
+		delete[] areas;
+		areas = nullptr;
 	}
+	pthread_mutex_destroy(&lk);
 
 }
 
@@ -39,61 +23,67 @@ void query_context::unlock(){
 	pthread_mutex_unlock(&lk);
 }
 
-//query_context& query_context::operator=(query_context const &t){
-//    geography = t.geography;
-//
-//	thread_id = t.thread_id;
-//	num_threads = t.num_threads;
-//	vpr = t.vpr;
-//	vpr_end = t.vpr_end;
-//	use_grid = t.use_grid;
-//	use_qtree = t.use_qtree;
-//	use_mer = t.use_mer;
-//	use_triangulate = t.use_triangulate;
-//	mer_sample_round = t.mer_sample_round;
-//	use_convex_hull = t.use_convex_hull;
-//	perform_refine = t.perform_refine;
-//	gpu = t.gpu;
-//	sample_rate = t.sample_rate;
-//	small_threshold = t.small_threshold;
-//	big_threshold = t.big_threshold;
-//	sort_polygons = t.sort_polygons;
-//	report_gap = t.report_gap;
-//	distance_buffer_size = t.distance_buffer_size;
-//	source_path = t.source_path;
-//	target_path = t.target_path;
-//	target_num = t.target_num;
-//
-//    query_type = t.query_type;
-//    collect_latency = t.collect_latency;
-//    pthread_mutex_init(&lock, NULL);
-//	return *this;
-//
-//}
-
-void query_context::report_latency(int num_v, double lt){
-	if(vertex_number.find(num_v)==vertex_number.end()){
-		vertex_number[num_v] = 1;
-		latency[num_v] = lt;
-	}else{
-		vertex_number[num_v] = vertex_number[num_v]+1;
-		latency[num_v] = latency[num_v]+lt;
+void query_context::run_worker_threads(WorkerFunction worker, void *worker_target, void *worker_target2){
+	if(num_threads <= 0){
+		log("ERROR: thread count must be positive");
+		exit(EXIT_FAILURE);
 	}
-}
 
-void query_context::load_points(){
-	struct timeval start = get_cur_time();
-	target_num = load_points_from_path(target_path.c_str(), &points);
-	logt("loaded %ld points", start, target_num);
+	vector<pthread_t> threads(num_threads);
+	vector<query_context> contexts(num_threads);
+	for(int i = 0; i < num_threads; i++){
+		// Copy configuration only; shared data remains reachable through global_ctx.
+		contexts[i].geography = geography;
+		contexts[i].num_threads = num_threads;
+		contexts[i].vpr = vpr;
+		contexts[i].use_hierarchy = use_hierarchy;
+		contexts[i].use_approximation = use_approximation;
+		contexts[i].mer_sample_round = mer_sample_round;
+		contexts[i].perform_refine = perform_refine;
+		contexts[i].sample_rate = sample_rate;
+		contexts[i].batch_size = batch_size;
+		contexts[i].bitwidth = bitwidth;
+		contexts[i].merge_threshold = merge_threshold;
+		contexts[i].approx_confidence = approx_confidence;
+		contexts[i].NLow = NLow;
+		contexts[i].unroll_size = unroll_size;
+		contexts[i].query_type = query_type;
+		contexts[i].within_distance = within_distance;
+		contexts[i].source_path = source_path;
+		contexts[i].target_path = target_path;
+		contexts[i].max_num_polygons = max_num_polygons;
+		contexts[i].report_gap = report_gap;
+		contexts[i].report_prefix = report_prefix;
+		contexts[i].global_ctx = this;
+		contexts[i].thread_id = i;
+		contexts[i].target = worker_target;
+		contexts[i].target2 = worker_target2;
+	}
+
+	for(int i = 0; i < num_threads; i++){
+		int error = pthread_create(&threads[i], nullptr, worker, &contexts[i]);
+		if(error != 0){
+			log("ERROR: failed to create thread %d: %d", i, error);
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	for(int i = 0; i < num_threads; i++){
+		int error = pthread_join(threads[i], nullptr);
+		if(error != 0){
+			log("ERROR: failed to join thread %d: %d", i, error);
+			exit(EXIT_FAILURE);
+		}
+	}
 }
 
 void query_context::report_progress(int eval_batch){
 	if(++query_count==eval_batch){
-		global_ctx->query_count += query_count;
 		global_ctx->lock();
+		global_ctx->query_count += query_count;
 		double time_passed = get_time_elapsed(global_ctx->previous);
 		if(time_passed>global_ctx->report_gap){
-			log_refresh("%s %d (%.2f\%)",global_ctx->report_prefix, global_ctx->query_count,(double)global_ctx->query_count*100/(global_ctx->target_num));
+			log_refresh("%s %zu (%.2f%%)",global_ctx->report_prefix, global_ctx->query_count,(double)global_ctx->query_count*100/(global_ctx->target_num));
 			global_ctx->previous = get_cur_time();
 		}
 		global_ctx->unlock();
@@ -104,41 +94,30 @@ void query_context::report_progress(int eval_batch){
 void query_context::merge_global(){
 	global_ctx->lock();
 	global_ctx->found += found;
-	global_ctx->query_count += query_count;
-	global_ctx->refine_count += refine_count;
-	global_ctx->area += area;
+	global_ctx->profiler.merge(profiler);
+	global_ctx->unlock();
+}
 
-	global_ctx->contain_check += contain_check;
-	global_ctx->object_checked += object_checked;
-	global_ctx->pixel_evaluated += pixel_evaluated;
-	global_ctx->border_evaluated += border_evaluated;
-	global_ctx->border_checked += border_checked;
-	global_ctx->edge_checked += edge_checked;
-	global_ctx->intersection_checked += intersection_checked;
+void query_context::merge_object_pairs() {
+    size_t local_size = object_pairs.size();
+    if (local_size == 0) return;
 
-	// global_ctx->test_duration += test_duration;
-
-	for(auto &it :vertex_number){
-		const double lt = latency.at(it.first);
-		if(global_ctx->vertex_number.find(it.first)!=global_ctx->vertex_number.end()){
-			global_ctx->vertex_number[it.first] = global_ctx->vertex_number[it.first]+it.second;
-			global_ctx->latency[it.first] = global_ctx->latency[it.first]+lt;
-		}else{
-			global_ctx->vertex_number[it.first] = it.second;
-			global_ctx->latency[it.first] = lt;
+	global_ctx->lock();
+	size_t required_size = global_ctx->object_pairs.size() + local_size;
+    if (required_size > global_ctx->object_pairs.capacity()) {
+		size_t old_capacity = global_ctx->object_pairs.capacity();
+		size_t new_capacity = old_capacity * 2;
+		if (new_capacity < required_size || new_capacity < old_capacity) {
+			new_capacity = required_size;
 		}
-	}
+		log("WARNING: Reserving global object_pairs %zu", old_capacity);
+		global_ctx->object_pairs.reserve(new_capacity);
+    }
 
-	global_ctx->object_pairs.insert(global_ctx->object_pairs.end(), object_pairs.begin(), object_pairs.end());
-
-	
-	// point_polygon_pairs_size = point_polygon_pairs_idx;
-	// global_ctx->point_polygon_pairs_size += point_polygon_pairs_size;
-	
-	// for(int i = 0; i < point_polygon_pairs_size; i ++){
-	// 	global_ctx->point_polygon_pairs[global_ctx->point_polygon_pairs_idx ++] = point_polygon_pairs[i];
-	// }
-
+	global_ctx->object_pairs.insert(global_ctx->object_pairs.end(),
+	                                object_pairs.begin(),
+	                                object_pairs.end());
+	global_ctx->num_pairs = global_ctx->object_pairs.size();
 	global_ctx->unlock();
 }
 
@@ -170,70 +149,17 @@ bool query_context::next_batch(int batch_num){
 //edge = [33.1568436 52.6532413 70.7067904 88.4315092 106.2501207 124.6311698 143.7354825 161.9386059 181.0331808 198.2849336]
 
 void query_context::print_stats(){
-	log("count-found:\t%ld",found);
-
-	if(object_checked.counter>0){
-		if(refine_count)
-		log("checked-refine:\t%.7f",(double)refine_count/object_checked.counter);
-		if(pixel_evaluated.counter)
-		log("checked-pixel:\t%.7f",(double)pixel_evaluated.counter/object_checked.counter);
-		if(edge_checked.counter)
-		log("checked-edges:\t%.7f",(double)edge_checked.counter/object_checked.counter);
-	}
-
-	if(border_checked.counter>0){
-		log("border-eval:\t%.7f",(double)border_evaluated.counter/object_checked.counter);
-		log("border-checked:\t%.7f",(double)border_checked.counter/object_checked.counter);
-		log("border-edges:\t%.7f",(double)edge_checked.counter/border_checked.counter);
-		log("border-node:\t%.7f",(double)intersection_checked.counter/border_checked.counter);
-	}
-
-	if(contain_check.counter>0){
-		log("latency-ctn:\t%.7f",contain_check.execution_time/contain_check.counter);
-	}
-
-	if(pixel_evaluated.counter>0){
-		log("latency-pixel:\t%.7f",pixel_evaluated.execution_time/pixel_evaluated.counter);
-	}
-	if(border_evaluated.counter>0){
-		log("latency-border:\t%.7f",border_evaluated.execution_time/border_evaluated.counter);
-	}
-	if(edge_checked.execution_time>0){
-		log("latency-edge:\t%.7f",edge_checked.execution_time/edge_checked.counter);
-	}
-	if(intersection_checked.execution_time>0){
-		log("latency-node:\t%.7f",intersection_checked.execution_time/intersection_checked.counter);
-	}
-	if(object_checked.execution_time>0){
-		log("latency-other:\t%.7f",(object_checked.execution_time-
-									pixel_evaluated.execution_time-border_evaluated.execution_time-
-									edge_checked.execution_time-intersection_checked.execution_time-
-									contain_check.execution_time
-									)/object_checked.counter);
-	}
-	if(object_checked.execution_time>0){
-		log("latency-all:\t%.7f",object_checked.execution_time/object_checked.counter);
-	}
-
-	if(collect_latency){
-		for(auto it:vertex_number){
-			cout<<it.first<<"\t"<<it.second<<"\t"<<latency[it.first]/it.second<<endl;
-		}
-	}
-
+	log("count-found:\t%zu",found);
+	profiler.print();
 }
 
 
-query_context get_parameters(int argc, char **argv){
-	query_context global_ctx;
-
+void get_parameters(int argc, char **argv, query_context &global_ctx){
 	po::options_description desc("query usage");
 	desc.add_options()
 		("help", "produce help message")
-		("rasterize,r", "partition with rasterization")
-		("gpu,g", "query with gpu")
 		("approximation,a", "use approximation")
-		("hierachy,h", "partition with hierarchical grid")
+		("hierarchy,h", "partition with hierarchical grid")
 
 		("source,s", po::value<string>(&global_ctx.source_path), "path to the source")
 		("target,t", po::value<string>(&global_ctx.target_path), "path to the target")
@@ -241,32 +167,40 @@ query_context get_parameters(int argc, char **argv){
 		("vpr,v", po::value<int>(&global_ctx.vpr), "number of vertices per raster")
 		("batch_size,b", po::value<size_t>(&global_ctx.batch_size), "batch size")
 		("merge_threshold,m", po::value<float>(&global_ctx.merge_threshold), "merge threshold")
-		("NLow", po::value<int>(&global_ctx.NLow), "NLow")
-		("unorll_size,u", po::value<int>(&global_ctx.unroll_size), "unroll size"),
-		("within_distance,d", po::value<int>(&global_ctx.within_distance), "within distance"),
-		("category_count,w", po::value<int>(&global_ctx.category_count), "category count")
+		("approx_confidence,c", po::value<float>(&global_ctx.approx_confidence), "approximation confidence threshold")
+		("NLow,l", po::value<int>(&global_ctx.NLow), "NLow")
+		("unroll_size,u", po::value<int>(&global_ctx.unroll_size), "unroll size")
+		("within_distance,d", po::value<int>(&global_ctx.within_distance), "within distance")
+		("bitwidth,w", po::value<int>(&global_ctx.bitwidth), "bits per raster status")
 		;
 	po::variables_map vm;
 	try{
 		po::store(po::parse_command_line(argc, argv, desc), vm);
 	}catch(...){
-		cout << "Undefined Option!" << endl;
-		exit(0);
+		cerr << "Undefined Option!" << endl;
+		exit(EXIT_FAILURE);
 	}
 	if (vm.count("help")) {
 		cout << desc << "\n";
 		exit(0);
 	}
 	po::notify(vm);
+	if(global_ctx.vpr <= 0){
+		cerr << "vpr must be greater than 0" << endl;
+		exit(EXIT_FAILURE);
+	}
+	if(global_ctx.bitwidth < 2 || global_ctx.bitwidth > 8){
+		cerr << "bitwidth must be between 2 and 8" << endl;
+		exit(EXIT_FAILURE);
+	}
+	if(global_ctx.unroll_size <= 0){
+		cerr << "unroll size must be greater than 0" << endl;
+		exit(EXIT_FAILURE);
+	}
 
-	global_ctx.use_ideal = vm.count("rasterize");
-	global_ctx.use_gpu = vm.count("gpu");
 	global_ctx.use_approximation = vm.count("approximation");
-	global_ctx.use_hierachy = vm.count("hierachy");
+	global_ctx.use_hierarchy = vm.count("hierarchy");
 
+	assert(global_ctx.approx_confidence >= 0.0f && global_ctx.approx_confidence <= 1.0f);
 
-	assert(global_ctx.use_ideal+global_ctx.use_vector+global_ctx.use_qtree<=1
-			&&"can only choose one from, IDEAL, VECTOR, QTree");
-
-	return global_ctx;
 }

@@ -61,6 +61,7 @@ public:
 
 	Point centroid();
 
+	void align(double step_x, double step_y);
 	void print_vertices();
 	void print();
 	void to_array(Point *p);

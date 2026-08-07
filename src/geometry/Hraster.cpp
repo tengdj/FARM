@@ -1,27 +1,62 @@
 #include <Hraster.h>
 
-void Hraster::init(double _step_x, double _step_y, int _dimx, int _dimy, box *_mbr, bool last_layer){
-    step_x = _step_x;
-    step_y = _step_y;
-    dimx = _dimx;
-    dimy = _dimy;
-    
-    if(last_layer){
-        mbr = _mbr;
-    }else{
+Hraster::~Hraster()
+{
+	if (!owns_status)
+	{
+		status = nullptr;
+	}
+	if (owns_areas && areas)
+	{
+		delete[] areas;
+	}
+	if (owns_mbr && mbr)
+	{
+		delete mbr;
+	}
+}
+
+void Hraster::init(double _step_x, double _step_y, int &_dimx, int &_dimy, box *_mbr, bool is_base_layer){
+	step_x = _step_x;
+	step_y = _step_y;
+	dimx = _dimx;
+	dimy = _dimy;
+	status = nullptr;
+	areas = nullptr;
+	owns_status = false;
+	owns_areas = false;
+	owns_mbr = false;
+
+	if(is_base_layer){
+		mbr = _mbr;
+	}else{
 		mbr = new box(_mbr);
+		owns_mbr = true;
 
-		mbr->low[0] = floor(mbr->low[0] / step_x) * step_x;
-		mbr->low[1] = floor(mbr->low[1] / step_y) * step_y;
-		mbr->high[0] = ceil(mbr->high[0] / step_x) * step_x;
-		mbr->high[1] = ceil(mbr->high[1] / step_y) * step_y;
+		status_size = static_cast<uint>(packed_status_bytes(
+			static_cast<size_t>(dimx) * dimy, bitwidth));
+		status = new uint8_t[status_size];
+		memset(status, 0, status_size * sizeof(uint8_t));
+		areas = new double[dimx * dimy]();
+		owns_status = true;
+		owns_areas = true;
+	}
 
-		dimx = static_cast<int>(round((mbr->high[0] - mbr->low[0]) / step_x));
-		dimy = static_cast<int>(round((mbr->high[1] - mbr->low[1]) / step_y));
-        
-		status = new uint8_t[dimx * dimy];
-        memset(status, 0, dimx * dimy * sizeof(uint8_t));
-    }
+	status_size = static_cast<uint>(packed_status_bytes(
+		static_cast<size_t>(dimx) * dimy, bitwidth));
+
+	_dimx = dimx;
+	_dimy = dimy;
+}
+
+void Hraster::attach_base_storage(uint8_t *_status, double *_areas)
+{
+	status = _status;
+	areas = _areas;
+	owns_status = false;
+	owns_areas = false;
+	status_size = static_cast<uint>(packed_status_bytes(
+		static_cast<size_t>(dimx) * dimy, bitwidth));
 }
 
 void Hraster::print(){

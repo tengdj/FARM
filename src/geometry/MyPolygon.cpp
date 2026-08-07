@@ -1,5 +1,5 @@
 #include "../include/MyPolygon.h"
-#include "../include/Ideal.h"
+#include "../include/farm.h"
 
 MyPolygon::~MyPolygon(){
 	if(boundary){
@@ -16,9 +16,6 @@ MyPolygon::~MyPolygon(){
 	}
 	if(mer){
 		delete mer;
-	}
-	if(qtree){
-		delete qtree;
 	}
 	if(rtree){
 		delete rtree;
@@ -45,7 +42,7 @@ box *MyPolygon::getMER(query_context *ctx){
 		return mer;
 	}
 
-	Ideal *ras = new Ideal();
+	Farm *ras = new Farm();
 	ras->mbr = new box(mbr);
 	ras->boundary = new VertexSequence(boundary->num_vertices, boundary->p);
  	ras->rasterization(ctx->vpr);
@@ -83,87 +80,6 @@ VertexSequence *MyPolygon::get_convex_hull(){
 	return convex_hull;
 }
 
-QTNode *MyPolygon::partition_qtree(const int vpr){
-
-	pthread_mutex_lock(&qtree_partition_lock);
-	if(qtree){
-		pthread_mutex_unlock(&qtree_partition_lock);
-		return qtree;
-	}
-
-	int num_boxes = get_num_vertices()/vpr;
-	int level = 1;
-	while(pow(4,level)<num_boxes){
-		level++;
-	}
-	int dimx = pow(2,level);
-	int dimy = dimx;
-
-	Ideal *ras = new Ideal();
-	ras->mbr = new box(mbr);
-	ras->boundary = new VertexSequence(boundary->num_vertices, boundary->p);
-	ras->init_raster(dimx, dimy);
-    ras->rasterization();
-
-	int box_count = 4;
-	int cur_level = 1;
-
-	qtree = new QTNode(*(this->getMBB()));
-	std::stack<QTNode *> ws;
-	qtree->split();
-	qtree->push(ws);
-
-	vector<QTNode *> level_nodes;
-
-	//breadth first traverse
-	query_context qc;
-	while(box_count<num_boxes||!ws.empty()){
-		if(cur_level>level){
-			dimx *= 2;
-			dimy *= 2;
-			level = cur_level;
-			delete ras;
-			ras = new Ideal();
-			ras->mbr = new box(mbr);
-			ras->boundary = new VertexSequence(boundary->num_vertices, boundary->p);
-			ras->init_raster(dimx, dimy);
-			ras->rasterization();
-		}
-
-		while(!ws.empty()){
-			QTNode *cur = ws.top();
-			ws.pop();
-			bool contained = false;
-			if(!ras->MyRaster::contain(&cur->mbr, contained)){
-				level_nodes.push_back(cur);
-			}else if(contained){
-				cur->interior = true;
-			}else{
-				cur->exterior = true;
-			}
-		}
-
-
-		for(QTNode *n:level_nodes){
-			if(box_count<num_boxes){
-				n->split();
-				n->push(ws);
-				box_count += 3;
-			}else{
-				break;
-			}
-		}
-		cur_level++;
-		level_nodes.clear();
-	}
-	//assert(box_count>=num_boxes);
-
-	delete ras;
-	pthread_mutex_unlock(&qtree_partition_lock);
-
-	return qtree;
-}
-
 MyPolygon *MyPolygon::clone(){
 	MyPolygon *polygon = new MyPolygon();
 	polygon->boundary = boundary->clone();
@@ -192,36 +108,6 @@ size_t MyPolygon::get_rtree_size(){
 	}else{
 		return 0;
 	}
-}
-
-void MyPolygon::triangulate(){
-	assert(!boundary->clockwise());
-	if(triangle_num > 0){
-		return;
-	}
-	assert(boundary->p);
-	assert(boundary->num_vertices>0);
-
-	vector<Vertex *> polyline = boundary->pack_to_polyline();
-	assert(polyline.size() > 0);
-	CDT *cdt = new CDT(polyline);
-	cdt->Triangulate();
-	vector<Triangle *> tri = cdt->GetTriangles();
-	triangles = new Point[3*tri.size()];
-	for(int i=0;i<tri.size();i++){
-		triangles[i*3].x = tri[i]->point(0)->x;
-		triangles[i*3].y = tri[i]->point(0)->y;
-		triangles[i*3+1].x = tri[i]->point(1)->x;
-		triangles[i*3+1].y = tri[i]->point(1)->y;
-		triangles[i*3+2].x = tri[i]->point(2)->x;
-		triangles[i*3+2].y = tri[i]->point(2)->y;
-	}
-	triangle_num = tri.size();
-	delete cdt;
-	for(Vertex *v:polyline){
-		delete v;
-	}
-	polyline.clear();
 }
 
 VertexSequence *MyPolygon::read_vertices(const char *wkt, size_t &offset, bool clockwise){
@@ -439,7 +325,6 @@ double MyPolygon::distance_rtree(Point &p, query_context *ctx){
 							ctx->distance = dist;
 						}
 					}
-					ctx->edge_checked.counter += 3;
 				}else{
 					for(RTNode *p:pr.first->children){
 						pixq.push(p);
@@ -496,7 +381,6 @@ double MyPolygon::distance_rtree(Point &start, Point &end, query_context *ctx){
 							return mindist;
 						}
 					}
-					ctx->edge_checked.counter += 3;
 				}else{
 					for(RTNode *p:pr.first->children){
 						pixq.push(p);
@@ -523,13 +407,6 @@ bool MyPolygon::contain(Point &p, query_context *ctx, bool profile){
 	if(convex_hull&&!convex_hull->contain(p)){
 		return false;
 	}
-	
-	if(qtree){
-		QTNode *tnode = get_qtree()->retrieve(p);
-		assert(tnode->isleaf()&&tnode->mbr.contain(p));
-		if(tnode->exterior) return false;
-		else if(tnode->interior) return true;
-	}
 
 	bool contained = false;
 	// refinement step
@@ -547,19 +424,6 @@ bool MyPolygon::contain(MyPolygon *target, query_context *ctx){
 		return false;
 	}
 
-	if(qtree) {
-		// filtering with the mbr of the target against the qtree
-		bool isin = false;
-		if(get_qtree()->determine_contain(*(target->getMBB()), isin)){
-			return isin;
-		}
-		ctx->border_checked.counter++;
-		// otherwise, checking all the edges to make sure no intersection
-		if(segment_intersect_batch(boundary->p, target->boundary->p, boundary->num_vertices, target->boundary->num_vertices)){
-			return false;
-		}
-	}
-
 	// filtering with mer, mbr, and convex hull
 	if(mer){
 		// filter with the mer of source and mbr of the target
@@ -571,7 +435,8 @@ bool MyPolygon::contain(MyPolygon *target, query_context *ctx){
 		if(target->convex_hull){
 			Point mer_vertices[5];
 			mer->to_array(mer_vertices);
-			if(!segment_intersect_batch(mer_vertices, target->convex_hull->p, 5, target->convex_hull->num_vertices)){
+			if(!segment_intersect_batch(mer_vertices, target->convex_hull->p, 4,
+				target->convex_hull->num_vertices - 1)){
 				if(mer->contain(convex_hull->p[0])){
 					return true;
 				}
@@ -581,7 +446,8 @@ bool MyPolygon::contain(MyPolygon *target, query_context *ctx){
 		Point mbb_vertices[5];
 		target->mbr->to_array(mbb_vertices);
 		// no intersection between this polygon and the mbr of the target polygon
-		if(!segment_intersect_batch(boundary->p, mbb_vertices, boundary->num_vertices, 5)){
+		if(!segment_intersect_batch(boundary->p, mbb_vertices,
+			boundary->num_vertices - 1, 4)){
 			// the target must be the one which is contained (not contain) as its mbr is contained
 			if(contain(mbb_vertices[0], ctx)){
 				return true;
@@ -600,7 +466,8 @@ bool MyPolygon::contain(MyPolygon *target, query_context *ctx){
 			return true;
 		}else{
 			// otherwise, checking all the edges to make sure no intersection
-			if(segment_intersect_batch(boundary->p, target->boundary->p, boundary->num_vertices, target->boundary->num_vertices)){
+			if(segment_intersect_batch(boundary->p, target->boundary->p,
+				boundary->num_vertices - 1, target->boundary->num_vertices - 1)){
 				return false;
 			}
 		}
@@ -617,12 +484,6 @@ double MyPolygon::distance(Point &p, query_context *ctx, bool profile){
 	double mindist = getMBB()->max_distance(p, ctx->geography);
 	bool contained = contain(p, ctx, profile);
 	if(contained) return 0;
-
-	if(qtree){
-		if(ctx->is_within_query()&&!qtree->within(p, ctx->within_distance)){
-			return DBL_MAX;
-		}
-	}
 
 	//checking convex
 	if(ctx->is_within_query()&&convex_hull){
@@ -650,23 +511,6 @@ double MyPolygon::distance(Point &p, query_context *ctx, bool profile){
 }
 
 double MyPolygon::distance(MyPolygon *target, query_context *ctx, bool profile){
-	if(qtree){
-		// checking the qtree for filtering
-		if(ctx->is_within_query()){
-			for(int i=0;i<target->boundary->num_vertices-1;i++){
-				// if any edge is within the distance after checking the QTree, get the exact distance from it to the source polygon
-				if(qtree->within(target->boundary->p[i], target->boundary->p[i+1], ctx->within_distance)){
-					double dist = segment_sequence_distance(boundary->p, target->boundary->p+i,
-							boundary->num_vertices, 1,ctx->geography);
-					if(dist <= ctx->within_distance){
-						return dist;
-					}
-				}
-			}
-		}
-	}
-
-
 	//checking convex for filtering
 	if(ctx->is_within_query() && convex_hull && target->convex_hull){
 		double dist = segment_sequence_distance(convex_hull->p, target->convex_hull->p,
@@ -757,4 +601,3 @@ size_t MyPolygon::decode(char *source){
 	}
 	return decoded;
 }
-

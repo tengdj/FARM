@@ -4,6 +4,7 @@
 #include <math.h>
 #include "util.h"
 #include "Point.h"
+#include "packed_status.h"
 #include <float.h>
 
 /*
@@ -20,31 +21,11 @@ inline bool collinear(Point &p1, Point &p2, Point &p3)
 	return double_zero(a);
 }
 
-inline double getSlope(Point &A, Point &B)
-{
-	return (((double)B.y - A.y) / (B.x - A.x));
-}
-
-inline bool isInsideHorizontalDual(double Yi, double Yi1, double py)
-{
-	if (py < Yi || py > Yi1)
-	{
-		return false;
-	}
-	return true;
-}
-inline bool isInsideVerticalDual(double Xi, double Xi1, double px)
-{
-	if (px < Xi || px > Xi1)
-	{
-		return false;
-	}
-	return true;
-}
-
 /*
  * distance related
  * */
+
+inline bool segment_intersect(const Point &a, const Point &b, const Point &c, const Point &d);
 
 inline double point_to_segment_distance(const Point &p, const Point &p1, const Point &p2, bool geography)
 {
@@ -104,6 +85,10 @@ inline double point_to_segment_sequence_distance(Point &p, Point *vs, size_t seq
 
 inline double segment_to_segment_distance(Point &s1, Point &e1, Point &s2, Point &e2, bool geography)
 {
+	if (segment_intersect(s1, e1, s2, e2))
+	{
+		return 0.0;
+	}
 	double dist1 = point_to_segment_distance(s1, s2, e2, geography);
 	double dist2 = point_to_segment_distance(e1, s2, e2, geography);
 	double dist3 = point_to_segment_distance(s2, s1, e1, geography);
@@ -114,71 +99,45 @@ inline double segment_to_segment_distance(Point &s1, Point &e1, Point &s2, Point
 inline double segment_sequence_distance(Point *vs1, Point *vs2, size_t s1, size_t s2, bool geography)
 {
 	double mindist = DBL_MAX;
-	for (int i = 0; i < s1; i++)
+	if (s1 < 2 || s2 < 2)
 	{
-		double dist = point_to_segment_sequence_distance(vs1[i], vs2, s2, geography);
-		if (dist < mindist)
+		return mindist;
+	}
+	for (size_t i = 0; i + 1 < s1; i++)
+	{
+		for (size_t j = 0; j + 1 < s2; j++)
 		{
-			mindist = dist;
+			if (segment_intersect(vs1[i], vs1[i + 1], vs2[j], vs2[j + 1]))
+			{
+				return 0.0;
+			}
+			double dist = point_to_segment_distance(vs1[i], vs2[j], vs2[j + 1], geography);
+			if (dist < mindist)
+			{
+				mindist = dist;
+			}
 		}
 	}
-	for (int i = 0; i < s2; i++)
+	double dist = point_to_segment_sequence_distance(vs1[s1 - 1], vs2, s2, geography);
+	if (dist < mindist)
 	{
-		double dist = point_to_segment_sequence_distance(vs2[i], vs1, s1, geography);
-		if (dist < mindist)
-		{
-			mindist = dist;
-		}
+		mindist = dist;
 	}
-	return mindist;
-}
-
-inline double point_to_segment_within_batch(Point &p, Point *vs, size_t seq_len, double within_distance, bool geography)
-{
-	double mindist = DBL_MAX;
-	for (int i = 0; i < seq_len - 1; i++)
+	for (size_t i = 0; i < s2; i++)
 	{
-		double dist = point_to_segment_distance(p, vs[i], vs[i + 1], geography);
+		dist = point_to_segment_sequence_distance(vs2[i], vs1, s1, geography);
 		if (dist < mindist)
 		{
 			mindist = dist;
 		}
-		// if (mindist <= within_distance)
-		// {
-		// 	return mindist;
-		// }
 	}
 	return mindist;
 }
 
 inline double segment_to_segment_within_batch(Point *vs1, Point *vs2, size_t s1, size_t s2, double within_distance, bool geography)
 {
-	double mindist = DBL_MAX;
-	for (int i = 0; i < s1; i++)
-	{
-		double dist = point_to_segment_within_batch(vs1[i], vs2, s2, within_distance, geography);
-		if (dist < mindist)
-		{
-			mindist = dist;
-		}
-		// if (mindist <= within_distance)
-		// {
-		// 	return mindist;
-		// }
-	}
-	for (int i = 0; i < s2; i++)
-	{
-		double dist = point_to_segment_within_batch(vs2[i], vs1, s1, within_distance, geography);
-		if (dist < mindist)
-		{
-			mindist = dist;
-		}
-		// if (mindist <= within_distance)
-		// {
-		// 	return mindist;
-		// }
-	}
-	return mindist;
+	(void)within_distance;
+	return segment_sequence_distance(vs1, vs2, s1, s2, geography);
 }
 
 /*
@@ -220,14 +179,16 @@ inline bool segment_intersect(const Point &a, const Point &b, const Point &c, co
 		   sgn(c.cross(d, a)) != sgn(c.cross(d, b));
 }
 
-// checking whether two segment sequences intersect
-inline bool segment_intersect_batch(Point *p1, Point *p2, int s1, int s2)
+// Each sequence contains segment_count + 1 points.
+inline bool segment_intersect_batch(const Point *source_points, const Point *target_points,
+	int source_segment_count, int target_segment_count)
 {
-	for (int i = 0; i < s1; i++)
+	for (int i = 0; i < source_segment_count; i++)
 	{
-		for (int j = 0; j < s2; j++)
+		for (int j = 0; j < target_segment_count; j++)
 		{
-			if (segment_intersect(p1[i], p1[i + 1], p2[j], p2[j + 1]))
+			if (segment_intersect(source_points[i], source_points[i + 1],
+				target_points[j], target_points[j + 1]))
 			{
 				return true;
 			}
@@ -236,68 +197,15 @@ inline bool segment_intersect_batch(Point *p1, Point *p2, int s1, int s2)
 	return false;
 }
 
-inline void segment_intersect_batch(Point *p1, Point *p2, int s1, int s2, int e1, int e2, std::vector<Intersection> &inters)
-{
-	for (int i = s1; i < e1; i++)
-	{
-		for (int j = s2; j < e2; j++)
-		{
-
-			Point d1 = p1[i + 1] - p1[i];
-			Point d2 = p2[j + 1] - p2[j];
-
-			Point r = p2[j] - p1[i];
-
-			double denom = d1.cross(d2);
-
-			if (std::abs(denom) < 1e-12) continue;
-
-			double t = r.cross(d2) / denom;
-			double u = r.cross(d1) / denom;
-
-			if (t >= -1e-9 && t <= 1 + 1e-9 && u >= -1e-9 && u <= 1 + 1e-9)
-			{
-				Point intersect_p = p1[i] + d1 * t;
-				Intersection inter = {intersect_p, 0, i, j, t, u};
-				inters.push_back(inter);
-			}
-		}
-	}
-	return;
-}
-
 /*
  *
  * area related
  *
  */
 
-inline double computePolygonArea(vector<Point> &polygon)
+inline uint8_t classifyPixel(double area, double pixelArea, uint8_t bitwidth)
 {
-	int n = polygon.size();
-	if (n < 3)
-		return 0.0;
-
-	// if (n == 5 && abs(polygon[0].x - polygon[1].x) < 1e-9 && abs(polygon[2].x - polygon[3].x) < 1e-9)
-	// {
-	// 	double dx = abs(polygon[1].x - polygon[2].x);
-	// 	double dy1 = abs(polygon[1].y - polygon[0].y), dy2 = abs(polygon[2].y - polygon[3].y);
-	// 	return dx * (dy1 + dy2) / 2;
-	// }
-
-	double area = 0.0;
-	for (int i = 0; i < n - 1; ++i)
-	{
-		const Point &p1 = polygon[i];
-		const Point &p2 = polygon[i + 1];
-		area += ((double)p1.x * p2.y - (double)p2.x * p1.y);
-	}
-	
-	return std::abs(area) / 2.0;
-}
-
-inline uint8_t classifyPixel(double area, double pixelArea, int count)
-{
+	const int count = status_category_count(bitwidth);
 	double ratio = area / pixelArea;
 	// area calculation has precision error
 	if (fabs(ratio - 1.0) < 1e-9)
@@ -314,55 +222,7 @@ inline uint8_t classifyPixel(double area, double pixelArea, int count)
 
 	int idx = static_cast<int>(ceil(ratio * (count - 2)));
 	if (idx >= count)
-		idx = count - 1; // 防止越界
-
-	assert(idx < 256);
-	return idx;
-}
-
-inline uint8_t classifyPixel(double area1, double pixelArea1, double area2, double pixelArea2, int count)
-{
-
-	double ratio = (area1 / pixelArea1 + area2 / pixelArea2) / 2;
-	// area calculation has precision error
-	if (fabs(ratio - 1.0) < 1e-9)
-	{
-		// full
-		return count - 1;
-	}
-
-	if (fabs(ratio) < 1e-9)
-	{
-		// empty
-		return 0;
-	}
-
-	int idx = static_cast<int>(ceil(ratio * (count - 2)));
-	if (idx >= count)
-		idx = count - 1; // 防止越界
-
-	assert(idx < 256);
-	return idx;
-}
-
-inline uint8_t classifyPixel(double ratio, int count)
-{
-	// area calculation has precision error
-	if (fabs(ratio - 1.0) < 1e-9)
-	{
-		// full
-		return count - 1;
-	}
-
-	if (fabs(ratio) < 1e-9)
-	{
-		// empty
-		return 0;
-	}
-
-	int idx = static_cast<int>(ceil(ratio * (count - 2)));
-	if (idx >= count)
-		idx = count - 1; // 防止越界
+		idx = count - 1;
 
 	assert(idx < 256);
 	return idx;

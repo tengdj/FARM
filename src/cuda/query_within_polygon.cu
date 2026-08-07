@@ -1,21 +1,16 @@
 #include "geometry.cuh"
+#include <cub/device/device_radix_sort.cuh>
+#include <cuda/std/tuple>
+#include <cmath>
+#include <limits>
 #include <thrust/device_vector.h>
-#include <thrust/sort.h>
 #include <thrust/device_ptr.h>
+#include <thrust/execution_policy.h>
 #include <thrust/adjacent_difference.h>
+#include <thrust/copy.h>
 #include <thrust/count.h>
-
-
-#define WITHIN_DISTANCE 10
-
-struct Task
-{
-    uint s_start = 0;
-    uint t_start = 0;
-    uint s_length = 0;
-    uint t_length = 0;
-    int pair_id = 0;
-};
+#include <thrust/sequence.h>
+#include <thrust/transform.h>
 
 struct BoxDistRange
 {
@@ -24,13 +19,104 @@ struct BoxDistRange
     int pairId;
     float minDist;
     float maxDist;
+};
+
+static_assert(sizeof(BoxDistRange) == 20, "final raster candidate must stay compact");
+
+enum class ExpansionMode : uint8_t
+{
+    Fixed = 0,
+    SourceOnly = 1,
+    TargetOnly = 2,
+    Both = 3
+};
+
+struct ActiveRasterCandidate
+{
+    int sourcePixelId;
+    int targetPixelId;
+    int pairId;
     uint8_t s_cur_level;
     uint8_t t_cur_level;
-
-    void print() const {
-        printf("%d %d %f %f\n", sourcePixelId, targetPixelId, minDist, maxDist);
-    }
+    ExpansionMode mode;
+    uint8_t reserved;
 };
+
+static_assert(sizeof(ActiveRasterCandidate) == 16, "active raster candidate must stay compact");
+
+__device__ __forceinline__ ExpansionMode get_expansion_mode(
+    const RasterInfo *__restrict__ layer_info,
+    const FarmOffset &source,
+    const FarmOffset &target,
+    uint8_t s_cur_level,
+    uint8_t t_cur_level,
+    uint s_level,
+    uint t_level)
+{
+    const float s_step = static_cast<float>(
+        (layer_info + source.layer_start)[s_cur_level].step_x);
+    const float t_step = static_cast<float>(
+        (layer_info + target.layer_start)[t_cur_level].step_x);
+    const bool expand_source = s_cur_level < s_level &&
+        (s_step >= t_step || t_cur_level >= t_level);
+    const uint8_t next_source_level = s_cur_level + static_cast<uint8_t>(expand_source);
+    const bool expand_target = t_cur_level < t_level &&
+        (s_step <= t_step || next_source_level >= s_level);
+
+    return static_cast<ExpansionMode>(
+        static_cast<uint8_t>(expand_source) |
+        (static_cast<uint8_t>(expand_target) << 1));
+}
+
+__device__ __forceinline__ BoxDistRange *get_final_candidate_slot(
+    char *__restrict__ final_buffer, uint final_index)
+{
+    return reinterpret_cast<BoxDistRange *>(final_buffer + CUDA_SCRATCH_BUFFER_BYTES -
+        (static_cast<size_t>(final_index) + 1) * sizeof(BoxDistRange));
+}
+
+__device__ __forceinline__ void append_active_candidate(
+    ActiveRasterCandidate *__restrict__ active_buffer,
+    uint *__restrict__ active_size,
+    uint *__restrict__ final_size,
+    bool active_shares_final,
+    uint *__restrict__ overflow_flag,
+    const ActiveRasterCandidate &value)
+{
+    const uint index = atomicAdd(active_size, 1U);
+    const size_t active_bytes = (static_cast<size_t>(index) + 1) * sizeof(ActiveRasterCandidate);
+    const size_t final_bytes = active_shares_final
+        ? static_cast<size_t>(*final_size) * sizeof(BoxDistRange)
+        : 0;
+    if(active_bytes > CUDA_SCRATCH_BUFFER_BYTES ||
+       active_bytes + final_bytes > CUDA_SCRATCH_BUFFER_BYTES){
+        atomicExch(overflow_flag, 1U);
+        return;
+    }
+    active_buffer[index] = value;
+}
+
+__device__ __forceinline__ void append_final_candidate(
+    char *__restrict__ final_buffer,
+    uint *__restrict__ final_size,
+    uint *__restrict__ active_size,
+    bool active_output_shares_final,
+    uint input_shared_active_size,
+    uint *__restrict__ overflow_flag,
+    const BoxDistRange &value)
+{
+    const uint index = atomicAdd(final_size, 1U);
+    const size_t final_bytes = (static_cast<size_t>(index) + 1) * sizeof(BoxDistRange);
+    const size_t active_bytes = active_output_shares_final
+        ? static_cast<size_t>(*active_size) * sizeof(ActiveRasterCandidate)
+        : static_cast<size_t>(input_shared_active_size) * sizeof(ActiveRasterCandidate);
+    if(final_bytes > CUDA_SCRATCH_BUFFER_BYTES ||
+       active_bytes + final_bytes > CUDA_SCRATCH_BUFFER_BYTES){
+        atomicExch(overflow_flag, 1U);
+        return;
+    }
+    *get_final_candidate_slot(final_buffer, index) = value;
+}
 
 struct PixelDist
 {
@@ -41,22 +127,118 @@ struct PixelDist
     float apxDist;
     float minDist;
     float maxDist;
+};
 
-    void print() const {
-        printf("%d %d %d %d %f %f %f\n", sourcePixelId, targetPixelId, pf, pairId, apxDist, minDist, maxDist);
+struct WithinApproximation
+{
+    float normalized_mean;
+    float approximate_distance;
+};
+
+__device__ __forceinline__ WithinApproximation calculate_within_approximation(
+    uint8_t pf, uint8_t bitwidth, float min_distance, float max_distance)
+{
+    const float category_count = static_cast<float>(status_category_count(bitwidth));
+    const float normalized_mean =
+        (1.0f - pf / category_count) * 0.55f;
+    const float approximate_distance = min_distance
+        + normalized_mean * (max_distance - min_distance);
+    return {normalized_mean, approximate_distance};
+}
+
+__device__ __forceinline__ uint8_t calculate_combined_fullness(
+    uint8_t source_fullness, double source_pixel_area,
+    uint8_t target_fullness, double target_pixel_area,
+    uint8_t bitwidth)
+{
+    const double source_low = gpu_decode_fullness(
+        source_fullness, source_pixel_area, bitwidth, true);
+    const double source_high = gpu_decode_fullness(
+        source_fullness, source_pixel_area, bitwidth, false);
+    const double target_low = gpu_decode_fullness(
+        target_fullness, target_pixel_area, bitwidth, true);
+    const double target_high = gpu_decode_fullness(
+        target_fullness, target_pixel_area, bitwidth, false);
+    const double source_approx = (source_low + source_high) * 0.5;
+    const double target_approx = (target_low + target_high) * 0.5;
+    return gpu_encode_fullness(source_approx, source_pixel_area,
+        target_approx, target_pixel_area, bitwidth);
+}
+
+struct PixelDistKeyDecomposer
+{
+    __host__ __device__
+    auto operator()(PixelDist &value) const
+    {
+        return cuda::std::tie(value.pairId, value.apxDist, value.minDist);
     }
 };
 
-__device__ bool d_flag = false;
+static PixelDist *radix_sort_pixel_dist(PixelDist *input, uint size, uint pair_count,
+    int begin_bit = 0)
+{
+    PixelDist *sorted = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&sorted, size * sizeof(PixelDist)));
 
-__global__ void kernel_init_distance(pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *layer_info, uint32_t *layer_offset, uint8_t *status, uint size, float *max_box_dist, BoxDistRange *buffer, uint *buffer_size, int category_count)
+    uint max_pair_id = pair_count > 0 ? pair_count - 1 : 0;
+    int pair_id_bits = 0;
+    while(max_pair_id > 0){
+        pair_id_bits ++;
+        max_pair_id >>= 1;
+    }
+    const int end_bit = 64 + pair_id_bits;
+
+    if(begin_bit >= end_bit){
+        CUDA_SAFE_CALL(cudaMemcpy(sorted, input, size * sizeof(PixelDist),
+            cudaMemcpyDeviceToDevice));
+        return sorted;
+    }
+
+    cub::DoubleBuffer<PixelDist> keys(input, sorted);
+    size_t temp_storage_bytes = 0;
+    CUDA_SAFE_CALL(cub::DeviceRadixSort::SortKeys(nullptr, temp_storage_bytes,
+        keys, size, PixelDistKeyDecomposer(), begin_bit, end_bit));
+
+    void *temp_storage = nullptr;
+    if(temp_storage_bytes > 0){
+        CUDA_SAFE_CALL(cudaMalloc(&temp_storage, temp_storage_bytes));
+    }
+    CUDA_SAFE_CALL(cub::DeviceRadixSort::SortKeys(temp_storage, temp_storage_bytes,
+        keys, size, PixelDistKeyDecomposer(), begin_bit, end_bit));
+
+    if(keys.Current() != sorted){
+        CUDA_SAFE_CALL(cudaMemcpy(sorted, keys.Current(), size * sizeof(PixelDist),
+            cudaMemcpyDeviceToDevice));
+    }
+    if(temp_storage){
+        CUDA_SAFE_CALL(cudaFree(temp_storage));
+    }
+    return sorted;
+}
+
+__global__ void kernel_init_distance(
+    const pair<uint32_t, uint32_t> *__restrict__ pairs,
+    const FarmOffset *__restrict__ farm_offset,
+    const RasterInfo *__restrict__ layer_info,
+    const uint32_t *__restrict__ layer_offset,
+    const uint8_t *__restrict__ status,
+    uint size,
+    float *__restrict__ max_box_dist,
+    ActiveRasterCandidate *__restrict__ buffer,
+    uint *__restrict__ buffer_size,
+    uint *__restrict__ overflow_flag,
+    uint8_t bitwidth)
 {
     const int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (pair_id < size)
     {
-        pair<uint32_t, uint32_t> &pair = pairs[pair_id];
-        IdealOffset &source = idealoffset[pair.first];
-        IdealOffset &target = idealoffset[pair.second];
+        const pair<uint32_t, uint32_t> pair = pairs[pair_id];
+        const FarmOffset source = farm_offset[pair.first];
+        const FarmOffset target = farm_offset[pair.second];
+        const uint s_level = farm_offset[pair.first + 1].layer_start - source.layer_start - 1;
+        const uint t_level = farm_offset[pair.second + 1].layer_start - target.layer_start - 1;
+        const ExpansionMode mode = get_expansion_mode(
+            layer_info, source, target, 0, 0, s_level, t_level);
 
         int s_dimx = (layer_info + source.layer_start)[0].dimx, s_dimy = (layer_info + source.layer_start)[0].dimy;
         int t_dimx = (layer_info + target.layer_start)[0].dimx, t_dimy = (layer_info + target.layer_start)[0].dimy;
@@ -65,11 +247,15 @@ __global__ void kernel_init_distance(pair<uint32_t, uint32_t> *pairs, IdealOffse
 
         for(int i = 0; i < s_dimx * s_dimy; i ++){
             for(int j = 0; j < t_dimx * t_dimy; j ++){
-                int pa = gpu_get_id(i, j, s_dimx);
-                int pb = gpu_get_id(i, j , t_dimx);
-                if(gpu_show_status(status, source.status_start, pa, category_count, source_offset) == BORDER && gpu_show_status(status, target.status_start, pb, category_count, target_offset) == BORDER){
+                if(gpu_show_status(status, source.status_start, i, bitwidth, source_offset) == BORDER &&
+                    gpu_show_status(status, target.status_start, j, bitwidth, target_offset) == BORDER){
                     uint idx = atomicAdd(buffer_size, 1);
-                    buffer[idx] = {i, j, pair_id, 0.0, FLT_MAX, 0, 0};
+                    if((static_cast<size_t>(idx) + 1) * sizeof(ActiveRasterCandidate) >
+                       CUDA_SCRATCH_BUFFER_BYTES){
+                        atomicExch(overflow_flag, 1U);
+                        continue;
+                    }
+                    buffer[idx] = {i, j, pair_id, 0, 0, mode, 0};
                 }
             }
         }
@@ -80,258 +266,191 @@ __global__ void kernel_init_distance(pair<uint32_t, uint32_t> *pairs, IdealOffse
 }
 
 // calculate lower bound and upper bound between box from (top down)
-__global__ void iterative_filtering_step1(BoxDistRange *candidate, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *layer_info, uint32_t *layer_offset, uint8_t *status, float *max_box_dist, uint *size, BoxDistRange *buffer, uint *buffer_size, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr, uint8_t category_count)
+__global__ void iterative_filtering_step(const ActiveRasterCandidate *__restrict__ candidate,
+    const pair<uint32_t, uint32_t> *__restrict__ pairs,
+    const FarmOffset *__restrict__ farm_offset,
+    const RasterInfo *__restrict__ layer_info,
+    const uint32_t *__restrict__ layer_offset,
+    const uint8_t *__restrict__ status,
+    float *__restrict__ max_box_dist,
+    uint size,
+    ActiveRasterCandidate *__restrict__ active_buffer,
+    uint *__restrict__ active_size,
+    char *__restrict__ final_buffer,
+    uint *__restrict__ final_size,
+    bool active_shares_final,
+    uint input_shared_active_size,
+    uint *__restrict__ overflow_flag,
+    const float *__restrict__ degree_per_kilometer_latitude,
+    const float *__restrict__ degree_per_kilometer_longitude_arr,
+    uint8_t bitwidth,
+    float within_distance)
 {
     const int candidate_id = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (candidate_id < *size)
+    if (candidate_id < size)
     {
-        d_flag = false;
+        const ActiveRasterCandidate current = candidate[candidate_id];
+        int source_pixel_id = current.sourcePixelId;
+        int target_pixel_id = current.targetPixelId;
+        int pair_id = current.pairId;
+        if(max_box_dist[pair_id] < 0.0f) return;
 
-        int source_pixel_id = candidate[candidate_id].sourcePixelId;
-        int target_pixel_id = candidate[candidate_id].targetPixelId;
-        int pair_id = candidate[candidate_id].pairId;
         uint8_t s_cur_level = candidate[candidate_id].s_cur_level;
         uint8_t t_cur_level = candidate[candidate_id].t_cur_level;
 
-        pair<uint32_t, uint32_t> &pair = pairs[pair_id];
-        IdealOffset &source = idealoffset[pair.first];
-        IdealOffset &target = idealoffset[pair.second];
-        uint s_level = idealoffset[pair.first + 1].layer_start - source.layer_start - 1;
-        uint t_level = idealoffset[pair.second + 1].layer_start - target.layer_start - 1;
-
-        // int source_start_x, source_start_y, source_end_x, source_end_y, target_start_x, target_start_y, target_end_x, target_end_y;
-        // uint32_t source_offset, target_offset;
-        // box s_mbr, t_mbr;
-        // double s_step = (layer_info + source.layer_start)[s_cur_level].step_x, t_step = (layer_info + target.layer_start)[t_cur_level].step_x;
-        // double s_step_x, s_step_y, t_step_x, t_step_y;
-        // int s_dimx, s_dimy, t_dimx, t_dimy;
-        // box source_pixel_box, target_pixel_box;
-
-        // // printf("s_step = %lf, t_step = %lf\n", s_step, t_step);
-
-        // if(s_cur_level < s_level){
-        //     d_flag = true;
-        //     s_cur_level ++;
-
-        //     source_offset = (layer_offset + source.layer_start)[s_cur_level];
-        //     s_mbr = (layer_info + source.layer_start)[s_cur_level].mbr;
-        //     s_step_x = (layer_info + source.layer_start)[s_cur_level].step_x, s_step_y = (layer_info + source.layer_start)[s_cur_level].step_y;
-        //     s_dimx = (layer_info + source.layer_start)[s_cur_level].dimx, s_dimy = (layer_info + source.layer_start)[s_cur_level].dimy;
-
-        //     // printf("LINESTRING((%f %f, %f %f, %f %f, %f %f, %f %f))\n", s_mbr.low[0],s_mbr.low[1],
-		// 	// 	s_mbr.high[0],s_mbr.low[1],
-		// 	// 	s_mbr.high[0],s_mbr.high[1],
-		// 	// 	s_mbr.low[0],s_mbr.high[1],
-		// 	// 	s_mbr.low[0],s_mbr.low[1]);
-            
-        //     // printf("s_step_x = %lf, s_step_y = %lf, s_dimx = %d, s_dimy = %d\n", s_step_x, s_step_y, s_dimx, s_dimy);
-
-        //     source_pixel_box = gpu_get_pixel_box(
-        //         gpu_get_x(source_pixel_id, (layer_info + source.layer_start)[s_cur_level - 1].dimx),
-        //         gpu_get_y(source_pixel_id, (layer_info + source.layer_start)[s_cur_level - 1].dimx, (layer_info + source.layer_start)[s_cur_level - 1].dimy),
-        //         (layer_info + source.layer_start)[s_cur_level - 1].mbr.low[0], (layer_info + source.layer_start)[s_cur_level - 1].mbr.low[1],
-        //         (layer_info + source.layer_start)[s_cur_level - 1].step_x, (layer_info + source.layer_start)[s_cur_level - 1].step_y);
-        //     source_pixel_box.low[0] += 0.000001;
-        //     source_pixel_box.low[1] += 0.000001;
-        //     source_pixel_box.high[0] -= 0.000001;
-        //     source_pixel_box.high[1] -= 0.000001;
-
-        //     // printf("LINESTRING((%f %f, %f %f, %f %f, %f %f, %f %f))\n", source_pixel_box.low[0],source_pixel_box.low[1],
-		// 	// 	source_pixel_box.high[0],source_pixel_box.low[1],
-		// 	// 	source_pixel_box.high[0],source_pixel_box.high[1],
-		// 	// 	source_pixel_box.low[0],source_pixel_box.high[1],
-		// 	// 	source_pixel_box.low[0],source_pixel_box.low[1]);
-
-        //     source_start_x = gpu_get_offset_x(s_mbr.low[0], source_pixel_box.low[0], s_step_x, s_dimx);
-        //     source_start_y = gpu_get_offset_y(s_mbr.low[1], source_pixel_box.low[1], s_step_y, s_dimy);
-        //     source_end_x = gpu_get_offset_x(s_mbr.low[0], source_pixel_box.high[0], s_step_x, s_dimx);
-        //     source_end_y = gpu_get_offset_y(s_mbr.low[1], source_pixel_box.high[1], s_step_y, s_dimy);
-        // }else{
-        //     source_offset = (layer_offset + source.layer_start)[s_cur_level];
-        //     s_mbr = (layer_info + source.layer_start)[s_cur_level].mbr;
-        //     s_step_x = (layer_info + source.layer_start)[s_cur_level].step_x, s_step_y = (layer_info + source.layer_start)[s_cur_level].step_y;
-        //     s_dimx = (layer_info + source.layer_start)[s_cur_level].dimx, s_dimy = (layer_info + source.layer_start)[s_cur_level].dimy;
-
-        //     source_start_x = gpu_get_x(source_pixel_id, s_dimx);
-        //     source_start_y = gpu_get_y(source_pixel_id, s_dimx, s_dimy);
-        //     source_end_x = gpu_get_x(source_pixel_id, s_dimx);
-        //     source_end_y = gpu_get_y(source_pixel_id, s_dimx, s_dimy);
-        // }
-
-        // if(t_cur_level < t_level){
-        //     d_flag = true;
-        //     t_cur_level ++;
-
-        //     target_offset = (layer_offset + target.layer_start)[t_cur_level];
-        //     t_mbr = (layer_info + target.layer_start)[t_cur_level].mbr;
-        //     t_step_x = (layer_info + target.layer_start)[t_cur_level].step_x, t_step_y = (layer_info + target.layer_start)[t_cur_level].step_y;
-        //     t_dimx = (layer_info + target.layer_start)[t_cur_level].dimx, t_dimy = (layer_info + target.layer_start)[t_cur_level].dimy;
-
-        //     // printf("LINESTRING((%f %f, %f %f, %f %f, %f %f, %f %f))\n", t_mbr.low[0],t_mbr.low[1],
-		// 	// 	t_mbr.high[0],t_mbr.low[1],
-		// 	// 	t_mbr.high[0],t_mbr.high[1],
-		// 	// 	t_mbr.low[0],t_mbr.high[1],
-		// 	// 	t_mbr.low[0],t_mbr.low[1]);
-            
-        //     // printf("t_step_x = %lf, t_step_y = %lf, t_dimx = %d, t_dimy = %d\n", t_step_x, t_step_y, t_dimx, t_dimy);
-
-        //     target_pixel_box = gpu_get_pixel_box(
-        //         gpu_get_x(target_pixel_id, (layer_info + target.layer_start)[t_cur_level - 1].dimx),
-        //         gpu_get_y(target_pixel_id, (layer_info + target.layer_start)[t_cur_level - 1].dimx, (layer_info + target.layer_start)[t_cur_level - 1].dimy),
-        //         (layer_info + target.layer_start)[t_cur_level - 1].mbr.low[0], (layer_info + target.layer_start)[t_cur_level - 1].mbr.low[1],
-        //         (layer_info + target.layer_start)[t_cur_level - 1].step_x, (layer_info + target.layer_start)[t_cur_level - 1].step_y);
-        //     target_pixel_box.low[0] += 0.000001;
-        //     target_pixel_box.low[1] += 0.000001;
-        //     target_pixel_box.high[0] -= 0.000001;
-        //     target_pixel_box.high[1] -= 0.000001;
-
-        //     target_start_x = gpu_get_offset_x(t_mbr.low[0], target_pixel_box.low[0], t_step_x, t_dimx);
-        //     target_start_y = gpu_get_offset_y(t_mbr.low[1], target_pixel_box.low[1], t_step_y, t_dimy);
-        //     target_end_x = gpu_get_offset_x(t_mbr.low[0], target_pixel_box.high[0], t_step_x, t_dimx);
-        //     target_end_y = gpu_get_offset_y(t_mbr.low[1], target_pixel_box.high[1], t_step_y, t_dimy);
-        // }else{
-        //     target_offset = (layer_offset + target.layer_start)[t_cur_level];
-        //     t_mbr = (layer_info + target.layer_start)[t_cur_level].mbr;
-        //     t_step_x = (layer_info + target.layer_start)[t_cur_level].step_x, t_step_y = (layer_info + target.layer_start)[t_cur_level].step_y;
-        //     t_dimx = (layer_info + target.layer_start)[t_cur_level].dimx, t_dimy = (layer_info + target.layer_start)[t_cur_level].dimy;
-
-        //     target_start_x = gpu_get_x(target_pixel_id, t_dimx);
-        //     target_start_y = gpu_get_y(target_pixel_id, t_dimx, t_dimy);
-        //     target_end_x = gpu_get_x(target_pixel_id, t_dimx);
-        //     target_end_y = gpu_get_y(target_pixel_id, t_dimx, t_dimy);
-        // }
+        const pair<uint32_t, uint32_t> pair = pairs[pair_id];
+        const FarmOffset source = farm_offset[pair.first];
+        const FarmOffset target = farm_offset[pair.second];
+        uint s_level = farm_offset[pair.first + 1].layer_start - source.layer_start - 1;
+        uint t_level = farm_offset[pair.second + 1].layer_start - target.layer_start - 1;
 
         int source_start_x, source_start_y, source_end_x, source_end_y, target_start_x, target_start_y, target_end_x, target_end_y;
         uint32_t source_offset, target_offset;
-        box s_mbr, t_mbr;
-        double s_step = (layer_info + source.layer_start)[s_cur_level].step_x, t_step = (layer_info + target.layer_start)[t_cur_level].step_x;
-        double s_step_x, s_step_y, t_step_x, t_step_y;
+        float s_origin_x, s_origin_y, t_origin_x, t_origin_y;
+        float s_step_x, s_step_y, t_step_x, t_step_y;
         int s_dimx, s_dimy, t_dimx, t_dimy;
-        box source_pixel_box, target_pixel_box;
 
-        if(s_cur_level < s_level && (s_step >= t_step || t_cur_level >= t_level)){
-            d_flag = true;
+        const bool expand_source = current.mode == ExpansionMode::SourceOnly ||
+            current.mode == ExpansionMode::Both;
+        const bool expand_target = current.mode == ExpansionMode::TargetOnly ||
+            current.mode == ExpansionMode::Both;
+
+        if(expand_source){
+            int source_parent_dimx = (layer_info + source.layer_start)[s_cur_level].dimx;
+            int source_parent_y = source_pixel_id / source_parent_dimx;
+            int source_parent_x = source_pixel_id - source_parent_y * source_parent_dimx;
             s_cur_level ++;
 
             source_offset = (layer_offset + source.layer_start)[s_cur_level];
-            s_mbr = (layer_info + source.layer_start)[s_cur_level].mbr;
-            s_step_x = (layer_info + source.layer_start)[s_cur_level].step_x, s_step_y = (layer_info + source.layer_start)[s_cur_level].step_y;
+            const RasterInfo &source_info = (layer_info + source.layer_start)[s_cur_level];
+            s_origin_x = static_cast<float>(source_info.mbr.low[0]);
+            s_origin_y = static_cast<float>(source_info.mbr.low[1]);
+            s_step_x = static_cast<float>(source_info.step_x);
+            s_step_y = static_cast<float>(source_info.step_y);
             s_dimx = (layer_info + source.layer_start)[s_cur_level].dimx, s_dimy = (layer_info + source.layer_start)[s_cur_level].dimy;
 
-            source_pixel_box = gpu_get_pixel_box(
-                gpu_get_x(source_pixel_id, (layer_info + source.layer_start)[s_cur_level - 1].dimx),
-                gpu_get_y(source_pixel_id, (layer_info + source.layer_start)[s_cur_level - 1].dimx, (layer_info + source.layer_start)[s_cur_level - 1].dimy),
-                (layer_info + source.layer_start)[s_cur_level - 1].mbr.low[0], (layer_info + source.layer_start)[s_cur_level - 1].mbr.low[1],
-                (layer_info + source.layer_start)[s_cur_level - 1].step_x, (layer_info + source.layer_start)[s_cur_level - 1].step_y);
-            source_pixel_box.low[0] += 1e-6;
-            source_pixel_box.low[1] += 1e-6;
-            source_pixel_box.high[0] -= 1e-6;
-            source_pixel_box.high[1] -= 1e-6;
-
-            source_start_x = gpu_get_offset_x(s_mbr.low[0], source_pixel_box.low[0], s_step_x, s_dimx);
-            source_start_y = gpu_get_offset_y(s_mbr.low[1], source_pixel_box.low[1], s_step_y, s_dimy);
-            source_end_x = gpu_get_offset_x(s_mbr.low[0], source_pixel_box.high[0], s_step_x, s_dimx);
-            source_end_y = gpu_get_offset_y(s_mbr.low[1], source_pixel_box.high[1], s_step_y, s_dimy);
+            source_start_x = source_parent_x * 2;
+            source_start_y = source_parent_y * 2;
+            source_end_x = min(source_start_x + 1, s_dimx - 1);
+            source_end_y = min(source_start_y + 1, s_dimy - 1);
         }else{
             source_offset = (layer_offset + source.layer_start)[s_cur_level];
-            s_mbr = (layer_info + source.layer_start)[s_cur_level].mbr;
-            s_step_x = (layer_info + source.layer_start)[s_cur_level].step_x, s_step_y = (layer_info + source.layer_start)[s_cur_level].step_y;
+            const RasterInfo &source_info = (layer_info + source.layer_start)[s_cur_level];
+            s_origin_x = static_cast<float>(source_info.mbr.low[0]);
+            s_origin_y = static_cast<float>(source_info.mbr.low[1]);
+            s_step_x = static_cast<float>(source_info.step_x);
+            s_step_y = static_cast<float>(source_info.step_y);
             s_dimx = (layer_info + source.layer_start)[s_cur_level].dimx, s_dimy = (layer_info + source.layer_start)[s_cur_level].dimy;
 
-            source_start_x = gpu_get_x(source_pixel_id, s_dimx);
-            source_start_y = gpu_get_y(source_pixel_id, s_dimx, s_dimy);
-            source_end_x = gpu_get_x(source_pixel_id, s_dimx);
-            source_end_y = gpu_get_y(source_pixel_id, s_dimx, s_dimy);
+            source_start_y = source_pixel_id / s_dimx;
+            source_start_x = source_pixel_id - source_start_y * s_dimx;
+            source_end_x = source_start_x;
+            source_end_y = source_start_y;
         }
 
-        if(t_cur_level < t_level && (s_step <= t_step || s_cur_level >= s_level)){
-            d_flag = true;
+        if(expand_target){
+            int target_parent_dimx = (layer_info + target.layer_start)[t_cur_level].dimx;
+            int target_parent_y = target_pixel_id / target_parent_dimx;
+            int target_parent_x = target_pixel_id - target_parent_y * target_parent_dimx;
             t_cur_level ++;
 
             target_offset = (layer_offset + target.layer_start)[t_cur_level];
-            t_mbr = (layer_info + target.layer_start)[t_cur_level].mbr;
-            t_step_x = (layer_info + target.layer_start)[t_cur_level].step_x, t_step_y = (layer_info + target.layer_start)[t_cur_level].step_y;
+            const RasterInfo &target_info = (layer_info + target.layer_start)[t_cur_level];
+            t_origin_x = static_cast<float>(target_info.mbr.low[0]);
+            t_origin_y = static_cast<float>(target_info.mbr.low[1]);
+            t_step_x = static_cast<float>(target_info.step_x);
+            t_step_y = static_cast<float>(target_info.step_y);
             t_dimx = (layer_info + target.layer_start)[t_cur_level].dimx, t_dimy = (layer_info + target.layer_start)[t_cur_level].dimy;
 
-            target_pixel_box = gpu_get_pixel_box(
-                gpu_get_x(target_pixel_id, (layer_info + target.layer_start)[t_cur_level - 1].dimx),
-                gpu_get_y(target_pixel_id, (layer_info + target.layer_start)[t_cur_level - 1].dimx, (layer_info + target.layer_start)[t_cur_level - 1].dimy),
-                (layer_info + target.layer_start)[t_cur_level - 1].mbr.low[0], (layer_info + target.layer_start)[t_cur_level - 1].mbr.low[1],
-                (layer_info + target.layer_start)[t_cur_level - 1].step_x, (layer_info + target.layer_start)[t_cur_level - 1].step_y);
-            target_pixel_box.low[0] += 1e-6;
-            target_pixel_box.low[1] += 1e-6;
-            target_pixel_box.high[0] -= 1e-6;
-            target_pixel_box.high[1] -= 1e-6;
-
-            target_start_x = gpu_get_offset_x(t_mbr.low[0], target_pixel_box.low[0], t_step_x, t_dimx);
-            target_start_y = gpu_get_offset_y(t_mbr.low[1], target_pixel_box.low[1], t_step_y, t_dimy);
-            target_end_x = gpu_get_offset_x(t_mbr.low[0], target_pixel_box.high[0], t_step_x, t_dimx);
-            target_end_y = gpu_get_offset_y(t_mbr.low[1], target_pixel_box.high[1], t_step_y, t_dimy);
+            target_start_x = target_parent_x * 2;
+            target_start_y = target_parent_y * 2;
+            target_end_x = min(target_start_x + 1, t_dimx - 1);
+            target_end_y = min(target_start_y + 1, t_dimy - 1);
         }else{
             target_offset = (layer_offset + target.layer_start)[t_cur_level];
-            t_mbr = (layer_info + target.layer_start)[t_cur_level].mbr;
-            t_step_x = (layer_info + target.layer_start)[t_cur_level].step_x, t_step_y = (layer_info + target.layer_start)[t_cur_level].step_y;
+            const RasterInfo &target_info = (layer_info + target.layer_start)[t_cur_level];
+            t_origin_x = static_cast<float>(target_info.mbr.low[0]);
+            t_origin_y = static_cast<float>(target_info.mbr.low[1]);
+            t_step_x = static_cast<float>(target_info.step_x);
+            t_step_y = static_cast<float>(target_info.step_y);
             t_dimx = (layer_info + target.layer_start)[t_cur_level].dimx, t_dimy = (layer_info + target.layer_start)[t_cur_level].dimy;
 
-            target_start_x = gpu_get_x(target_pixel_id, t_dimx);
-            target_start_y = gpu_get_y(target_pixel_id, t_dimx, t_dimy);
-            target_end_x = gpu_get_x(target_pixel_id, t_dimx);
-            target_end_y = gpu_get_y(target_pixel_id, t_dimx, t_dimy);
+            target_start_y = target_pixel_id / t_dimx;
+            target_start_x = target_pixel_id - target_start_y * t_dimx;
+            target_end_x = target_start_x;
+            target_end_y = target_start_y;
         }
-        
+
+        const float inv_latitude = 1.0f / *degree_per_kilometer_latitude;
+        const float within_distance_sq = within_distance * within_distance;
+        const ExpansionMode next_mode = get_expansion_mode(
+            layer_info, source, target, s_cur_level, t_cur_level, s_level, t_level);
+        const bool final_level = next_mode == ExpansionMode::Fixed;
+        float min_surviving_max_distance = FLT_MAX;
         for (int x1 = source_start_x; x1 <= source_end_x; x1++)
         {
             for (int y1 = source_start_y; y1 <= source_end_y; y1++)
             {
                 int id1 = gpu_get_id(x1, y1, s_dimx);
-                auto box1 = gpu_get_pixel_box(x1, y1, s_mbr.low[0], s_mbr.low[1], s_step_x, s_step_y);
+                if(gpu_show_status(status, source.status_start, id1, bitwidth, source_offset) != BORDER) continue;
+
+                const FloatBox box1 = make_float_pixel_box(x1, y1, s_origin_x, s_origin_y, s_step_x, s_step_y);
+                const float longitude_factor = gpu_degree_per_kilometer_longitude(
+                    box1.low_y, degree_per_kilometer_longitude_arr);
+                const float inv_longitude = 1.0f / longitude_factor;
                 for (int x2 = target_start_x; x2 <= target_end_x; x2++)
                 {
                     for (int y2 = target_start_y; y2 <= target_end_y; y2++)
                     {
                         int id2 = gpu_get_id(x2, y2, t_dimx);
-                        if (gpu_show_status(status, source.status_start, id1, category_count, source_offset) == BORDER && gpu_show_status(status, target.status_start, id2, category_count, target_offset) == BORDER)
+                        if (gpu_show_status(status, target.status_start, id2, bitwidth, target_offset) == BORDER)
                         {  
-                            auto box2 = gpu_get_pixel_box(x2, y2, t_mbr.low[0], t_mbr.low[1], t_step_x, t_step_y);
-                            float min_distance = gpu_distance(box1, box2, degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
-                            float max_distance = gpu_max_distance(box1, box2, degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
-                            if(max_distance <= WITHIN_DISTANCE){
+                            const FloatBox box2 = make_float_pixel_box(x2, y2,
+                                t_origin_x, t_origin_y, t_step_x, t_step_y);
+                            const float min_distance_sq = float_box_min_distance_sq(
+                                box1, box2, inv_latitude, inv_longitude);
+                            if(min_distance_sq > within_distance_sq) continue;
+
+                            const float max_distance_sq = float_box_max_distance_sq(
+                                box1, box2, inv_latitude, inv_longitude);
+                            if(max_distance_sq <= within_distance_sq){
                                 atomicMinFloat(max_box_dist + pair_id, -1.0f);
                                 return;
                             }
-                            if(min_distance > WITHIN_DISTANCE) continue;
-            
-                            uint idx = atomicAdd(buffer_size, 1);
-                            buffer[idx] = {id1, id2, pair_id, min_distance, max_distance, s_cur_level, t_cur_level};
-                            atomicMinFloat(max_box_dist + pair_id, max_distance);
+
+                            const float max_distance = sqrtf(max_distance_sq);
+                            if(final_level){
+                                append_final_candidate(final_buffer, final_size, active_size,
+                                    active_shares_final, input_shared_active_size, overflow_flag,
+                                    {id1, id2, pair_id, sqrtf(min_distance_sq), max_distance});
+                            }else{
+                                append_active_candidate(active_buffer, active_size, final_size,
+                                    active_shares_final, overflow_flag,
+                                    {id1, id2, pair_id, s_cur_level, t_cur_level, next_mode, 0});
+                            }
+                            min_surviving_max_distance = fminf(min_surviving_max_distance, max_distance);
                         }
                     }
                 }
             }
         }
-    }
-}
-
-// filter candidate pixel pairs
-__global__ void iterative_filtering_step2(BoxDistRange *bufferinput, float *max_box_dist, uint *size, BoxDistRange *bufferoutput, uint *bufferoutput_size)
-{
-    const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
-    if (bufferId < *size)
-    {
-        float left = bufferinput[bufferId].minDist;
-        int pairId = bufferinput[bufferId].pairId;
-        if (left < max_box_dist[pairId])
-        {
-            int idx = atomicAdd(bufferoutput_size, 1);
-            bufferoutput[idx] = bufferinput[bufferId];
+        if(min_surviving_max_distance < FLT_MAX){
+            atomicMinFloat(max_box_dist + pair_id, min_surviving_max_distance);
         }
     }
 }
 
-__global__ void calculate_apxDist(BoxDistRange *bufferinput, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, RasterInfo *info, uint8_t *status, uint *size, PixelDist *bufferoutput, uint *bufferoutput_size, uint8_t category_count){
+__global__ void calculate_apxDist(const BoxDistRange *__restrict__ bufferinput,
+    const pair<uint32_t, uint32_t> *__restrict__ pairs,
+    const FarmOffset *__restrict__ farm_offset,
+    const RasterInfo *__restrict__ info,
+    const uint8_t *__restrict__ status,
+    uint size,
+    PixelDist *__restrict__ bufferoutput,
+    uint8_t bitwidth){
     const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
-    if (bufferId < *size)
+    if (bufferId < size)
     {
         int pa = bufferinput[bufferId].sourcePixelId;
         int pb = bufferinput[bufferId].targetPixelId;
@@ -340,84 +459,111 @@ __global__ void calculate_apxDist(BoxDistRange *bufferinput, pair<uint32_t, uint
         pair<uint32_t, uint32_t> pair = pairs[pair_id];
         uint32_t src_idx = pair.first;
         uint32_t tar_idx = pair.second;
-        IdealOffset source = idealoffset[src_idx];
-        IdealOffset target = idealoffset[tar_idx];
+        FarmOffset source = farm_offset[src_idx];
+        FarmOffset target = farm_offset[tar_idx];
 
-        uint8_t pa_fullness = (status + source.status_start)[pa], pb_fullness = (status + target.status_start)[pb];
+        uint8_t pa_fullness = gpu_get_fullness(
+            status, source.status_start, pa, bitwidth);
+        uint8_t pb_fullness = gpu_get_fullness(
+            status, target.status_start, pb, bitwidth);
         double pa_pixelArea = info[src_idx].step_x * info[src_idx].step_y;
         double pb_pixelArea = info[tar_idx].step_x * info[tar_idx].step_y;
-        double pa_low = gpu_decode_fullness(pa_fullness, pa_pixelArea, category_count, true);
-        double pa_high = gpu_decode_fullness(pa_fullness, pa_pixelArea, category_count, false);
-        double pa_apx = (pa_low + pa_high) / 2;
-        double pb_low = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, true);
-        double pb_high = gpu_decode_fullness(pb_fullness, pb_pixelArea, category_count, false);
-        double pb_apx = (pb_low + pb_high) / 2;
-        uint8_t pf = gpu_encode_fullness(pa_apx, pa_pixelArea, pb_apx, pb_pixelArea, category_count);
-        auto u0 = 0.5;
-        float mean = (1.0 - pf / category_count) * u0;
+        uint8_t pf = calculate_combined_fullness(
+            pa_fullness, pa_pixelArea, pb_fullness, pb_pixelArea, bitwidth);
+        const WithinApproximation approximation = calculate_within_approximation(
+            pf, bitwidth, bufferinput[bufferId].minDist, bufferinput[bufferId].maxDist);
 
-        int idx = atomicAdd(bufferoutput_size, 1U);
-        bufferoutput[idx] = {pa, pb, pf, pair_id, bufferinput[bufferId].minDist + mean * (bufferinput[bufferId].maxDist - bufferinput[bufferId].minDist), bufferinput[bufferId].minDist, bufferinput[bufferId].maxDist};
+        bufferoutput[bufferId] = {pa, pb, pf, pair_id, approximation.approximate_distance,
+            bufferinput[bufferId].minDist, bufferinput[bufferId].maxDist};
     }
 }
 
-__global__ void calculate_result_a(PixelDist *pixpairs, uint size, bool *res){
+__device__ __forceinline__ float calculate_within_probability(
+    float apx_distance, float min_distance, float max_distance,
+    float distance_threshold)
+{
+    if(distance_threshold < min_distance) return 0.0f;
+    if(distance_threshold >= max_distance) return 1.0f;
+
+    float span = max_distance - min_distance;
+    if(span <= 0.0f) return distance_threshold >= min_distance ? 1.0f : 0.0f;
+
+    float ratio = (distance_threshold - min_distance) / span;
+    float mean = (apx_distance - min_distance) / span;
+    ratio = fminf(1.0f, fmaxf(0.0f, ratio));
+    mean = fminf(1.0f, fmaxf(0.0f, mean));
+
+    float stddev = 0.3f * mean;
+    if(stddev <= 0.0f) return ratio >= mean ? 1.0f : 0.0f;
+
+    float probability = 0.5f * (1.0f + erff((ratio - mean) / (stddev * sqrtf(2.0f))));
+    return fminf(1.0f, fmaxf(0.0f, probability));
+}
+
+__global__ void kernel_accumulate_approximate_within(
+    const BoxDistRange *__restrict__ candidates,
+    const pair<uint32_t, uint32_t> *__restrict__ pairs,
+    const FarmOffset *__restrict__ farm_offset,
+    const RasterInfo *__restrict__ info,
+    const uint8_t *__restrict__ status,
+    uint size,
+    uint8_t bitwidth, float within_distance, bool *res,
+    float *scores, uint *candidate_counts)
+{
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    if (x < size)
-    {
-        int pairId = pixpairs[x].pairId;
-        if(res[pairId]) return;
-        float apxDist = (pixpairs[x].apxDist);
-        if(apxDist <= WITHIN_DISTANCE){
-            res[pairId] = true;
-        }
+    if(x >= size) return;
+
+    const BoxDistRange candidate = candidates[x];
+    const int pair_id = candidate.pairId;
+    if(res[pair_id]) return;
+
+    const pair<uint32_t, uint32_t> pair = pairs[pair_id];
+    const FarmOffset source = farm_offset[pair.first];
+    const FarmOffset target = farm_offset[pair.second];
+    const uint8_t source_fullness = gpu_get_fullness(
+        status, source.status_start, candidate.sourcePixelId, bitwidth);
+    const uint8_t target_fullness = gpu_get_fullness(
+        status, target.status_start, candidate.targetPixelId, bitwidth);
+    const double source_pixel_area = info[pair.first].step_x * info[pair.first].step_y;
+    const double target_pixel_area = info[pair.second].step_x * info[pair.second].step_y;
+    const uint8_t pf = calculate_combined_fullness(
+        source_fullness, source_pixel_area,
+        target_fullness, target_pixel_area, bitwidth);
+    const WithinApproximation approximation = calculate_within_approximation(
+        pf, bitwidth, candidate.minDist, candidate.maxDist);
+    const float probability = calculate_within_probability(
+        approximation.approximate_distance, candidate.minDist, candidate.maxDist, within_distance);
+
+    if(probability >= 1.0f){
+        res[pair_id] = true;
+        return;
+    }
+
+    atomicAdd(candidate_counts + pair_id, 1U);
+    if(probability > 0.0f){
+        atomicAdd(scores + pair_id, -log1pf(-probability));
     }
 }
 
-__global__ void statistic_result_a(bool *res, uint size, uint *result){
+__global__ void kernel_finalize_approximate_within(
+    const float *scores, const uint *candidate_counts, uint size,
+    bool *res, float required_score)
+{
+    const uint pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+    if(pair_id >= size || res[pair_id] || candidate_counts[pair_id] == 0) return;
+
+    if(scores[pair_id] >= required_score){
+        res[pair_id] = true;
+    }
+}
+
+__global__ void statistic_result_a(bool *res, float *max_box_dist, uint size, uint *result, float within_distance){
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    if (x < size && res[x])
+    if (x < size && (res[x] || max_box_dist[x] <= within_distance))
     {
         atomicAdd(result, 1);
     }
 }
-
-__global__ void statistic_size(BoxDistRange *pixpairs, uint size, uint *pixelpairidx){
-    const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
-    if (bufferId < size)
-    {
-        int pairId = pixpairs[bufferId].pairId;
-        atomicAdd(pixelpairidx + pairId, 1);
-    }
-}
-
-__global__ void mark_nonzeros(uint *input, uint *flags, uint size) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid < size) {
-        flags[tid] = (input[tid] != 0) ? 1 : 0;
-    }
-}
-
-__global__ void compact_array(uint *input, uint *prefix_sum, uint *output, uint size) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid < size && input[tid]) {
-        int pos = prefix_sum[tid]; // The prefix and the target location are given
-        output[pos] = input[tid];  // Write non-zero elements to a compact array
-    }
-}
-
-struct CompareKeyValuePairs {
-    __host__ __device__
-    bool operator()(const PixelDist& a, const PixelDist& b) const {
-        if (a.pairId != b.pairId) {
-            return a.pairId < b.pairId; 
-        }else if(a.apxDist != b.apxDist){
-            return a.apxDist < b.apxDist; 
-        }else{
-            return a.minDist < b.minDist;
-        }
-    }
-};
 
 __global__ void preprocess_suffixmin(PixelDist *pixpairs, int *pixelpairidx, uint pairsize, float *suffix_min)
 {
@@ -436,97 +582,9 @@ __global__ void preprocess_suffixmin(PixelDist *pixpairs, int *pixelpairidx, uin
     }
 }
 
-// __global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelpairsize, float *suffix_min, uint pairsize, PixPair* buffer, uint *buffer_size, float *max_box_dist, float threshold)
-// {
-//     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
-//     if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0)
-//     {
-//         int start = pixelpairidx[tid];
-//         int end = pixelpairsize[tid + 1];
-//         int pairId = pixpairs[start].pairId;
-
-//         float prob = 1.0;
-//         float d = suffix_min[start];
-
-//         if(max_box_dist[pairId] < 0 || max_box_dist[pairId] <= d){
-//             pixelpairidx[tid] = end;
-//             return;
-//         }
-
-//         for(int i = start; i < end; i ++){
-//             int idx = atomicAdd(buffer_size, 1);
-//             buffer[idx] = {pixpairs[i].sourcePixelId, pixpairs[i].targetPixelId, pixpairs[i].pairId};
-//             uint8_t pf = pixpairs[i].pf;
-
-//             d = i < end - 1 ? suffix_min[i + 1] : suffix_min[i];
-
-//             float minDist = pixpairs[i].minDist;
-//             float maxDist = pixpairs[i].maxDist;
-//             float ratio = (d - minDist) / (maxDist - minDist);
-//             assert(ratio < 1);
-//             auto u0 = 0.5;
-//             float mean = (1.0 - pf / 20.0) * u0;
-//             float stddev = 0.3 * mean;
-//             prob = prob * (1 - (1 + erf((ratio - mean) / (stddev * sqrt(2)))) / 2);
-//             // printf("%lf, %d\n", prob, pairId);
-
-//             if(1 - prob >= threshold) {
-//                 pixelpairidx[tid] = i + 1;
-//                 return;
-//             } 
-//         }
-
-//         pixelpairidx[tid] = end;
-//     }
-// }
-
-// __global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelpairsize, float *suffix_min, uint pairsize, PixPair* buffer, uint *buffer_size, float *max_box_dist, float *mean, float *stddev, float threshold, int *times)
-// {
-//     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
-//     if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0)
-//     {
-//         int start = pixelpairidx[tid];
-//         int end = pixelpairsize[tid + 1];
-//         int pairId = pixpairs[start].pairId;
-
-//         float prob = 1.0;
-//         float d = suffix_min[start];
-//         uint tsize = 1;
-
-//         if(max_box_dist[pairId] < 0 || max_box_dist[pairId] <= d){
-//             pixelpairidx[tid] = end;
-//             return;
-//         }
-
-//         for(int i = start; i < end; ){
-//             int idx = atomicAdd(buffer_size, tsize);
-//             for(int j = 0; j < tsize; j ++){
-//                 assert(i + j < end);
-//                 buffer[idx + j] = {pixpairs[i + j].sourcePixelId, pixpairs[i + j].targetPixelId, pixpairs[i + j].pairId};
-//             }
-//             uint8_t pf = pixpairs[i].pf;
-//             prob = 1.0;
-//             d = i < end - 1 ? suffix_min[i + 1] : suffix_min[i];
-//             for(int j = start; j <= i; j ++){
-//                 float minDist = pixpairs[j].minDist;
-//                 float maxDist = pixpairs[j].maxDist;
-//                 float ratio = (d - minDist) / (maxDist - minDist);
-//                 assert(ratio < 1);
-//                 prob = prob * (1 - (1 + erf((ratio - mean[pf]) / (stddev[pf] * sqrt(2)))) / 2);
-//             }
-//             // printf("%lf, %d\n", 1 - prob, pairId);
-//             if(1 - prob >= threshold) {
-//                 pixelpairidx[tid] = i + 1;
-//                 return;
-//             } 
-//             i += tsize;
-//             tsize = min((uint)(ceil(threshold - (1 - prob)) / ((1 - prob) / (i - start))), end - i);
-//         }
-//         pixelpairidx[tid] = end;
-//     }
-// }
-
-__global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelpairsize, float *suffix_min, uint pairsize, PixPair* buffer, uint *buffer_size, float *max_box_dist, float threshold, int category_count)
+__global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx,
+    int *pixelpairsize, float *suffix_min, uint pairsize, PixPair* buffer,
+    uint *buffer_size, float *max_box_dist, float threshold)
 {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < pairsize && pixelpairsize[tid + 1] - pixelpairidx[tid] > 0)
@@ -562,18 +620,13 @@ __global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelp
             float d_r = (end_idx < end) ? suffix_min[end_idx] : numeric_limits<float>::infinity();
 
             for(int j = i; j < end_idx; j ++){
-                float minDist = pixpairs[j].minDist;
-                float maxDist = pixpairs[j].maxDist;
-                float ratio = (d_r - minDist) / (maxDist - minDist);
-                if(ratio >= 1){
+                const float probability = calculate_within_probability(
+                    pixpairs[j].apxDist, pixpairs[j].minDist, pixpairs[j].maxDist, d_r);
+                if(probability >= 1.0f){
                     pixelpairidx[tid] = end_idx;
                     return;
                 }
-                auto pf = pixpairs[j].pf;
-                auto u0 = 0.5;
-                float mean = (1.0 - pf / category_count) * u0;
-                float stddev = 0.3 * mean;
-                prob = prob * (1 - (1 + erf((ratio - mean) / (stddev * sqrt(2)))) / 2);
+                prob *= 1.0f - probability;
             }
 
             if(1 - prob >= threshold) {
@@ -587,18 +640,18 @@ __global__ void kernel_merge(PixelDist *pixpairs, int *pixelpairidx, int *pixelp
     }
 }
 
-__global__ void kernel_unroll_within_polygon(PixPair *pixpairs, pair<uint32_t, uint32_t> *pairs, IdealOffset *idealoffset, uint32_t *es_offset, EdgeSeq *edge_sequences, uint* size, Task *tasks, uint *task_size, int unroll_size)
+__global__ void kernel_unroll_within_polygon(PixPair *pixpairs, pair<uint32_t, uint32_t> *pairs, FarmOffset *farm_offset, uint32_t *es_offset, EdgeSeq *edge_sequences, uint* size, Task *tasks, uint *task_size, uint unroll_size)
 {
     const int bufferId = blockIdx.x * blockDim.x + threadIdx.x;
     if (bufferId < *size)
     {
-        int p = pixpairs[bufferId].source_pixid;
-        int p2 = pixpairs[bufferId].target_pixid;
+        int p = pixpairs[bufferId].pixid_a;
+        int p2 = pixpairs[bufferId].pixid_b;
         int pairId = pixpairs[bufferId].pair_id;
 
         pair<uint32_t, uint32_t> &pair = pairs[pairId];
-        IdealOffset &source = idealoffset[pair.first];
-        IdealOffset &target = idealoffset[pair.second];
+        FarmOffset &source = farm_offset[pair.first];
+        FarmOffset &target = farm_offset[pair.second];
 
         int s_num_sequence = (es_offset + source.offset_start)[p + 1] - (es_offset + source.offset_start)[p];
         int t_num_sequence = (es_offset + target.offset_start)[p2 + 1] - (es_offset + target.offset_start)[p2];
@@ -606,18 +659,28 @@ __global__ void kernel_unroll_within_polygon(PixPair *pixpairs, pair<uint32_t, u
         for (int i = 0; i < s_num_sequence; ++ i)
         {
             EdgeSeq r = (edge_sequences + source.edge_sequences_start)[(es_offset + source.offset_start)[p] + i];
+            if(r.length == 0) continue;
+            uint source_segments = r.length;
+            uint source_chunks = (source_segments + unroll_size - 1) / unroll_size;
             for (int j = 0; j < t_num_sequence; ++j)
             {
                 EdgeSeq r2 = (edge_sequences + target.edge_sequences_start)[(es_offset + target.offset_start)[p2] + j];
-                int max_size = unroll_size;
-                for (uint s = 0; s < r.length; s += max_size)
+                if(r2.length == 0) continue;
+                uint target_segments = r2.length;
+                uint target_chunks = (target_segments + unroll_size - 1) / unroll_size;
+                uint task_base = atomicAdd(task_size, source_chunks * target_chunks);
+                uint source_chunk = 0;
+                for (uint s = 0; s < source_segments; s += unroll_size, source_chunk ++)
                 {
-                    uint end_s = min(s + max_size, r.length);
-                    for (uint t = 0; t < r2.length; t += max_size)
+                    uint source_segment_count = min(unroll_size, source_segments - s);
+                    uint target_chunk = 0;
+                    for (uint t = 0; t < target_segments; t += unroll_size, target_chunk ++)
                     {
-                        uint end_t = min(t + max_size, r2.length);
-                        int idx = atomicAdd(task_size, 1U);
-                        tasks[idx] = {source.vertices_start + r.start + s, target.vertices_start + r2.start + t, end_s - s, end_t - t, pairId};
+                        uint target_segment_count = min(unroll_size, target_segments - t);
+                        uint task_id = task_base + source_chunk * target_chunks + target_chunk;
+                        tasks[task_id] = {source.vertices_start + r.start + s,
+                            target.vertices_start + r2.start + t,
+                            source_segment_count, target_segment_count, pairId};
                     }
                 }
            }
@@ -626,7 +689,7 @@ __global__ void kernel_unroll_within_polygon(PixPair *pixpairs, pair<uint32_t, u
 }
 
 
-__global__ void kernel_refine_within_polygon(Task *tasks, Point *vertices, uint *size, float *max_box_dist, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr)
+__global__ void kernel_refine_within_polygon(Task *tasks, Point *vertices, uint *size, float *max_box_dist, float *degree_per_kilometer_latitude, float *degree_per_kilometer_longitude_arr, float within_distance)
 {
     const int taskId = blockIdx.x * blockDim.x + threadIdx.x;
     if (taskId < *size)
@@ -636,9 +699,14 @@ __global__ void kernel_refine_within_polygon(Task *tasks, Point *vertices, uint 
         uint len1 = tasks[taskId].s_length;
         uint len2 = tasks[taskId].t_length;
         int pair_id = tasks[taskId].pair_id;
+        if(max_box_dist[pair_id] < 0.0f){
+            return;
+        }
 
-        float dist = gpu_segment_to_segment_within_batch(vertices + s1, vertices + s2, len1, len2, degree_per_kilometer_latitude, degree_per_kilometer_longitude_arr);
-        if(dist <= WITHIN_DISTANCE){
+        float dist = gpu_segment_to_segment_within_batch(vertices + s1, vertices + s2,
+            len1 + 1, len2 + 1, degree_per_kilometer_latitude,
+            degree_per_kilometer_longitude_arr, within_distance);
+        if(dist <= within_distance){
             atomicMinFloat(max_box_dist + pair_id, -1.0f); 
             return;
         }
@@ -647,11 +715,10 @@ __global__ void kernel_refine_within_polygon(Task *tasks, Point *vertices, uint 
     }
 }
 
-__global__ void statistic_result_polygon(float *max_box_dist, uint size, uint *result, bool *res){
+__global__ void statistic_result_polygon(float *max_box_dist, uint size, uint *result, float within_distance){
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    if (x < size && max_box_dist[x] < WITHIN_DISTANCE)
+    if (x < size && max_box_dist[x] <= within_distance)
     {
-        res[x] = true;
         atomicAdd(result, 1);
     }
 }
@@ -659,78 +726,132 @@ __global__ void statistic_result_polygon(float *max_box_dist, uint size, uint *r
 void cuda_within_polygon(query_context *gctx)
 {
     size_t batch_size = gctx->index_end - gctx->index;
-    uint h_bufferinput_size, h_bufferoutput_size;
-    CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
+	uint h_bufferinput_size = 0, h_bufferoutput_size = 0;
+	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
 	CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
+	CUDA_SAFE_CALL(cudaMemset(gctx->d_result, 0, sizeof(uint)));
 
     float *d_max_box_dist = nullptr;
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_max_box_dist, batch_size * sizeof(float)));
+    uint *d_final_size = nullptr;
+    uint *d_overflow_flag = nullptr;
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_final_size, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_overflow_flag, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(d_final_size, 0, sizeof(uint)));
+    CUDA_SAFE_CALL(cudaMemset(d_overflow_flag, 0, sizeof(uint)));
 
     const int block_size = BLOCK_SIZE;
+    const float within_distance = static_cast<float>(gctx->within_distance);
     int grid_size = (batch_size + block_size - 1) / block_size;
 
-    kernel_init_distance<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, batch_size, d_max_box_dist, (BoxDistRange *)gctx->d_BufferInput, gctx->d_bufferinput_size, gctx->category_count);
-    cudaDeviceSynchronize();
+    kernel_init_distance<<<grid_size, block_size>>>(gctx->d_candidate_pairs + gctx->index,
+        gctx->d_farm_offset, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status,
+        batch_size, d_max_box_dist, (ActiveRasterCandidate *)gctx->d_BufferInput,
+        gctx->d_bufferinput_size, d_overflow_flag,
+        static_cast<uint8_t>(gctx->bitwidth));
     check_execution("kernel_init");
 
     CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
- 
-    int round = 0;
-    bool h_flag;
-    while(true){
-        grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
-        iterative_filtering_step1<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_layer_info, gctx->d_layer_offset, gctx->d_status, d_max_box_dist, gctx->d_bufferinput_size, (BoxDistRange *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr, gctx->category_count);
-        cudaDeviceSynchronize();
-        check_execution("iterative_filtering_step1");
-
-        CUDA_SAFE_CALL(cudaMemcpy(&h_bufferinput_size, gctx->d_bufferinput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-        CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-        if(h_bufferinput_size == h_bufferoutput_size) break;
-
-        CUDA_SWAP_BUFFER();        
-        
-        cudaMemcpyFromSymbol(&h_flag, d_flag, sizeof(bool));
-        if(!h_flag) break;
-        if(h_bufferinput_size == 0) return;
-
-        grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
-        iterative_filtering_step2<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, d_max_box_dist, gctx->d_bufferinput_size, (BoxDistRange *)gctx->d_BufferOutput, gctx->d_bufferoutput_size);
-        cudaDeviceSynchronize();
-        check_execution("iterative_filtering_step2");
-
-        CUDA_SWAP_BUFFER();
-
-        if(h_bufferinput_size == 0) return;
+    uint h_overflow_flag = 0;
+    CUDA_SAFE_CALL(cudaMemcpy(&h_overflow_flag, d_overflow_flag, sizeof(uint), cudaMemcpyDeviceToHost));
+    if(h_overflow_flag){
+        fprintf(stderr, "GPU within raster active queue exceeded scratch buffer capacity\n");
+        exit(EXIT_FAILURE);
     }
 
-    CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
-    if(h_bufferoutput_size != 0) CUDA_SWAP_BUFFER();
+    ActiveRasterCandidate *active_input =
+        reinterpret_cast<ActiveRasterCandidate *>(gctx->d_BufferInput);
+    ActiveRasterCandidate *active_output =
+        reinterpret_cast<ActiveRasterCandidate *>(gctx->d_BufferOutput);
+    uint *active_input_size = gctx->d_bufferinput_size;
+    uint *active_output_size = gctx->d_bufferoutput_size;
+    char *final_buffer = reinterpret_cast<char *>(gctx->d_BufferOutput);
+    uint h_final_size = 0;
 
-    assert(h_bufferinput_size > 0);
+    while(h_bufferinput_size > 0){
+        grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        const bool active_output_shares_final =
+            reinterpret_cast<char *>(active_output) == final_buffer;
+        const bool active_input_shares_final =
+            reinterpret_cast<char *>(active_input) == final_buffer;
 
-    grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        iterative_filtering_step<<<grid_size, block_size>>>(active_input,
+            gctx->d_candidate_pairs + gctx->index, gctx->d_farm_offset, gctx->d_layer_info,
+            gctx->d_layer_offset, gctx->d_status, d_max_box_dist, h_bufferinput_size,
+            active_output, active_output_size, final_buffer, d_final_size,
+            active_output_shares_final,
+            active_input_shares_final ? h_bufferinput_size : 0,
+            d_overflow_flag,
+            gctx->d_degree_degree_per_kilometer_latitude,
+            gctx->d_degree_per_kilometer_longitude_arr,
+            static_cast<uint8_t>(gctx->bitwidth),
+            within_distance);
+        check_execution("iterative_filtering_step");
 
-    calculate_apxDist<<<grid_size, block_size>>>((BoxDistRange *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_info, gctx->d_status, gctx->d_bufferinput_size, (PixelDist *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->category_count);
-    cudaDeviceSynchronize();
-    check_execution("calculate_apxDist");
+        CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, active_output_size, sizeof(uint), cudaMemcpyDeviceToHost));
+        CUDA_SAFE_CALL(cudaMemcpy(&h_final_size, d_final_size, sizeof(uint), cudaMemcpyDeviceToHost));
+        CUDA_SAFE_CALL(cudaMemcpy(&h_overflow_flag, d_overflow_flag, sizeof(uint), cudaMemcpyDeviceToHost));
+        if(h_overflow_flag){
+            fprintf(stderr, "GPU within raster active/final queues exceeded scratch buffer capacity\n");
+            exit(EXIT_FAILURE);
+        }
 
-    CUDA_SWAP_BUFFER();
+        std::swap(active_input, active_output);
+        std::swap(active_input_size, active_output_size);
+        h_bufferinput_size = h_bufferoutput_size;
+        CUDA_SAFE_CALL(cudaMemset(active_output_size, 0, sizeof(uint)));
+    }
+
+    BoxDistRange *final_candidates = reinterpret_cast<BoxDistRange *>(
+        final_buffer + CUDA_SCRATCH_BUFFER_BYTES -
+        static_cast<size_t>(h_final_size) * sizeof(BoxDistRange));
+    h_bufferinput_size = h_final_size;
+    CUDA_SAFE_CALL(cudaFree(d_final_size));
+    CUDA_SAFE_CALL(cudaFree(d_overflow_flag));
 
     if(gctx->use_approximation){
         bool *d_res = nullptr;
         CUDA_SAFE_CALL(cudaMalloc((void **)&d_res, batch_size * sizeof(bool)));
         CUDA_SAFE_CALL(cudaMemset(d_res, 0, batch_size * sizeof(bool)));
 
-        grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        calculate_result_a<<<grid_size, block_size>>>((PixelDist *)gctx->d_BufferInput, h_bufferinput_size, d_res);
-        cudaDeviceSynchronize();
-        check_execution("calculate_result_a");
+        if(h_bufferinput_size > 0){
+            float *d_scores = nullptr;
+            uint *d_candidate_counts = nullptr;
+            CUDA_SAFE_CALL(cudaMalloc((void **)&d_scores, batch_size * sizeof(float)));
+            CUDA_SAFE_CALL(cudaMalloc((void **)&d_candidate_counts, batch_size * sizeof(uint)));
+            CUDA_SAFE_CALL(cudaMemset(d_scores, 0, batch_size * sizeof(float)));
+            CUDA_SAFE_CALL(cudaMemset(d_candidate_counts, 0, batch_size * sizeof(uint)));
+
+            grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+            kernel_accumulate_approximate_within<<<grid_size, block_size>>>(
+                final_candidates,
+                gctx->d_candidate_pairs + gctx->index,
+                gctx->d_farm_offset,
+                gctx->d_info,
+                gctx->d_status,
+                h_bufferinput_size,
+                static_cast<uint8_t>(gctx->bitwidth),
+                within_distance,
+                d_res,
+                d_scores,
+                d_candidate_counts);
+            check_execution("kernel_accumulate_approximate_within");
+
+            const float confidence = gctx->approx_confidence;
+            const float required_score = confidence >= 1.0f
+                ? std::numeric_limits<float>::infinity()
+                : -static_cast<float>(std::log1p(-static_cast<double>(confidence)));
+            grid_size = (batch_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+            kernel_finalize_approximate_within<<<grid_size, block_size>>>(
+                d_scores, d_candidate_counts, batch_size, d_res, required_score);
+            check_execution("kernel_finalize_approximate_within");
+
+            CUDA_SAFE_CALL(cudaFree(d_scores));
+            CUDA_SAFE_CALL(cudaFree(d_candidate_counts));
+        }
 
         grid_size = (batch_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        statistic_result_a<<<grid_size, block_size>>>(d_res, batch_size, gctx->d_result);
-        cudaDeviceSynchronize();
+        statistic_result_a<<<grid_size, block_size>>>(d_res, d_max_box_dist, batch_size, gctx->d_result, within_distance);
         check_execution("statistic_result_a");
 
         uint h_result;
@@ -740,22 +861,36 @@ void cuda_within_polygon(query_context *gctx)
         CUDA_SAFE_CALL(cudaFree(d_res));
    
     }else{
+      if(h_bufferinput_size > 0){
+        CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferinput_size, 0, sizeof(uint)));
+        CUDA_SAFE_CALL(cudaMemset(gctx->d_bufferoutput_size, 0, sizeof(uint)));
+        grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        calculate_apxDist<<<grid_size, block_size>>>(
+            final_candidates,
+            gctx->d_candidate_pairs + gctx->index,
+            gctx->d_farm_offset,
+            gctx->d_info,
+            gctx->d_status,
+            h_bufferinput_size,
+            (PixelDist *)gctx->d_BufferInput,
+            static_cast<uint8_t>(gctx->bitwidth));
+        check_execution("calculate_apxDist");
 
-        int num_pixel_pairs = h_bufferinput_size;
+        PixelDist* d_pixpairs = radix_sort_pixel_dist(
+            (PixelDist*)gctx->d_BufferInput, h_bufferinput_size,
+            static_cast<uint>(batch_size));
+        thrust::device_ptr<PixelDist> begin = thrust::device_pointer_cast(d_pixpairs);
+        thrust::device_ptr<PixelDist> end = begin + h_bufferinput_size;
 
-        thrust::device_ptr<PixelDist> begin = thrust::device_pointer_cast((PixelDist*)gctx->d_BufferInput);
-        thrust::device_ptr<PixelDist> end = thrust::device_pointer_cast((PixelDist*)gctx->d_BufferInput + h_bufferinput_size);
-        thrust::sort(thrust::device, begin, end, CompareKeyValuePairs());
-
-        thrust::device_vector<int> d_indices(num_pixel_pairs);
+        thrust::device_vector<int> d_indices(h_bufferinput_size);
         thrust::sequence(d_indices.begin(), d_indices.end());
 
-        thrust::device_vector<int> pair_ids(num_pixel_pairs);
+        thrust::device_vector<int> pair_ids(h_bufferinput_size);
         thrust::transform(begin, end, pair_ids.begin(), 
             [] __device__(const PixelDist &r){
                 return r.pairId;});
 
-        thrust::device_vector<int> d_flags(num_pixel_pairs);
+        thrust::device_vector<int> d_flags(h_bufferinput_size);
         thrust::adjacent_difference(thrust::device, pair_ids.begin(), pair_ids.end(), d_flags.begin());
 
         thrust::transform(d_flags.begin(), d_flags.end(), d_flags.begin(),
@@ -765,7 +900,7 @@ void cuda_within_polygon(query_context *gctx)
 
         uint num_groups = thrust::count(d_flags.begin(), d_flags.end(), 1);
 
-        thrust::device_vector<int> d_starts(num_groups + 1, num_pixel_pairs);
+        thrust::device_vector<int> d_starts(num_groups + 1, h_bufferinput_size);
 
         thrust::copy_if(thrust::device,
             d_indices.begin(), d_indices.end(),
@@ -779,10 +914,6 @@ void cuda_within_polygon(query_context *gctx)
         thrust::device_vector<int>().swap(pair_ids);
         thrust::device_vector<int>().swap(d_flags);
 
-        PixelDist* d_pixpairs = nullptr;
-        CUDA_SAFE_CALL(cudaMalloc((void **)&d_pixpairs, h_bufferinput_size * sizeof(PixelDist)));
-        CUDA_SAFE_CALL(cudaMemcpy(d_pixpairs, gctx->d_BufferInput, h_bufferinput_size * sizeof(PixelDist), cudaMemcpyDeviceToDevice));
-
         int *d_end_ptr = nullptr; 
         CUDA_SAFE_CALL(cudaMalloc((void **)&d_end_ptr, (num_groups + 1) * sizeof(int)));
         CUDA_SAFE_CALL(cudaMemcpy(d_end_ptr, d_start_ptr, (num_groups + 1) * sizeof(int), cudaMemcpyDeviceToDevice));
@@ -792,16 +923,14 @@ void cuda_within_polygon(query_context *gctx)
 
         grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
         preprocess_suffixmin<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, num_groups, d_suffix_min);
-        cudaDeviceSynchronize();
         check_execution("preprocess_suffixmin"); 
 
-        int round_refine = 0;
         while(true){
-            round_refine ++;
-
             grid_size = (num_groups + BLOCK_SIZE - 1) / BLOCK_SIZE;
-            kernel_merge<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr, d_end_ptr, d_suffix_min, num_groups, (PixPair *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, d_max_box_dist, gctx->merge_threshold, gctx->category_count);
-            cudaDeviceSynchronize();
+            kernel_merge<<<grid_size, block_size>>>(d_pixpairs, d_start_ptr,
+                d_end_ptr, d_suffix_min, num_groups,
+                (PixPair *)gctx->d_BufferOutput, gctx->d_bufferoutput_size,
+                d_max_box_dist, gctx->merge_threshold);
             check_execution("kernel_merge"); 
 
             CUDA_SAFE_CALL(cudaMemcpy(&h_bufferoutput_size, gctx->d_bufferoutput_size, sizeof(uint), cudaMemcpyDeviceToHost));
@@ -810,35 +939,32 @@ void cuda_within_polygon(query_context *gctx)
             CUDA_SWAP_BUFFER();
 
             grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-            kernel_unroll_within_polygon<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_idealoffset, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, gctx->unroll_size);
-            cudaDeviceSynchronize();
+            kernel_unroll_within_polygon<<<grid_size, block_size>>>((PixPair *)gctx->d_BufferInput, gctx->d_candidate_pairs + gctx->index, gctx->d_farm_offset, gctx->d_offset, gctx->d_edge_sequences, gctx->d_bufferinput_size, (Task *)gctx->d_BufferOutput, gctx->d_bufferoutput_size, static_cast<uint>(gctx->unroll_size));
             check_execution("kernel_unroll_within_polygon");
     
             CUDA_SWAP_BUFFER();
 
             grid_size = (h_bufferinput_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-            kernel_refine_within_polygon<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_vertices, gctx->d_bufferinput_size, d_max_box_dist, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr);
-            cudaDeviceSynchronize();
+            kernel_refine_within_polygon<<<grid_size, block_size>>>((Task *)gctx->d_BufferInput, gctx->d_vertices, gctx->d_bufferinput_size, d_max_box_dist, gctx->d_degree_degree_per_kilometer_latitude, gctx->d_degree_per_kilometer_longitude_arr, within_distance);
             check_execution("kernel_refine_within_polygon");
         }
 
-
-        bool* d_res = nullptr;
-        CUDA_SAFE_CALL(cudaMalloc((void **)&d_res, batch_size * sizeof(bool)));
-        CUDA_SAFE_CALL(cudaMemset(d_res, 0, batch_size * sizeof(bool)));
+        CUDA_SAFE_CALL(cudaFree(d_end_ptr));
+        CUDA_SAFE_CALL(cudaFree(d_suffix_min));
+        CUDA_SAFE_CALL(cudaFree(d_pixpairs));
+      }
 
         grid_size = (batch_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-        statistic_result_polygon<<<grid_size, block_size>>>(d_max_box_dist, batch_size, gctx->d_result, d_res);
-        cudaDeviceSynchronize();
+        statistic_result_polygon<<<grid_size, block_size>>>(
+            d_max_box_dist, batch_size, gctx->d_result, within_distance);
         check_execution("statistic_result");
 
         uint h_result;
         CUDA_SAFE_CALL(cudaMemcpy(&h_result, gctx->d_result, sizeof(uint), cudaMemcpyDeviceToHost));
         gctx->found += h_result;
 
-        CUDA_SAFE_CALL(cudaFree(d_pixpairs));
-        CUDA_SAFE_CALL(cudaFree(d_max_box_dist));
     }
+    CUDA_SAFE_CALL(cudaFree(d_max_box_dist));
     return;
 }

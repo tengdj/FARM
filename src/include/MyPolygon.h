@@ -9,10 +9,8 @@
 #include <map>
 #include <bits/stdc++.h>
 
-#include "../geometry/triangulate/poly2tri.h"
 #include "util.h"
 #include "../index/RTree.h"
-#include "../index/QTree.h"
 #include "BaseGeometry.h"
 #include "Box.h"
 #include "Point.h"
@@ -20,7 +18,6 @@
 #include "geometry_computation.h"
 
 using namespace std;
-using namespace p2t;
 
 const static char *multipolygon_char = "MULTIPOLYGON";
 const static char *polygon_char = "POLYGON";
@@ -33,30 +30,6 @@ typedef struct PolygonMeta_
 	size_t offset;	   // the offset in the file
 	box mbr;		   // the bounding boxes
 } PolygonMeta;
-
-class TempPolygon{
-public:
-	uint recID;
-	vector<Point> vertices;
-	int cellX, cellY;
-	TempPolygon() {}
-
-	TempPolygon(uint &recID)
-	{
-		this->recID = recID;
-	}
-
-	void addPoint(Point &p)
-	{
-		
-		if (find(vertices.begin(), vertices.end(), p) == vertices.end())
-		{
-			vertices.push_back(p);
-		}
-
-		// vertices.push_back(p);
-	}
-};
 
 class VertexSequence
 {
@@ -106,7 +79,6 @@ private:
 	size_t triangle_num = 0;
 
 	RTNode *rtree = NULL;
-	QTNode *qtree = NULL;
 
 	pthread_mutex_t qtree_partition_lock;
 
@@ -136,7 +108,6 @@ public:
 	// size_t get_triangle_size();
 	// RTNode *get_rtree() {return rtree;}
 	size_t get_rtree_size();
-	void triangulate();
 
 	static VertexSequence *read_vertices(const char *wkt, size_t &offset, bool clockwise = true);
 	static MyPolygon *read_polygon(const char *wkt, size_t &offset);
@@ -173,9 +144,7 @@ public:
 	box *getMBB();
 	box *getMER(query_context *ctx = NULL);
 	VertexSequence *get_convex_hull();
-	QTNode *partition_qtree(const int vpr);
 	box *get_mer() { return mer; }
-	QTNode *get_qtree() { return qtree; }
 
 	inline int get_num_vertices()
 	{
@@ -264,16 +233,6 @@ public:
 	}
 };
 
-class MyMultiPoint
-{
-	vector<Point *> points;
-
-public:
-	void insert(vector<Point *> &origin_points);
-	void insert(Point *p);
-	void print(size_t max_num = INT_MAX);
-};
-
 // utility functions
 //  void process_rasterization(query_context *ctx);
 //  void process_convex_hull(query_context *ctx);
@@ -284,7 +243,6 @@ public:
 void print_boxes(vector<box *> boxes);
 
 // storage related functions
-size_t load_points_from_path(const char *path, Point **points);
 vector<MyPolygon *> load_polygons_from_path(const char *path, query_context &ctx);
 size_t load_mbr_from_file(const char *path, box **);
 size_t load_polygonmeta_from_file(const char *path, PolygonMeta **pmeta);
